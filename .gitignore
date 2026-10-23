@@ -1,0 +1,13 @@
+#Compendio
+.compendio/*
+
+#ATL
+.atl/*
+
+#ODD work log
+odd/
+
+#Build output
+target/
+# Local AI runtime state
+.atl/
