@@ -11,3 +11,7 @@ odd/
 target/
 # Local AI runtime state
 .atl/
+
+#Node
+node_modules/
+dist/
