@@ -1,6 +1,6 @@
 import { type Check, type Config, isSourceOf } from "./check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "./maven.js"
-import type { CommandRunner, ExecutableLookup, ReportReaders } from "./ports.js"
+import type { CommandRunner, ExecutableLookup, ProjectLock, ReportReaders } from "./ports.js"
 import type { RuleFailure } from "./violation.js"
 
 export type CheckOutcome =
@@ -15,6 +15,7 @@ export interface CheckDeps {
   run: CommandRunner
   readers: ReportReaders
   hasExecutable: ExecutableLookup
+  lock: ProjectLock
 }
 
 /** Runs the checks that apply at task end: all of them, `edit` ones included. */
@@ -46,15 +47,21 @@ export async function runEditChecks(
   return runChecks(projectDir, checks, deps)
 }
 
-/** Checks run one after another, because two builds must not share `target/` at the same time. */
+/**
+ * Checks run one after another, under the project lock, because two builds must not share `target/` at the same time.
+ * That holds across processes too: two edits in a row start two Interlint processes.
+ */
 async function runChecks(projectDir: string, checks: Check[], deps: CheckDeps): Promise<CheckOutcome[]> {
+  if (checks.length === 0) return []
   const daemon = checks.some((check) => usesMaven(check.run)) && deps.hasExecutable(MAVEN_DAEMON)
-  const outcomes: CheckOutcome[] = []
-  for (const check of checks) {
-    const command = daemon && usesMaven(check.run) ? withMavenDaemon(check.run) : check.run
-    outcomes.push(await runCheck(projectDir, check, command, deps))
-  }
-  return outcomes
+  return deps.lock(projectDir, async () => {
+    const outcomes: CheckOutcome[] = []
+    for (const check of checks) {
+      const command = daemon && usesMaven(check.run) ? withMavenDaemon(check.run) : check.run
+      outcomes.push(await runCheck(projectDir, check, command, deps))
+    }
+    return outcomes
+  })
 }
 
 async function runCheck(

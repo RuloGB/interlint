@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { lockFileFor } from "../src/adapters/lock/project-lock.js"
 import { main } from "../src/cli.js"
 
 const VIOLATIONS_XML = readFileSync(
@@ -217,6 +218,36 @@ describe("interlint check --when edit", () => {
     const { exitCode } = await run("check", "--when", "edit", "--file", "README.md", "--file", join(projectDir, ORDER))
 
     expect(exitCode).toBe(1)
+  })
+
+  it("never runs two builds at the same time on the same project", async () => {
+    const log = join(projectDir, "builds.log")
+    writeFileSync(
+      join(projectDir, "slow.mjs"),
+      `import { appendFileSync } from "node:fs"
+appendFileSync(${JSON.stringify(log)}, "start\\n")
+await new Promise((resolve) => setTimeout(resolve, 300))
+appendFileSync(${JSON.stringify(log)}, "end\\n")
+process.exit(1)
+`,
+    )
+    writeConfig({ name: "slow", run: "node slow.mjs", when: "edit" })
+
+    await Promise.all([run("check", "--when", "edit", "--file", ORDER), run("check", "--when", "edit", "--file", ORDER)])
+
+    expect(readFileSync(log, "utf8")).toBe("start\nend\nstart\nend\n")
+  })
+
+  it("does not wait for a running build when no check applies", async () => {
+    writeConfig({ name: "fast", run: fakeCheck("fast", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" })
+    mkdirSync(dirname(lockFileFor(projectDir)), { recursive: true })
+    writeFileSync(lockFileFor(projectDir), String(process.pid))
+
+    try {
+      expect(await run("check", "--when", "edit", "--file", "README.md")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    } finally {
+      rmSync(lockFileFor(projectDir), { force: true })
+    }
   })
 
   it("exits 2 without --file", async () => {

@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { archUnitReader } from "./adapters/archunit/archunit.js"
+import { withProjectLock } from "./adapters/lock/project-lock.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
 import { ConfigError, loadConfig } from "./adapters/yaml-config/config.js"
@@ -33,7 +34,12 @@ export interface Io {
 class UsageError extends Error {}
 
 /** Wires the core to its adapters. This file is the only place that knows both. */
-const DEPS: CheckDeps = { run: runCommand, readers: { archunit: archUnitReader }, hasExecutable: lookupExecutable }
+const DEPS: CheckDeps = {
+  run: runCommand,
+  readers: { archunit: archUnitReader },
+  hasExecutable: lookupExecutable,
+  lock: withProjectLock,
+}
 
 export async function main(args: string[], io: Io): Promise<number> {
   try {

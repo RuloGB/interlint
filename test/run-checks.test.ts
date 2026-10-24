@@ -15,6 +15,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     },
     readers: { archunit: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
+    lock: (_projectDir, work) => work(),
   }
   return { deps, launched }
 }

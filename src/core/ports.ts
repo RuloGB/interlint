@@ -13,6 +13,9 @@ export type CommandRunner = (command: string, cwd: string) => Promise<CommandRes
 /** Whether an executable, such as the Maven Daemon, is on the PATH. */
 export type ExecutableLookup = (name: string) => boolean
 
+/** Runs `work` while no other Interlint process runs checks on the same project. */
+export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
+
 export interface ReportResult {
   /** Whether the run wrote any report at all. */
   found: boolean
