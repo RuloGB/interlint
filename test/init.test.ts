@@ -301,7 +301,7 @@ describe("interlint init", () => {
     const { exitCode, stderr } = await run("init", "--agent", "cursor")
 
     expect(exitCode).toBe(2)
-    expect(stderr).toContain('--agent must be opencode (got "cursor")')
+    expect(stderr).toContain('--agent must be opencode or claude-code (got "cursor")')
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 })
@@ -368,5 +368,136 @@ describe("interlint init --agent opencode", () => {
     await run("init")
 
     expect(existsSync(join(projectDir, ".opencode"))).toBe(false)
+  })
+})
+
+describe("interlint init --agent claude-code", () => {
+  const SETTINGS = join(".claude", "settings.json")
+  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
+  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
+  const readSettings = () => readFileSync(join(projectDir, SETTINGS), "utf8")
+
+  beforeEach(() => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("adds the post-edit and stop hooks to .claude/settings.json", async () => {
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "claude-code")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(JSON.parse(readSettings())).toEqual({
+      hooks: {
+        PostToolUse: [{ matcher: "Edit|Write", hooks: [POST_EDIT] }],
+        Stop: [{ hooks: [STOP] }],
+      },
+    })
+    expect(stdout).toContain("Wrote:\n  interlint.yaml\n  .claude/settings.json\n")
+  })
+
+  it("keeps the settings and hooks that are already there", async () => {
+    const lint = { matcher: "Write", hooks: [{ type: "command", command: "npm run lint" }] }
+    const notify = { hooks: [{ type: "command", command: "notify-send done" }] }
+    writeFile(
+      SETTINGS,
+      JSON.stringify({
+        permissions: { allow: ["Bash(./mvnw:*)"] },
+        env: { MAVEN_OPTS: "-Xmx1g" },
+        hooks: { PostToolUse: [lint], Stop: [notify], SessionStart: [notify] },
+      }),
+    )
+
+    expect((await run("init", "--agent", "claude-code")).exitCode).toBe(0)
+
+    expect(JSON.parse(readSettings())).toEqual({
+      permissions: { allow: ["Bash(./mvnw:*)"] },
+      env: { MAVEN_OPTS: "-Xmx1g" },
+      hooks: {
+        PostToolUse: [lint, { matcher: "Edit|Write", hooks: [POST_EDIT] }],
+        Stop: [notify, { hooks: [STOP] }],
+        SessionStart: [notify],
+      },
+    })
+  })
+
+  it("leaves the same result when it runs twice", async () => {
+    writeFile(SETTINGS, '{ "permissions": { "allow": [] } }\n')
+    await run("init", "--agent", "claude-code")
+    const first = readSettings()
+
+    const { exitCode, stdout } = await run("init", "--agent", "claude-code")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Unchanged:\n  interlint.yaml\n  .claude/settings.json\n")
+    expect(readSettings()).toBe(first)
+  })
+
+  it("leaves a file that already has the hooks exactly as it is, formatting included", async () => {
+    const settings = `{\n    "hooks": {\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }]\n    }\n}\n`
+    writeFile(SETTINGS, settings)
+
+    expect((await run("init", "--agent", "claude-code")).stdout).toContain("Unchanged:\n  .claude/settings.json\n")
+    expect(readSettings()).toBe(settings)
+  })
+
+  it("replaces an older Interlint hook instead of adding a second one", async () => {
+    const other = { type: "command", command: "npm run lint" }
+    writeFile(
+      SETTINGS,
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [
+            { matcher: "Edit", hooks: [other, { type: "command", command: POST_EDIT.command }] },
+            { matcher: "Write", hooks: [{ type: "command", command: POST_EDIT.command, timeout: 60 }] },
+          ],
+          Stop: [{ hooks: [{ ...STOP, timeout: 60 }] }],
+        },
+      }),
+    )
+
+    await run("init", "--agent", "claude-code")
+
+    expect(JSON.parse(readSettings()).hooks).toEqual({
+      PostToolUse: [
+        { matcher: "Edit", hooks: [other] },
+        { matcher: "Edit|Write", hooks: [POST_EDIT] },
+      ],
+      Stop: [{ hooks: [STOP] }],
+    })
+  })
+
+  it("writes nothing when .claude/settings.json is not valid JSON", async () => {
+    writeFile(SETTINGS, '{ "hooks": { // comments are not JSON\n } }\n')
+
+    const { exitCode, stderr } = await run("init", "--agent", "claude-code")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain(".claude/settings.json is not valid JSON")
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+    expect(readSettings()).toBe('{ "hooks": { // comments are not JSON\n } }\n')
+  })
+
+  it("writes nothing when the hooks in .claude/settings.json are not what Claude Code expects", async () => {
+    writeFile(SETTINGS, '{ "hooks": { "Stop": {} } }')
+
+    const { exitCode, stderr } = await run("init", "--agent", "claude-code")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain(".claude/settings.json: hooks.Stop is not a list")
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+  })
+
+  it("does not write the settings when interlint.yaml cannot be written", async () => {
+    writeFile("interlint.yaml", "# The team's own config\n")
+
+    expect((await run("init", "--agent", "claude-code")).exitCode).toBe(2)
+    expect(existsSync(join(projectDir, ".claude"))).toBe(false)
+  })
+
+  it("does not write the settings when there are no ArchUnit tests", async () => {
+    rmSync(join(projectDir, "src"), { recursive: true })
+
+    expect((await run("init", "--agent", "claude-code")).exitCode).toBe(2)
+    expect(existsSync(join(projectDir, ".claude"))).toBe(false)
   })
 })

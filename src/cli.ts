@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { archUnitReader } from "./adapters/archunit/archunit.js"
 import { decideStop, editNote, HOOK_EXIT, HookInputError, parseHookInput } from "./adapters/claude-code/hooks.js"
+import { claudeCodeSettingsFile, SettingsError } from "./adapters/claude-code/settings.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
 import { runCommand } from "./adapters/process/command-runner.js"
@@ -21,7 +22,8 @@ import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-chec
 export const EXIT = { passed: 0, violations: 1, error: 2 } as const
 
 const USAGE = `Usage:
-  interlint init [--agent opencode] [--force] [--cwd <dir>]    Detect the project's checks and write interlint.yaml
+  interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
+                                                               Detect the project's checks and write interlint.yaml
   interlint check [--when task-end] [--cwd <dir>]              Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
   interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
@@ -32,6 +34,8 @@ mvnw or ./mvnw runs with mvnd instead; without mvnd, Maven edit checks wait for 
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
 Wrapper (or mvn) and when: edit. It never replaces a different interlint.yaml without --force.
+--agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
+the post-edit and stop hooks to .claude/settings.json and keeps the rest of the file.
 
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
 
@@ -156,7 +160,7 @@ function projectFiles(cwd: string, projectDir: string, files: string[]): string[
     .map((path) => path.split(sep).join("/"))
 }
 
-const AGENTS = ["opencode"] as const
+const AGENTS = ["opencode", "claude-code"] as const
 
 function init(args: string[], io: Io): number {
   const { values } = parseInitArgs(args)
@@ -178,6 +182,7 @@ function init(args: string[], io: Io): number {
   const files: PlannedFile[] = [
     { path: CONFIG_FILE, content: renderConfig({ checks: [architecture] }), replace: values.force === true },
     ...(agent === "opencode" ? openCodePluginFiles() : []),
+    ...(agent === "claude-code" ? [claudeCodeSettings(projectDir)] : []),
   ]
   const states = files.map((file) => stateOf(projectDir, file))
   // No file is written while another one conflicts.
@@ -210,6 +215,15 @@ function init(args: string[], io: Io): number {
     ].join("\n"),
   )
   return EXIT.passed
+}
+
+function claudeCodeSettings(projectDir: string): PlannedFile {
+  try {
+    return claudeCodeSettingsFile(projectDir)
+  } catch (error) {
+    if (error instanceof SettingsError) throw new UsageError(`${error.message}. Nothing was written.`)
+    throw error
+  }
 }
 
 function section(title: string, paths: string[]): string[] {
