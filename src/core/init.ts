@@ -18,7 +18,8 @@ export function mavenCommand(facts: ProjectFacts): string {
  */
 export function architectureCheck(facts: ProjectFacts): Check | undefined {
   if (facts.archTestClasses.length === 0) return undefined
-  const classes = [...facts.archTestClasses].sort().join(",")
+  // Surefire matches `-Dtest` by simple name, so two classes with the same name need it once.
+  const classes = [...new Set(facts.archTestClasses)].sort().join(",")
   return {
     name: "architecture",
     run: `${mavenCommand(facts)} -q test -Dtest=${classes}`,

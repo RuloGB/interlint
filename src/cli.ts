@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { isAbsolute, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
@@ -109,6 +109,7 @@ function init(args: string[], io: Io): number {
   }
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
+  if (!existsSync(projectDir)) throw new UsageError(`${projectDir} does not exist`)
   const facts = scanProject(projectDir)
   const architecture = architectureCheck(facts)
   if (architecture === undefined) {
@@ -141,7 +142,7 @@ function init(args: string[], io: Io): number {
   io.stdout(
     [
       "Detected:",
-      `  ArchUnit tests: ${[...facts.archTestClasses].sort().join(", ")}`,
+      `  ArchUnit tests: ${[...new Set(facts.archTestClasses)].sort().join(", ")}`,
       `  Maven: ${maven} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
       `  mvnd: ${daemon}`,
       "",

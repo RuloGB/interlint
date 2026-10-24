@@ -78,6 +78,34 @@ describe("interlint init", () => {
     })
   })
 
+  it("names a class once when two packages have one with the same name", async () => {
+    archTest("src/test/java/com/acme/orders/ArchitectureRulesTest.java")
+    archTest("src/test/java/com/acme/billing/ArchitectureRulesTest.java")
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ArchitectureRulesTest")
+  })
+
+  it("keeps a long run command on one line", async () => {
+    for (const name of ["AdaptersRulesTest", "ApplicationRulesTest", "DomainRulesTest", "NamingRulesTest"]) {
+      archTest(`src/test/java/com/acme/${name}.java`)
+    }
+
+    await run("init")
+
+    expect(readConfig()).toContain(
+      "    run: mvn -q test -Dtest=AdaptersRulesTest,ApplicationRulesTest,DomainRulesTest,NamingRulesTest\n",
+    )
+  })
+
+  it("says so when the --cwd directory does not exist", async () => {
+    const { exitCode, stderr } = await run("init", "--cwd", "missing")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toBe(`interlint: ${join(projectDir, "missing")} does not exist\n`)
+  })
+
   it("writes the same check with and without mvnd on the PATH", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
