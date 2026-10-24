@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { XMLParser } from "fast-xml-parser"
-import type { ReportResult, RuleFailure, Violation } from "./report.js"
+import type { ReportResult, ReportSnapshot, RuleFailure, Violation } from "./report.js"
 
 const REPORTS_DIR = join("target", "surefire-reports")
 const SOURCE_ROOTS = ["src/main/java", "src/test/java"]
@@ -29,12 +29,17 @@ interface SurefireProblem {
   message?: string
 }
 
+/** Records the Surefire reports already in `target/`, so a later read can tell them apart from new ones. */
+export function snapshotReports(projectDir: string): ReportSnapshot {
+  return new Map(reportFiles(projectDir).map((path) => [path, statSync(path).mtimeMs]))
+}
+
 /**
- * Reads the Surefire XML reports written since `startedAt` and returns their ArchUnit failures.
- * Older reports left in `target/` by previous runs are ignored.
+ * Reads the Surefire XML reports written or rewritten since `before` and returns their ArchUnit failures.
+ * Reports left in `target/` by previous runs are ignored.
  */
-export function readArchUnitReport(projectDir: string, startedAt: number): ReportResult {
-  const reports = freshReports(join(projectDir, REPORTS_DIR), startedAt)
+export function readArchUnitReport(projectDir: string, before: ReportSnapshot): ReportResult {
+  const reports = reportFiles(projectDir).filter((path) => before.get(path) !== statSync(path).mtimeMs)
   const failures = reports.flatMap((path) => parseSurefireXml(readFileSync(path, "utf8")))
   for (const failure of failures) {
     for (const violation of failure.violations) resolvePath(projectDir, violation)
@@ -105,13 +110,11 @@ function resolvePath(projectDir: string, violation: Violation) {
   }
 }
 
-function freshReports(dir: string, startedAt: number): string[] {
+function reportFiles(projectDir: string): string[] {
+  const dir = join(projectDir, REPORTS_DIR)
   if (!existsSync(dir)) return []
-  // Whole seconds: some filesystems store modification times with one-second precision.
-  const since = Math.floor(startedAt / 1000) * 1000
   return readdirSync(dir)
     .filter((name) => name.startsWith("TEST-") && name.endsWith(".xml"))
     .map((name) => join(dir, name))
-    .filter((path) => statSync(path).mtimeMs >= since)
     .sort()
 }

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { parseSurefireXml, readArchUnitReport } from "../src/report/archunit.js"
+import { parseSurefireXml, readArchUnitReport, snapshotReports } from "../src/report/archunit.js"
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", "surefire", name), "utf8")
@@ -130,32 +130,40 @@ describe("readArchUnitReport", () => {
     rmSync(projectDir, { recursive: true, force: true })
   })
 
-  it("reads only the reports written since the run started", () => {
-    const stale = join(reportsDir, "TEST-com.acme.OldTest.xml")
-    writeFileSync(stale, fixture("two-rules-violated.xml"))
-    const oneMinuteAgo = new Date(Date.now() - 60_000)
-    utimesSync(stale, oneMinuteAgo, oneMinuteAgo)
-    const startedAt = Date.now()
+  it("reads only the reports written since the snapshot", () => {
+    writeFileSync(join(reportsDir, "TEST-com.acme.OldTest.xml"), fixture("two-rules-violated.xml"))
+    const before = snapshotReports(projectDir)
     writeFileSync(
       join(reportsDir, "TEST-com.acme.ArchitectureTest.xml"),
       suite('<testcase name="DOMAIN_IS_PURE" classname="ArchitectureTest"/>'),
     )
 
-    expect(readArchUnitReport(projectDir, startedAt)).toEqual({ found: true, failures: [] })
+    expect(readArchUnitReport(projectDir, before)).toEqual({ found: true, failures: [] })
+  })
+
+  it("reads a report that the run rewrote", () => {
+    const report = join(reportsDir, "TEST-ArchitectureRulesTest.xml")
+    writeFileSync(report, suite('<testcase name="DOMAIN_IS_PURE" classname="ArchitectureTest"/>'))
+    const oneMinuteAgo = new Date(Date.now() - 60_000)
+    utimesSync(report, oneMinuteAgo, oneMinuteAgo)
+    const before = snapshotReports(projectDir)
+    writeFileSync(report, fixture("two-rules-violated.xml"))
+
+    expect(readArchUnitReport(projectDir, before).failures).toHaveLength(2)
   })
 
   it("says so when the run wrote no report", () => {
-    expect(readArchUnitReport(projectDir, Date.now())).toEqual({ found: false, failures: [] })
+    expect(readArchUnitReport(projectDir, snapshotReports(projectDir))).toEqual({ found: false, failures: [] })
   })
 
   it("resolves the source file of each violation when it exists", () => {
     const sourceDir = join(projectDir, "src", "main", "java", "com", "myorg", "api", "application", "domain")
     mkdirSync(sourceDir, { recursive: true })
     writeFileSync(join(sourceDir, "Project.java"), "class Project {}")
-    const startedAt = Date.now()
+    const before = snapshotReports(projectDir)
     writeFileSync(join(reportsDir, "TEST-ArchitectureRulesTest.xml"), fixture("two-rules-violated.xml"))
 
-    const { failures } = readArchUnitReport(projectDir, startedAt)
+    const { failures } = readArchUnitReport(projectDir, before)
 
     expect(failures[0]?.violations.map((violation) => violation.path)).toEqual([
       "src/main/java/com/myorg/api/application/domain/Project.java",

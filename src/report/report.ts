@@ -20,5 +20,11 @@ export interface ReportResult {
   failures: RuleFailure[]
 }
 
+/** Report files present before a run, with their modification times. */
+export type ReportSnapshot = ReadonlyMap<string, number>
+
 /** Reads what one run of a check left behind. */
-export type ReportReader = (projectDir: string, startedAt: number) => ReportResult
+export interface ReportReader {
+  snapshot(projectDir: string): ReportSnapshot
+  read(projectDir: string, before: ReportSnapshot): ReportResult
+}
