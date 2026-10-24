@@ -12,7 +12,7 @@ import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
 import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
-import { architectureCheck, mavenCommand } from "./core/init.js"
+import { architectureCheck, mavenCommand, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-checks.js"
 
@@ -123,10 +123,12 @@ function init(args: string[], io: Io): number {
     ...(agent === "opencode" ? openCodePluginFiles() : []),
   ]
   const states = files.map((file) => stateOf(projectDir, file))
-  // Nothing is written unless every file can be.
-  if (states.includes("conflict")) {
+  // No file is written while another one conflicts.
+  const conflicts = files.filter((_, index) => states[index] === "conflict").map((file) => file.path)
+  if (conflicts.length > 0) {
+    const [verb, adjective] = conflicts.length === 1 ? ["exists", "is"] : ["exist", "are"]
     throw new UsageError(
-      `${CONFIG_FILE} already exists and is different from what init would write; rerun with --force to replace it`,
+      `${conflicts.join(", ")} already ${verb} and ${adjective} different from what init would write; rerun with --force to replace ${conflicts.length === 1 ? "it" : "them"}`,
     )
   }
   files.forEach((file, index) => {
@@ -142,7 +144,7 @@ function init(args: string[], io: Io): number {
   io.stdout(
     [
       "Detected:",
-      `  ArchUnit tests: ${[...new Set(facts.archTestClasses)].sort().join(", ")}`,
+      `  ArchUnit tests: ${runnableClasses(facts).join(", ")}`,
       `  Maven: ${maven} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
       `  mvnd: ${daemon}`,
       "",

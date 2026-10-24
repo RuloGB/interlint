@@ -7,7 +7,21 @@ export interface ProjectFacts {
   hasMavenWrapper: boolean
 }
 
-/** The project's own Maven, as the whole team runs it. Interlint switches it to mvnd at run time (decision 16). */
+/** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */
+const PLAIN_CLASS_NAME = /^[\p{L}_][\p{L}\p{N}_]*$/u
+
+/**
+ * The ArchUnit classes `-Dtest` will name, sorted. Surefire matches `-Dtest` by simple name, so two classes
+ * with the same name appear once. A name that is not a plain class name is left out: it goes into a shell command.
+ */
+export function runnableClasses(facts: ProjectFacts): string[] {
+  return [...new Set(facts.archTestClasses)].filter((name) => PLAIN_CLASS_NAME.test(name)).sort()
+}
+
+/**
+ * The project's own Maven, as the whole team runs it. `interlint check` runs it with mvnd when mvnd
+ * is on the PATH, so the versioned file stays the same on every machine.
+ */
 export function mavenCommand(facts: ProjectFacts): string {
   return facts.hasMavenWrapper ? "./mvnw" : "mvn"
 }
@@ -17,9 +31,8 @@ export function mavenCommand(facts: ProjectFacts): string {
  * Always `when: edit`: without mvnd it waits for task end anyway, so the file is the same on every machine.
  */
 export function architectureCheck(facts: ProjectFacts): Check | undefined {
-  if (facts.archTestClasses.length === 0) return undefined
-  // Surefire matches `-Dtest` by simple name, so two classes with the same name need it once.
-  const classes = [...new Set(facts.archTestClasses)].sort().join(",")
+  const classes = runnableClasses(facts).join(",")
+  if (classes === "") return undefined
   return {
     name: "architecture",
     run: `${mavenCommand(facts)} -q test -Dtest=${classes}`,

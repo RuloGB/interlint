@@ -78,6 +78,62 @@ describe("interlint init", () => {
     })
   })
 
+  it("ignores @ArchTest when it only appears in a comment or a string", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile(
+      "src/test/java/com/acme/OrderServiceTest.java",
+      [
+        "class OrderServiceTest {",
+        "  // @ArchTest static final ArchRule OLD = ...;",
+        "  /* @ArchTest",
+        "     static final ArchRule DISABLED = ...; */",
+        '  String note = "see @ArchTest"; // http://example.com',
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ArchitectureRulesTest")
+  })
+
+  it("finds @ArchTest after a char literal holding a double quote", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile("src/test/java/com/acme/QuoteRulesTest.java", `class QuoteRulesTest { char q = '"'; @ArchTest Object r = "x"; }\n`)
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ArchitectureRulesTest,QuoteRulesTest")
+  })
+
+  it("skips a directory whose name ends in .java", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    mkdirSync(join(projectDir, "src", "test", "java", "legacy.java"), { recursive: true })
+
+    const { exitCode, stderr } = await run("init")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ArchitectureRulesTest")
+  })
+
+  it("leaves out a class whose file name is not a plain Java name, so it never reaches the shell", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    archTest("src/test/java/com/acme/Evil$(id).java")
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ArchitectureRulesTest")
+  })
+
+  it("accepts class names with non-ASCII letters", async () => {
+    archTest("src/test/java/com/acme/ReglasDeArquitecturaÑTest.java")
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe("mvn -q test -Dtest=ReglasDeArquitecturaÑTest")
+  })
+
   it("names a class once when two packages have one with the same name", async () => {
     archTest("src/test/java/com/acme/orders/ArchitectureRulesTest.java")
     archTest("src/test/java/com/acme/billing/ArchitectureRulesTest.java")
