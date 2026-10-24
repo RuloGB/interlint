@@ -51,22 +51,18 @@ Requires Node 22 or later.
 | Exit code | Meaning |
 |---|---|
 | 0 | Every check passed |
-| 1 | A check failed: violations, or a command that failed without leaving any |
+| 1 | A check failed: violations, a command that failed without leaving any, or a command that wrote no report |
 | 2 | Configuration or usage error, or an unexpected Interlint error |
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 
 ### OpenCode V2
 
-Copy `adapters/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. When the agent tries to finish, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session so the agent fixes them. After 3 failed attempts in a row it reports the failures and lets the task end.
+Copy `adapters/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
 
-To run a CLI that is not on the `PATH`, register the plugin in `opencode.json` with the `command` option:
+When an agent turn ends, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them. After 3 failed attempts in a row it reports the failures and lets the task end. If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
 
-```jsonc
-{
-  "plugins": [{ "package": "./.opencode/plugins/interlint", "options": { "command": "node /path/to/interlint/dist/cli.js" } }]
-}
-```
+Tested with OpenCode 2.1.4.
 
 ## Planned
 
