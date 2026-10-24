@@ -2,7 +2,7 @@
 
 A deterministic harness for AI coding agents. Interlint runs the checks your project **already has** (ArchUnit, Checkstyle, PMD…) as early as possible inside the agent's session, and makes the agent fix any violation in that same session before it moves on.
 
-> **Status:** in development. Task-end checks with ArchUnit and the OpenCode V2 adapter work from a local build. Nothing is published yet.
+> **Status:** in development. Edit-time and task-end checks with ArchUnit and the OpenCode V2 adapter work from a local build. Nothing is published yet.
 
 ## Why
 
@@ -56,9 +56,27 @@ Requires Node 22 or later.
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 
+### After each edit
+
+A check with `when: edit` also runs after the agent changes one of its sources:
+
+```bash
+interlint check --when edit --file src/main/java/shop/Order.java
+```
+
+- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit`. Any other file, such as `README.md`, runs nothing and exits with 0.
+- The output and exit codes are the same as at task end. `--file` can be repeated.
+- With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
+- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end.
+- Check runs on the same project never overlap: a second edit waits until the first one's checks finish.
+
+At task end every check runs, `edit` ones included.
+
 ### OpenCode V2
 
 Copy `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
+
+After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit.
 
 When an agent turn ends, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them. After 3 failed attempts in a row it reports the failures and lets the task end. If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
 
@@ -67,7 +85,6 @@ Tested with OpenCode 2.1.4.
 ## Planned
 
 - `interlint init`: detects the project's checks and generates `interlint.yaml`.
-- `interlint check --when edit`: fast checks after each edit.
 - Adapter for Claude Code.
 - `report: maven` for Checkstyle and PMD.
 - Distribution through npm.

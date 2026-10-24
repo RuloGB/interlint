@@ -1,6 +1,9 @@
 /**
  * Interlint adapter for OpenCode V2.
  *
+ * After a tool changes files (`edit`, `write`, `patch`), it runs `interlint check --when edit` for them
+ * and appends any failures to that tool's result, so the agent sees them before it repeats the mistake.
+ *
  * When an agent turn ends (`session.execution.succeeded`), it runs `interlint check --when task-end`.
  * If a check fails, it resumes the session with the formatted failures so the agent fixes them,
  * up to MAX_CONSECUTIVE_BLOCKS times in a row.
@@ -21,6 +24,15 @@ export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
 const TURN_END = "session.execution.succeeded"
 /** Every report the Interlint CLI prints starts with this mark. */
 const REPORT_MARK = "✗ "
+const TASK_END_ARGS = ["check", "--when", "task-end"]
+/** The built-in tools that change files. */
+const FILE_TOOLS = new Set(["edit", "write", "patch"])
+const PATCH_FILE_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm
+/**
+ * File paths go to the shell inside double quotes. A path with a character that sh or cmd.exe
+ * could expand there (`$`, a backquote, `"`, `%`, `!`, `^`) is not passed at all.
+ */
+const SHELL_SAFE_PATH = /^[\p{L}\p{N} _\-./\\:@+,()[\]~#]+$/u
 
 export interface CheckRun {
   exitCode: number
@@ -60,6 +72,41 @@ export class TaskEndGate {
   }
 }
 
+/** The files a tool call changed, as the tool received them. Empty for tools that change no file. */
+export function changedFiles(tool: string, input: unknown): string[] {
+  if (!FILE_TOOLS.has(tool) || typeof input !== "object" || input === null) return []
+  const { path, patchText } = input as { path?: unknown; patchText?: unknown }
+  if (tool === "patch") {
+    return typeof patchText === "string" ? [...patchText.matchAll(PATCH_FILE_HEADER)].map((match) => match[1]!.trim()) : []
+  }
+  return typeof path === "string" ? [path] : []
+}
+
+/** The note added to a tool result after an edit, or nothing when the checks pass or could not run. */
+export function editNote(run: CheckRun): string | undefined {
+  // A run that could not happen is not the agent's mistake: the task-end check reports it.
+  if (run.exitCode !== 1 || !run.output.startsWith(REPORT_MARK)) return undefined
+  return `Interlint: the checks fail after this edit.\n\n${run.output}`
+}
+
+type ToolContent = string | readonly { type: string; text?: string }[]
+
+/** What OpenCode passes to an `execute.after` hook. Replacing `result` changes what the agent sees. */
+interface ToolExecuted {
+  readonly tool: string
+  readonly input: unknown
+  readonly status: "completed" | "error"
+  result?: { content?: ToolContent }
+}
+
+function withNote(result: { content?: ToolContent } | undefined, text: string) {
+  const content = result?.content
+  return {
+    ...result,
+    content: typeof content === "string" ? `${content}\n\n${text}` : [...(content ?? []), { type: "text", text }],
+  }
+}
+
 /** The part of the OpenCode V2 plugin context this adapter uses. */
 interface PluginContext {
   location: { directory: string }
@@ -70,9 +117,15 @@ interface PluginContext {
   event: {
     subscribe(input: { signal: AbortSignal }): AsyncIterable<{ type: string; data?: { sessionID?: string } }>
   }
+  tool: {
+    hook(
+      name: "execute.after",
+      callback: (event: ToolExecuted) => Promise<void> | void,
+    ): Promise<{ dispose(): Promise<void> }>
+  }
 }
 
-export type RunChecks = (directory: string, command: string, timeoutMs: number) => Promise<CheckRun>
+export type RunChecks = (directory: string, command: string, timeoutMs: number, args?: string[]) => Promise<CheckRun>
 
 export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
   return {
@@ -88,7 +141,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (running.has(sessionID)) return
         running.add(sessionID)
         try {
-          const decision = gate.decide(sessionID, await runChecks(ctx.location.directory, command, timeoutMs))
+          const decision = gate.decide(sessionID, await runChecks(ctx.location.directory, command, timeoutMs, TASK_END_ARGS))
           if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,
@@ -101,6 +154,22 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         }
       }
 
+      // OpenCode waits for this hook before it sends the tool result to the agent.
+      const afterEdit = await ctx.tool.hook("execute.after", async (event) => {
+        if (event.status !== "completed") return
+        const files = changedFiles(event.tool, event.input).filter((file) => {
+          if (SHELL_SAFE_PATH.test(file)) return true
+          console.error("[interlint] skipping a path the shell could misread:", file)
+          return false
+        })
+        if (files.length === 0) return
+        const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file])]
+        const run = await runChecks(ctx.location.directory, command, timeoutMs, args)
+        const note = editNote(run)
+        if (note) event.result = withNote(event.result, note)
+        else if (run.exitCode !== 0) console.error("[interlint] the edit checks could not run:", run.output)
+      })
+
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           const sessionID = event.data?.sessionID
@@ -111,13 +180,21 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (!controller.signal.aborted) console.error("[interlint]", error)
       })
 
-      return () => controller.abort()
+      return () => {
+        controller.abort()
+        void afterEdit.dispose()
+      }
     },
   }
 }
 
 /** Runs the Interlint CLI. Through the shell, so Windows finds `interlint.cmd`. */
-export function runInterlint(directory: string, command: string, timeoutMs: number): Promise<CheckRun> {
+export function runInterlint(
+  directory: string,
+  command: string,
+  timeoutMs: number,
+  args: string[] = TASK_END_ARGS,
+): Promise<CheckRun> {
   return new Promise((resolve) => {
     let output = ""
     let truncated = false
@@ -136,7 +213,9 @@ export function runInterlint(directory: string, command: string, timeoutMs: numb
       resolve(truncated ? { ...run, output: `${run.output}\n… output truncated by Interlint.\n` } : run)
     }
 
-    const child = spawn(`${command} check --when task-end`, {
+    // Arguments with other characters than these are quoted. File paths get here only if SHELL_SAFE_PATH accepts them.
+    const line = [command, ...args.map((arg) => (/^[\w./:=-]+$/.test(arg) ? arg : `"${arg}"`))].join(" ")
+    const child = spawn(line, {
       cwd: directory,
       shell: true,
       // Its own process group on POSIX, so a timeout can stop the whole build, not only the shell.

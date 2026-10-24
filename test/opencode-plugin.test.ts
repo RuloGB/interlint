@@ -4,7 +4,9 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import plugin, {
   type CheckRun,
+  changedFiles,
   createInterlintPlugin,
+  editNote,
   MAX_CONSECUTIVE_BLOCKS,
   MAX_OUTPUT_CHARS,
   runInterlint,
@@ -110,8 +112,9 @@ describe("runInterlint", () => {
 })
 
 /** A fake OpenCode V2 plugin context that records what the plugin sends to the session. */
-function fakeContext(events: { type: string; data?: { sessionID?: string } }[]) {
+function fakeContext(events: { type: string; data?: { sessionID?: string } }[] = []) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
+  const hooks = new Map<string, (event: ToolEvent) => Promise<void> | void>()
   let finished!: () => void
   const done = new Promise<void>((resolve) => (finished = resolve))
   const ctx = {
@@ -128,9 +131,29 @@ function fakeContext(events: { type: string; data?: { sessionID?: string } }[]) 
         finished()
       },
     },
+    tool: {
+      hook: async (name: string, callback: (event: ToolEvent) => Promise<void> | void) => {
+        hooks.set(name, callback)
+        return { dispose: async () => void hooks.delete(name) }
+      },
+    },
   }
-  return { ctx, sent, done }
+  /** Calls the plugin's `execute.after` hook the way OpenCode does after a tool call, and returns the event. */
+  const afterTool = async (tool: string, input: unknown, status: "completed" | "error" = "completed") => {
+    const event: ToolEvent =
+      status === "completed"
+        ? { tool, input, status, result: { content: [{ type: "text", text: "Edited the file" }] } }
+        : { tool, input, status, error: new Error("failed") }
+    await hooks.get("execute.after")?.(event)
+    return event
+  }
+  return { ctx, sent, done, afterTool }
 }
+
+type ToolEvent = { tool: string; input: unknown } & (
+  | { status: "completed"; result: { content?: { type: string; text?: string }[] } }
+  | { status: "error"; error: unknown }
+)
 
 describe("OpenCode plugin", () => {
   it("has a stable id", () => {
@@ -173,5 +196,132 @@ describe("OpenCode plugin", () => {
     await done
 
     expect(runs).toEqual([])
+  })
+})
+
+describe("changedFiles", () => {
+  it("reads the path of edit and write", () => {
+    expect(changedFiles("edit", { path: "src/main/java/shop/Order.java", oldString: "a", newString: "b" })).toEqual([
+      "src/main/java/shop/Order.java",
+    ])
+    expect(changedFiles("write", { path: "C:\\repo\\src\\Order.java", content: "" })).toEqual(["C:\\repo\\src\\Order.java"])
+  })
+
+  it("reads every file a patch adds, updates, moves or deletes", () => {
+    const patchText = [
+      "*** Begin Patch",
+      "*** Add File: src/main/java/shop/New.java",
+      "+class New {}",
+      "*** Update File: src/main/java/shop/Order.java",
+      "*** Move to: src/main/java/shop/domain/Order.java",
+      "@@ class Order",
+      "-int a;",
+      "+int b;",
+      "*** Delete File: src/main/java/shop/Old.java",
+      "*** End Patch",
+    ].join("\n")
+
+    expect(changedFiles("patch", { patchText })).toEqual([
+      "src/main/java/shop/New.java",
+      "src/main/java/shop/Order.java",
+      "src/main/java/shop/domain/Order.java",
+      "src/main/java/shop/Old.java",
+    ])
+  })
+
+  it("ignores tools that do not change files", () => {
+    expect(changedFiles("read", { path: "src/main/java/shop/Order.java" })).toEqual([])
+    expect(changedFiles("shell", { command: "rm Order.java" })).toEqual([])
+  })
+})
+
+describe("editNote", () => {
+  it("shows the failures with the same report the task end shows", () => {
+    expect(editNote(VIOLATIONS)).toBe(`Interlint: the checks fail after this edit.\n\n${VIOLATIONS.output}`)
+  })
+
+  it("adds nothing when the checks pass or cannot run", () => {
+    expect(editNote(PASSED)).toBeUndefined()
+    expect(editNote({ exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" })).toBeUndefined()
+    expect(editNote({ exitCode: 1, output: "'interlint' is not recognized as an internal or external command\n" })).toBeUndefined()
+  })
+})
+
+describe("OpenCode plugin after an edit", () => {
+  it("runs the edit checks for the changed file and appends the failures to the tool result", async () => {
+    const runs: { directory: string; args?: string[] }[] = []
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async (directory, _command, _timeoutMs, args) => {
+      runs.push({ directory, args })
+      return VIOLATIONS
+    }).setup(ctx)
+
+    const event = await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(runs).toEqual([{ directory: "/repo", args: ["check", "--when", "edit", "--file", "src/main/java/shop/Order.java"] }])
+    expect(event).toMatchObject({
+      result: {
+        content: [
+          { type: "text", text: "Edited the file" },
+          { type: "text", text: `Interlint: the checks fail after this edit.\n\n${VIOLATIONS.output}` },
+        ],
+      },
+    })
+  })
+
+  it("leaves the tool result as it was when the checks pass", async () => {
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async () => PASSED).setup(ctx)
+
+    const event = await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
+
+    expect(event).toMatchObject({ result: { content: [{ type: "text", text: "Edited the file" }] } })
+  })
+
+  it("does not run checks for tools that change no file, or for failed edits", async () => {
+    const runs: string[] = []
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async (directory) => {
+      runs.push(directory)
+      return VIOLATIONS
+    }).setup(ctx)
+
+    await afterTool("read", { path: "src/main/java/shop/Order.java" })
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" }, "error")
+
+    expect(runs).toEqual([])
+  })
+
+  it("skips a path the shell could misread, instead of passing it to the command line", async () => {
+    const runs: (string[] | undefined)[] = []
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, args) => {
+      runs.push(args)
+      return PASSED
+    }).setup(ctx)
+
+    await afterTool("edit", { path: 'src/$(touch x)/A".java' })
+
+    expect(runs).toEqual([])
+  })
+})
+
+describe("runInterlint arguments", () => {
+  let scratch: string
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "interlint-plugin-"))
+  })
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it("passes a file path with spaces and accents as one argument", async () => {
+    writeFileSync(join(scratch, "argv.mjs"), "console.log(JSON.stringify(process.argv.slice(2)))\n")
+
+    const run = await runInterlint(scratch, "node argv.mjs", 10_000, ["check", "--when", "edit", "--file", "src/Mi Pedido/Ñandú.java"])
+
+    expect(JSON.parse(run.output)).toEqual(["check", "--when", "edit", "--file", "src/Mi Pedido/Ñandú.java"])
   })
 })
