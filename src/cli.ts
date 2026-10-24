@@ -36,9 +36,11 @@ export async function main(args: string[], io: Io): Promise<number> {
   } catch (error) {
     if (error instanceof ConfigError || error instanceof UsageError) {
       io.stderr(`interlint: ${error.message}\n`)
-      return EXIT.error
+    } else {
+      // Node exits with 1 on a crash, which adapters would read as a violation.
+      io.stderr(`interlint: unexpected error: ${error instanceof Error ? error.stack : String(error)}\n`)
     }
-    throw error
+    return EXIT.error
   }
 }
 

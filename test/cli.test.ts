@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -133,6 +133,15 @@ describe("interlint check --when task-end", () => {
       stdout: "",
       stderr: `interlint: interlint.yaml not found in ${projectDir}\n`,
     })
+  })
+
+  it("exits 2, not 1, on an unexpected error, so adapters never mistake it for a violation", async () => {
+    mkdirSync(join(projectDir, "interlint.yaml"))
+
+    const { exitCode, stderr } = await run("check")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/^interlint: unexpected error: /)
   })
 
   it("exits 2 for a --when value it does not support yet", async () => {

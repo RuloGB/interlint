@@ -27,9 +27,10 @@ export function loadConfig(projectDir: string): Config {
   const path = join(projectDir, CONFIG_FILE)
   if (!existsSync(path)) throw new ConfigError(`${CONFIG_FILE} not found in ${projectDir}`)
 
+  const text = readFileSync(path, "utf8")
   let raw: unknown
   try {
-    raw = parse(readFileSync(path, "utf8"))
+    raw = parse(text)
   } catch (error) {
     throw new ConfigError(`${CONFIG_FILE} is not valid YAML: ${(error as Error).message}`)
   }
