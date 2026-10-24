@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { XMLParser } from "fast-xml-parser"
-import type { ReportResult, ReportSnapshot, RuleFailure, Violation } from "./report.js"
+import type { ReportReader, ReportResult, ReportSnapshot } from "../../core/ports.js"
+import type { RuleFailure, Violation } from "../../core/violation.js"
 
 const REPORTS_DIR = join("target", "surefire-reports")
 const SOURCE_ROOTS = ["src/main/java", "src/test/java"]
@@ -52,6 +53,8 @@ export function readArchUnitReport(projectDir: string, before: ReportSnapshot): 
   }
   return { found: reports.length > 0, failures }
 }
+
+export const archUnitReader: ReportReader = { snapshot: snapshotReports, read: readArchUnitReport }
 
 export function parseSurefireXml(xml: string): RuleFailure[] {
   const document = xmlParser.parse(xml)

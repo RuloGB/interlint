@@ -3,11 +3,13 @@ import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
-import { runTaskEndChecks } from "./check/run-checks.js"
-import { ConfigError, loadConfig } from "./config/config.js"
-import { formatOutcomes } from "./output/format.js"
+import { archUnitReader } from "./adapters/archunit/archunit.js"
+import { runCommand } from "./adapters/process/command-runner.js"
+import { ConfigError, loadConfig } from "./adapters/yaml-config/config.js"
+import { formatOutcomes } from "./core/format.js"
+import { type CheckDeps, runTaskEndChecks } from "./core/run-checks.js"
 
-/** Exit codes shared by every adapter. */
+/** Exit codes shared by every agent integration. */
 export const EXIT = { passed: 0, violations: 1, error: 2 } as const
 
 const USAGE = `Usage:
@@ -24,6 +26,9 @@ export interface Io {
 
 class UsageError extends Error {}
 
+/** Wires the core to its adapters. This file is the only place that knows both. */
+const DEPS: CheckDeps = { run: runCommand, readers: { archunit: archUnitReader } }
+
 export async function main(args: string[], io: Io): Promise<number> {
   try {
     const [command, ...rest] = args
@@ -37,7 +42,7 @@ export async function main(args: string[], io: Io): Promise<number> {
     if (error instanceof ConfigError || error instanceof UsageError) {
       io.stderr(`interlint: ${error.message}\n`)
     } else {
-      // Node exits with 1 on a crash, which adapters would read as a violation.
+      // Node exits with 1 on a crash, which agent integrations would read as a violation.
       io.stderr(`interlint: unexpected error: ${error instanceof Error ? error.stack : String(error)}\n`)
     }
     return EXIT.error
@@ -50,7 +55,7 @@ async function check(args: string[], io: Io): Promise<number> {
   if (when !== "task-end") throw new UsageError(`--when must be task-end (got "${when}")`)
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
-  const outcomes = await runTaskEndChecks(projectDir, loadConfig(projectDir))
+  const outcomes = await runTaskEndChecks(projectDir, loadConfig(projectDir), DEPS)
   const output = formatOutcomes(outcomes)
   if (output === "") return EXIT.passed
   io.stdout(output)

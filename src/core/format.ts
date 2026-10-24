@@ -1,5 +1,5 @@
-import type { CheckOutcome } from "../check/run-checks.js"
-import type { Violation } from "../report/report.js"
+import type { CheckOutcome } from "./run-checks.js"
+import type { Violation } from "./violation.js"
 
 const MAX_VIOLATIONS_PER_RULE = 10
 const FOOTER = "Fix these problems before continuing."

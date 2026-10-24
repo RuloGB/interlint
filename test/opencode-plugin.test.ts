@@ -9,7 +9,7 @@ import plugin, {
   MAX_OUTPUT_CHARS,
   runInterlint,
   TaskEndGate,
-} from "../adapters/opencode/interlint/index.js"
+} from "../integrations/opencode/interlint/index.js"
 
 const VIOLATIONS: CheckRun = { exitCode: 1, output: "✗ architecture · ARCH-01: rule\n\nFix these problems before continuing.\n" }
 const PASSED: CheckRun = { exitCode: 0, output: "" }

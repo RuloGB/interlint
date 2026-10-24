@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { parseSurefireXml, readArchUnitReport, snapshotReports } from "../src/report/archunit.js"
+import { parseSurefireXml, readArchUnitReport, snapshotReports } from "../src/adapters/archunit/archunit.js"
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", "surefire", name), "utf8")

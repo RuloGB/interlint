@@ -1,25 +1,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parse } from "yaml"
+import { type Check, type Config, REPORTS, WHENS } from "../../core/check.js"
 
 export const CONFIG_FILE = "interlint.yaml"
-
-export const REPORTS = ["archunit"] as const
-export const WHENS = ["edit", "task-end"] as const
-
-export type Report = (typeof REPORTS)[number]
-export type When = (typeof WHENS)[number]
-
-export interface Check {
-  name: string
-  run: string
-  report: Report
-  when: When
-}
-
-export interface Config {
-  checks: Check[]
-}
 
 export class ConfigError extends Error {}
 

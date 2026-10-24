@@ -10,7 +10,7 @@
   },
   "files": [
     "dist",
-    "adapters"
+    "integrations"
   ],
   "engines": {
     "node": ">=22"

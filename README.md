@@ -58,7 +58,7 @@ On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` w
 
 ### OpenCode V2
 
-Copy `adapters/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
+Copy `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
 
 When an agent turn ends, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them. After 3 failed attempts in a row it reports the failures and lets the task end. If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
 

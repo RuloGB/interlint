@@ -1,15 +1,8 @@
 import { spawn } from "node:child_process"
+import type { CommandRunner } from "../../core/ports.js"
 
 /** Keeps memory bounded on chatty builds; only the end of the output is ever shown. */
 const MAX_OUTPUT_CHARS = 64 * 1024
-
-export interface CommandResult {
-  exitCode: number
-  /** The end of stdout and stderr, interleaved as they arrived. */
-  output: string
-}
-
-export type CommandRunner = (command: string, cwd: string) => Promise<CommandResult>
 
 /**
  * `interlint.yaml` is shared across operating systems, but cmd.exe does not run `./mvnw`.

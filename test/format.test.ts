@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Check } from "../src/config/config.js"
-import { formatOutcomes } from "../src/output/format.js"
+import type { Check } from "../src/core/check.js"
+import { formatOutcomes } from "../src/core/format.js"
 
 const architecture: Check = {
   name: "architecture",

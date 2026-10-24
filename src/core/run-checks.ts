@@ -1,7 +1,6 @@
-import type { Check, Config, Report } from "../config/config.js"
-import { readArchUnitReport, snapshotReports } from "../report/archunit.js"
-import type { ReportReader, RuleFailure } from "../report/report.js"
-import { type CommandRunner, runCommand } from "./command-runner.js"
+import type { Check, Config } from "./check.js"
+import type { CommandRunner, ReportReaders } from "./ports.js"
+import type { RuleFailure } from "./violation.js"
 
 export type CheckOutcome =
   | { check: Check; durationMs: number; status: "passed" }
@@ -10,8 +9,10 @@ export type CheckOutcome =
 
 const OUTPUT_TAIL_LINES = 30
 
-const READERS: Record<Report, ReportReader> = {
-  archunit: { snapshot: snapshotReports, read: readArchUnitReport },
+/** The adapters a run needs, wired by the entry point. */
+export interface CheckDeps {
+  run: CommandRunner
+  readers: ReportReaders
 }
 
 /**
@@ -21,15 +22,15 @@ const READERS: Record<Report, ReportReader> = {
 export async function runTaskEndChecks(
   projectDir: string,
   config: Config,
-  run: CommandRunner = runCommand,
+  deps: CheckDeps,
 ): Promise<CheckOutcome[]> {
   const outcomes: CheckOutcome[] = []
-  for (const check of config.checks) outcomes.push(await runCheck(projectDir, check, run))
+  for (const check of config.checks) outcomes.push(await runCheck(projectDir, check, deps))
   return outcomes
 }
 
-async function runCheck(projectDir: string, check: Check, run: CommandRunner): Promise<CheckOutcome> {
-  const reader = READERS[check.report]
+async function runCheck(projectDir: string, check: Check, { run, readers }: CheckDeps): Promise<CheckOutcome> {
+  const reader = readers[check.report]
   const before = reader.snapshot(projectDir)
   const startedAt = performance.now()
   const { exitCode, output } = await run(check.run, projectDir)
