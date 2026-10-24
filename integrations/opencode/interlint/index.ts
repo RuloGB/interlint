@@ -10,7 +10,7 @@
  *
  * `session.idle` is not used: in OpenCode 2.1.4 it never reaches a plugin's event subscription.
  *
- * Install: copy this directory to `.opencode/plugins/interlint/` in the project.
+ * Install: `interlint init --agent opencode`, which copies this directory to `.opencode/plugins/interlint/`.
  * The file has no runtime imports besides Node built-ins: `Plugin.define` from `@opencode/plugin`
  * is the identity function, so the plain definition below is equivalent.
  */
