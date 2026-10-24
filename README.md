@@ -2,7 +2,7 @@
 
 A deterministic harness for AI coding agents. Interlint runs the checks your project **already has** (ArchUnit, Checkstyle, PMD…) as early as possible inside the agent's session, and makes the agent fix any violation in that same session before it moves on.
 
-> **Status:** in development. `interlint init`, edit-time and task-end checks with ArchUnit and the OpenCode V2 adapter work from a local build. Nothing is published yet.
+> **Status:** in development. `interlint init`, edit-time and task-end checks with ArchUnit, and the OpenCode V2 and Claude Code adapters work from a local build. Nothing is published yet.
 
 ## Why
 
@@ -30,7 +30,7 @@ Requires Node 22 or later.
    npm install && npm run build && npm link
    ```
 
-2. In the root of your Maven project, generate `interlint.yaml` and install the OpenCode plugin:
+2. In the root of your Maven project, generate `interlint.yaml` and set up your agent (`opencode` or `claude-code`):
 
    ```bash
    interlint init --agent opencode
@@ -69,6 +69,7 @@ checks:
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
 - Without `@ArchTest` classes it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin to `.opencode/plugins/interlint/`, replacing an older copy. It does not touch `opencode.json(c)`: OpenCode loads that directory by itself.
+- `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json` and keeps everything else in it. See [Claude Code](#claude-code).
 - At the end it prints what it detected and which files it wrote or left unchanged. `--cwd <dir>` runs it on another directory.
 
 The generated file is yours: edit it to change `when` or the command.
@@ -99,8 +100,42 @@ When an agent turn ends, the plugin runs `interlint check --when task-end`. If a
 
 Tested with OpenCode 2.1.4.
 
+### Claude Code
+
+`interlint init --agent claude-code` adds two hooks to the project's `.claude/settings.json`, the one you commit:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code post-edit", "timeout": 120 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code stop", "timeout": 600 }]
+      }
+    ]
+  }
+}
+```
+
+Other settings and hooks in the file stay as they are. Running `init` again leaves the file unchanged, and replaces an older Interlint hook instead of adding a second one. If the file is not valid JSON, `init` writes nothing. `interlint` must be on the `PATH` that Claude Code runs hooks with.
+
+`interlint hook claude-code post-edit|stop` reads the hook's JSON on stdin and runs the checks in the project (`CLAUDE_PROJECT_DIR`). It exits with Claude Code's codes instead of the ones above:
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Nothing for the agent: the checks passed, or no check reads the edited file |
+| 2 | A check failed: the failures go to Claude on stderr |
+| 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |
+
+- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit.
+- **When Claude finishes,** `stop` runs every check. If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures. The count is kept per session under the system's temp directory and starts over with each new turn.
+
 ## Planned
 
-- Adapter for Claude Code.
 - `report: maven` for Checkstyle and PMD.
 - Distribution through npm.
