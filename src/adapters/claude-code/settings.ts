@@ -31,9 +31,10 @@ export function claudeCodeSettingsFile(projectDir: string): PlannedFile {
 }
 
 /**
- * Adds each hook unless it is already there with the same matcher and timeout. An Interlint hook
- * with the same command elsewhere is an older setup and is removed. Settings that need no change
- * keep their exact text, so a second `init` leaves the file as it is.
+ * Leaves each hook once: the first handler with the same command, matcher and timeout stays,
+ * every other handler with that command is an older setup or a copy and is removed, and the hook
+ * is added when none was the same. Settings that need no change keep their exact text, so a second
+ * `init` leaves the file as it is.
  */
 export function withInterlintHooks(current: string | undefined): string {
   const settings = current === undefined || current.trim() === "" ? {} : parseSettings(current)
@@ -44,21 +45,28 @@ export function withInterlintHooks(current: string | undefined): string {
   for (const hook of HOOKS) {
     const groups = hooks[hook.event] ?? []
     if (!Array.isArray(groups)) throw new SettingsError(`${SETTINGS_FILE}: hooks.${hook.event} is not a list`)
-    if (groups.some((group) => isInstalled(group, hook))) continue
 
+    let installed = false
+    let removed = false
     const kept = groups.flatMap((group) => {
       if (!isObject(group) || !Array.isArray(group.hooks)) return [group]
-      const others = group.hooks.filter((handler) => !(isObject(handler) && handler.command === hook.command))
-      if (others.length === group.hooks.length) return [group]
-      return others.length === 0 ? [] : [{ ...group, hooks: others }]
+      const handlers = group.hooks.filter((handler) => {
+        if (!isObject(handler) || handler.command !== hook.command) return true
+        if (!installed && isInstalled(group, handler, hook)) return (installed = true)
+        removed = true
+        return false
+      })
+      if (handlers.length === group.hooks.length) return [group]
+      return handlers.length === 0 ? [] : [{ ...group, hooks: handlers }]
     })
-    hooks[hook.event] = [
-      ...kept,
-      {
+    if (!installed) {
+      kept.push({
         ...(hook.matcher === undefined ? {} : { matcher: hook.matcher }),
         hooks: [{ type: "command", command: hook.command, timeout: hook.timeout }],
-      },
-    ]
+      })
+    }
+    if (installed && !removed) continue
+    hooks[hook.event] = kept
     changed = true
   }
   if (!changed) return current as string
@@ -78,18 +86,13 @@ function parseSettings(text: string): JsonObject {
   return value
 }
 
-function isInstalled(group: unknown, hook: InterlintHook): boolean {
+/** Whether `handler`, in `group`, is `hook` exactly as `init` writes it. */
+function isInstalled(group: JsonObject, handler: JsonObject, hook: InterlintHook): boolean {
   return (
-    isObject(group) &&
     (group.matcher ?? "") === (hook.matcher ?? "") &&
-    Array.isArray(group.hooks) &&
-    group.hooks.some(
-      (handler) =>
-        isObject(handler) &&
-        handler.type === "command" &&
-        handler.command === hook.command &&
-        handler.timeout === hook.timeout,
-    )
+    handler.type === "command" &&
+    handler.command === hook.command &&
+    handler.timeout === hook.timeout
   )
 }
 

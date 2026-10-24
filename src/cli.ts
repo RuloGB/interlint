@@ -83,7 +83,8 @@ function reportError(error: unknown, io: Io) {
   if (error instanceof ConfigError || error instanceof UsageError || error instanceof HookInputError) {
     io.stderr(`interlint: ${error.message}\n`)
   } else {
-    // Node exits with 1 on a crash, which agent integrations would read as a violation.
+    // A crash is reported here so the caller picks the exit code: left to Node, it exits with 1,
+    // which means violations to `check` callers.
     io.stderr(`interlint: unexpected error: ${error instanceof Error ? error.stack : String(error)}\n`)
   }
 }

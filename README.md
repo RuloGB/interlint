@@ -133,7 +133,7 @@ Other settings and hooks in the file stay as they are. Running `init` again leav
 | 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |
 
 - **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit.
-- **When Claude finishes,** `stop` runs every check. If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures. The count is kept per session under the system's temp directory and starts over with each new turn.
+- **When Claude finishes,** `stop` runs every check. If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. The count is kept per session in your user's state directory (`%LOCALAPPDATA%\interlint` on Windows, `$XDG_STATE_HOME/interlint` or `~/.local/state/interlint` elsewhere).
 
 ## Planned
 

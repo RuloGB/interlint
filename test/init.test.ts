@@ -501,3 +501,40 @@ describe("interlint init --agent claude-code", () => {
     expect(existsSync(join(projectDir, ".claude"))).toBe(false)
   })
 })
+
+describe("interlint init --agent claude-code with an older hook next to the current one", () => {
+  const SETTINGS = join(".claude", "settings.json")
+  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
+  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
+
+  beforeEach(() => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("removes the older copy, so each hook runs once", async () => {
+    const other = { type: "command", command: "npm run lint" }
+    writeFile(
+      SETTINGS,
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [
+            { matcher: "Edit", hooks: [other, { ...POST_EDIT, timeout: 60 }] },
+            { matcher: "Edit|Write", hooks: [POST_EDIT, POST_EDIT] },
+          ],
+          Stop: [{ hooks: [STOP] }, { hooks: [{ ...STOP, timeout: 30 }] }],
+        },
+      }),
+    )
+
+    expect((await run("init", "--agent", "claude-code")).exitCode).toBe(0)
+
+    expect(JSON.parse(readFileSync(join(projectDir, SETTINGS), "utf8")).hooks).toEqual({
+      PostToolUse: [
+        { matcher: "Edit", hooks: [other] },
+        { matcher: "Edit|Write", hooks: [POST_EDIT] },
+      ],
+      Stop: [{ hooks: [STOP] }],
+    })
+  })
+})

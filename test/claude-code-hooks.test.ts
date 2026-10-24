@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -13,19 +13,22 @@ const PASSING_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 let projectDir: string
 let stateDir: string
+let tempDir: string
 
 beforeEach(() => {
   projectDir = mkdtempSync(join(tmpdir(), "interlint-claude-"))
   stateDir = mkdtempSync(join(tmpdir(), "interlint-claude-state-"))
-  // The stop hook keeps its block count under the OS temp directory.
-  for (const name of ["TMPDIR", "TEMP", "TMP"]) vi.stubEnv(name, stateDir)
+  tempDir = mkdtempSync(join(tmpdir(), "interlint-claude-temp-"))
+  // The stop hook keeps its block count in the user's state directory: LOCALAPPDATA on Windows, XDG_STATE_HOME elsewhere.
+  vi.stubEnv("LOCALAPPDATA", stateDir)
+  vi.stubEnv("XDG_STATE_HOME", stateDir)
+  for (const name of ["TMPDIR", "TEMP", "TMP"]) vi.stubEnv(name, tempDir)
   vi.stubEnv("CLAUDE_PROJECT_DIR", projectDir)
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  rmSync(projectDir, { recursive: true, force: true })
-  rmSync(stateDir, { recursive: true, force: true })
+  for (const dir of [projectDir, stateDir, tempDir]) rmSync(dir, { recursive: true, force: true })
 })
 
 /** A check whose report the test can switch between passing and failing. */
@@ -177,6 +180,25 @@ describe("interlint hook claude-code stop", () => {
     expect(output.systemMessage).toMatch(
       /^Interlint: the checks still fail after 3 attempts, so the task may end\.\n\n✗ architecture · ARCH-01/,
     )
+  })
+
+  it("does not block again after letting the task end while Claude Code keeps continuing", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await hook("stop", stopInput(false))
+    for (let index = 0; index < 3; index++) await hook("stop", stopInput(true))
+
+    // Another stop hook may keep Claude going: Interlint already let the task end and stays quiet.
+    expect(await hook("stop", stopInput(true))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect((await hook("stop", stopInput(false))).stderr).toMatch(/\(attempt 1 of 3\)/)
+  })
+
+  it("keeps the block count in the user's own state directory, not in the shared temp directory", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+
+    await hook("stop", stopInput(false))
+
+    expect(readdirSync(join(stateDir, "interlint", "claude-code-stop"))).toHaveLength(1)
+    expect(readdirSync(tempDir)).not.toContain("interlint")
   })
 
   it("starts counting again when Claude Code is not continuing because of a stop hook", async () => {
