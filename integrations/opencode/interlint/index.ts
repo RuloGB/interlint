@@ -20,6 +20,8 @@ export const MAX_CONSECUTIVE_BLOCKS = 3
 /** Keeps the text injected into the session bounded, like the CLI does with build output. */
 export const MAX_OUTPUT_CHARS = 64 * 1024
 export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
+/** The agent waits for an edit check before it gets the tool result, so a stuck one gives up sooner. */
+export const DEFAULT_EDIT_TIMEOUT_MS = 2 * 60 * 1000
 
 const TURN_END = "session.execution.succeeded"
 /** Every report the Interlint CLI prints starts with this mark. */
@@ -110,7 +112,7 @@ function withNote(result: { content?: ToolContent } | undefined, text: string) {
 /** The part of the OpenCode V2 plugin context this adapter uses. */
 interface PluginContext {
   location: { directory: string }
-  options?: { command?: unknown; timeoutMs?: unknown }
+  options?: { command?: unknown; timeoutMs?: unknown; editTimeoutMs?: unknown }
   session: {
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
@@ -133,6 +135,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
     async setup(ctx: PluginContext) {
       const command = typeof ctx.options?.command === "string" ? ctx.options.command : "interlint"
       const timeoutMs = typeof ctx.options?.timeoutMs === "number" ? ctx.options.timeoutMs : DEFAULT_TIMEOUT_MS
+      const editTimeoutMs =
+        typeof ctx.options?.editTimeoutMs === "number" ? ctx.options.editTimeoutMs : DEFAULT_EDIT_TIMEOUT_MS
       const gate = new TaskEndGate()
       const running = new Set<string>()
       const controller = new AbortController()
@@ -158,13 +162,14 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const afterEdit = await ctx.tool.hook("execute.after", async (event) => {
         if (event.status !== "completed") return
         const files = changedFiles(event.tool, event.input).filter((file) => {
-          if (SHELL_SAFE_PATH.test(file)) return true
+          // A trailing backslash would escape the closing quote under sh.
+          if (SHELL_SAFE_PATH.test(file) && !file.endsWith("\\")) return true
           console.error("[interlint] skipping a path the shell could misread:", file)
           return false
         })
         if (files.length === 0) return
         const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file])]
-        const run = await runChecks(ctx.location.directory, command, timeoutMs, args)
+        const run = await runChecks(ctx.location.directory, command, editTimeoutMs, args)
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
         else if (run.exitCode !== 0) console.error("[interlint] the edit checks could not run:", run.output)

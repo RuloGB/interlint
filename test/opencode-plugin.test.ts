@@ -6,6 +6,8 @@ import plugin, {
   type CheckRun,
   changedFiles,
   createInterlintPlugin,
+  DEFAULT_EDIT_TIMEOUT_MS,
+  DEFAULT_TIMEOUT_MS,
   editNote,
   MAX_CONSECUTIVE_BLOCKS,
   MAX_OUTPUT_CHARS,
@@ -119,7 +121,7 @@ function fakeContext(events: { type: string; data?: { sessionID?: string } }[] =
   const done = new Promise<void>((resolve) => (finished = resolve))
   const ctx = {
     location: { directory: "/repo" },
-    options: {},
+    options: {} as Record<string, unknown>,
     session: {
       synthetic: async (input: { sessionID: string; text: string; resume?: boolean }) => {
         sent.push({ sessionID: input.sessionID, text: input.text, resume: input.resume })
@@ -301,8 +303,28 @@ describe("OpenCode plugin after an edit", () => {
     }).setup(ctx)
 
     await afterTool("edit", { path: 'src/$(touch x)/A".java' })
+    // A trailing backslash would escape the closing quote under sh.
+    await afterTool("write", { path: "src\\main\\java\\" })
 
     expect(runs).toEqual([])
+  })
+
+  it("gives an edit check a shorter timeout than the task end, since the agent waits for it", async () => {
+    const timeouts: number[] = []
+    const record = async (_directory: string, _command: string, timeoutMs: number) => {
+      timeouts.push(timeoutMs)
+      return PASSED
+    }
+    const byDefault = fakeContext()
+    await createInterlintPlugin(record).setup(byDefault.ctx)
+    await byDefault.afterTool("edit", { path: "src/main/java/shop/Order.java" })
+    const configured = fakeContext()
+    configured.ctx.options = { editTimeoutMs: 5_000 }
+    await createInterlintPlugin(record).setup(configured.ctx)
+    await configured.afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(timeouts).toEqual([DEFAULT_EDIT_TIMEOUT_MS, 5_000])
+    expect(DEFAULT_EDIT_TIMEOUT_MS).toBeLessThan(DEFAULT_TIMEOUT_MS)
   })
 })
 

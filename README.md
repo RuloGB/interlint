@@ -76,7 +76,7 @@ At task end every check runs, `edit` ones included.
 
 Copy `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project. OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
 
-After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit.
+After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. The agent waits for these checks, so they give up after 2 minutes; if they cannot run, the edit result stays as it was and the task-end check reports the problem.
 
 When an agent turn ends, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them. After 3 failed attempts in a row it reports the failures and lets the task end. If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
 

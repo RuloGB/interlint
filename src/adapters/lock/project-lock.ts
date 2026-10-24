@@ -1,16 +1,19 @@
-import { createHash } from "node:crypto"
-import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { createHash, randomUUID } from "node:crypto"
+import { linkSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir, userInfo } from "node:os"
 import { join, resolve } from "node:path"
 import type { ProjectLock } from "../../core/ports.js"
 
 const POLL_MS = 100
 /** A lock this old is stale even if its PID is alive again: the OS may have reused the PID. */
 const STALE_AFTER_MS = 30 * 60 * 1000
+/** Removing a stale lock takes microseconds, so a takeover guard this old was left by a process that died. */
+const TAKEOVER_STALE_AFTER_MS = 10 * 1000
 
 /**
- * The lock file of a project. It lives in the temp directory, not in the project, so it never shows up in the repo.
- * Every Interlint process for the same project directory uses the same file.
+ * The lock file of a project. It lives in a temp directory of the current user, not in the project,
+ * so it never shows up in the repo and other users on the same host cannot block or break it.
+ * Every Interlint process of this user for the same project directory uses the same file.
  */
 export function lockFileFor(projectDir: string): string {
   let dir = resolve(projectDir)
@@ -21,61 +24,65 @@ export function lockFileFor(projectDir: string): string {
   }
   if (process.platform === "win32") dir = dir.toLowerCase()
   const key = createHash("sha256").update(dir).digest("hex").slice(0, 16)
-  return join(tmpdir(), "interlint-locks", `${key}.lock`)
+  return join(tmpdir(), `interlint-locks-${currentUser()}`, `${key}.lock`)
 }
 
 /** Runs `work` while holding the project lock, waiting for any other Interlint process that holds it. */
 export const withProjectLock: ProjectLock = async (projectDir, work) => {
   const file = lockFileFor(projectDir)
-  mkdirSync(join(file, ".."), { recursive: true })
-  while (!tryAcquire(file)) {
+  mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 })
+  // The PID says whether the holder is alive; the random part tells this holder from a later one with the same PID.
+  const token = `${process.pid}:${randomUUID()}`
+  while (!tryAcquire(file, token)) {
     removeIfStale(file)
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
   }
   try {
     return await work()
   } finally {
-    rmSync(file, { force: true })
+    if (read(file) === token) rmSync(file, { force: true })
   }
 }
 
-function tryAcquire(file: string): boolean {
+/**
+ * Creates the lock with its token already inside. The token goes to a private file first, and a hard link
+ * publishes it, so no waiter ever sees an empty lock and mistakes it for one whose holder died.
+ */
+function tryAcquire(file: string, token: string): boolean {
+  const draft = `${file}.${randomUUID()}.draft`
+  writeFileSync(draft, token)
   try {
-    const fd = openSync(file, "wx")
-    writeSync(fd, String(process.pid))
-    closeSync(fd)
+    linkSync(draft, file)
     return true
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false
     throw error
+  } finally {
+    rmSync(draft, { force: true })
   }
 }
 
 /** Removes the lock when its holder died without releasing it, for example when a timeout killed it. */
 function removeIfStale(file: string) {
-  let holder: string
-  let modifiedMs: number
-  try {
-    holder = readFileSync(file, "utf8")
-    modifiedMs = statSync(file).mtimeMs
-  } catch {
-    return // Released meanwhile.
-  }
-  if (isAlive(Number(holder)) && Date.now() - modifiedMs < STALE_AFTER_MS) return
+  const holder = read(file)
+  if (holder === undefined || !isStale(file, holder)) return
 
-  // Rename first, so two waiters that both saw the stale lock cannot delete a fresh one taken in between.
-  const moved = `${file}.${process.pid}.stale`
-  try {
-    renameSync(file, moved)
-  } catch {
-    return // Another waiter got there first.
+  // One waiter at a time removes a stale lock. While the stale lock exists nobody can take a new one,
+  // so the guard's owner deletes it only if it still holds the same token.
+  const guard = `${file}.takeover`
+  if (!tryAcquire(guard, holder)) {
+    if (ageMs(guard) > TAKEOVER_STALE_AFTER_MS) rmSync(guard, { force: true })
+    return
   }
   try {
-    // Another waiter replaced the stale lock between the read and the rename: put its lock back.
-    if (readFileSync(moved, "utf8") !== holder) renameSync(moved, file)
+    if (read(file) === holder) rmSync(file, { force: true })
   } finally {
-    rmSync(moved, { force: true })
+    rmSync(guard, { force: true })
   }
+}
+
+function isStale(file: string, holder: string): boolean {
+  return !isAlive(Number(holder.split(":")[0])) || ageMs(file) > STALE_AFTER_MS
 }
 
 function isAlive(pid: number): boolean {
@@ -85,5 +92,31 @@ function isAlive(pid: number): boolean {
     return true
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+function read(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8")
+  } catch {
+    return undefined
+  }
+}
+
+function ageMs(file: string): number {
+  try {
+    return Date.now() - statSync(file).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/** A name for the current user that is safe in a file name. */
+function currentUser(): string {
+  try {
+    const { uid, username } = userInfo()
+    return uid >= 0 ? String(uid) : username.replace(/[^\w.-]/g, "_")
+  } catch {
+    return "default"
   }
 }
