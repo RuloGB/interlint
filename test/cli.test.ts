@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -154,13 +154,79 @@ describe("interlint check --when task-end", () => {
     expect(stderr).toMatch(/^interlint: unexpected error: /)
   })
 
-  it("exits 2 for a --when value it does not support yet", async () => {
+  it("exits 2 for an unknown --when value", async () => {
     writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
 
-    const { exitCode, stderr } = await run("check", "--when", "edit")
+    const { exitCode, stderr } = await run("check", "--when", "commit")
 
     expect(exitCode).toBe(2)
-    expect(stderr).toBe('interlint: --when must be task-end (got "edit")\n')
+    expect(stderr).toBe('interlint: --when must be edit or task-end (got "commit")\n')
+  })
+
+  it("exits 2 when --file is given at task end", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
+
+    expect(await run("check", "--when", "task-end", "--file", "src/main/java/shop/Order.java")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "interlint: --file is only valid with --when edit\n",
+    })
+  })
+})
+
+describe("interlint check --when edit", () => {
+  const ORDER = join("src", "main", "java", "shop", "Order.java")
+
+  it("runs only the edit checks when a Java source changed", async () => {
+    writeConfig(
+      { name: "fast", run: fakeCheck("fast", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" },
+      { name: "slow", run: fakeCheck("slow", { report: VIOLATIONS_XML, exitCode: 1 }) },
+    )
+
+    const { exitCode, stdout } = await run("check", "--when", "edit", "--file", ORDER)
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain("✗ fast · ARCH-01: application has ZERO dependencies on infrastructure\n")
+    expect(stdout).not.toContain("✗ slow")
+  })
+
+  it("prints what task-end prints for the same failures", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" })
+    const atTaskEnd = await run("check", "--when", "task-end")
+
+    expect(await run("check", "--when", "edit", "--file", ORDER)).toEqual(atTaskEnd)
+  })
+
+  it("runs nothing and exits 0 when the changed file is not a source", async () => {
+    writeConfig({ name: "fast", run: fakeCheck("fast", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" })
+
+    expect(await run("check", "--when", "edit", "--file", "README.md")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(existsSync(join(projectDir, "target"))).toBe(false)
+  })
+
+  it("ignores a changed file outside the project", async () => {
+    writeConfig({ name: "fast", run: fakeCheck("fast", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" })
+    const outside = join(projectDir, "..", "other", "Order.java")
+
+    expect(await run("check", "--when", "edit", "--file", outside)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("accepts an absolute path and several --file options", async () => {
+    writeConfig({ name: "fast", run: fakeCheck("fast", { report: VIOLATIONS_XML, exitCode: 1 }), when: "edit" })
+
+    const { exitCode } = await run("check", "--when", "edit", "--file", "README.md", "--file", join(projectDir, ORDER))
+
+    expect(exitCode).toBe(1)
+  })
+
+  it("exits 2 without --file", async () => {
+    writeConfig({ name: "fast", run: fakeCheck("fast", { report: PASSING_XML, exitCode: 0 }), when: "edit" })
+
+    expect(await run("check", "--when", "edit")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "interlint: --when edit needs at least one --file <path>\n",
+    })
   })
 })
 
@@ -170,6 +236,7 @@ describe("interlint usage", () => {
 
     expect(exitCode).toBe(0)
     expect(stdout).toContain("interlint check [--when task-end] [--cwd <dir>]")
+    expect(stdout).toContain("interlint check --when edit --file <path>... [--cwd <dir>]")
   })
 
   it("exits 2 for an unknown command", async () => {

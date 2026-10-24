@@ -64,7 +64,14 @@ describe("formatOutcomes", () => {
 
   it("says so when a command exits 0 without writing a report", () => {
     const output = formatOutcomes([
-      { check: architecture, status: "failed", durationMs: 10, exitCode: 0, outputTail: "[INFO] Tests are skipped." },
+      {
+        check: architecture,
+        status: "failed",
+        durationMs: 10,
+        command: architecture.run,
+        exitCode: 0,
+        outputTail: "[INFO] Tests are skipped.",
+      },
     ])
 
     expect(output).toContain("✗ architecture · the command exited 0 but wrote no ArchUnit report\n")
@@ -76,6 +83,7 @@ describe("formatOutcomes", () => {
         check: architecture,
         status: "failed",
         durationMs: 10,
+        command: architecture.run,
         exitCode: 1,
         outputTail: "[ERROR] COMPILATION ERROR\n[ERROR] Order.java:[3,8] cannot find symbol",
       },

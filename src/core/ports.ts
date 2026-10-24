@@ -10,6 +10,9 @@ export interface CommandResult {
 /** Runs a check's `run` command in the project directory. */
 export type CommandRunner = (command: string, cwd: string) => Promise<CommandResult>
 
+/** Whether an executable, such as the Maven Daemon, is on the PATH. */
+export type ExecutableLookup = (name: string) => boolean
+
 export interface ReportResult {
   /** Whether the run wrote any report at all. */
   found: boolean
