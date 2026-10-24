@@ -34,10 +34,11 @@ async function runCheck(projectDir: string, check: Check, run: CommandRunner): P
   const startedAt = performance.now()
   const { exitCode, output } = await run(check.run, projectDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { failures } = reader.read(projectDir, before)
+  const { found, failures } = reader.read(projectDir, before)
 
   if (failures.length > 0) return { check, durationMs, status: "violations", failures }
-  if (exitCode !== 0) return { check, durationMs, status: "failed", exitCode, outputTail: tail(output) }
+  // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
+  if (exitCode !== 0 || !found) return { check, durationMs, status: "failed", exitCode, outputTail: tail(output) }
   return { check, durationMs, status: "passed" }
 }
 

@@ -152,6 +152,18 @@ describe("readArchUnitReport", () => {
     expect(readArchUnitReport(projectDir, before).failures).toHaveLength(2)
   })
 
+  it("reads a report rewritten within the same timestamp tick", () => {
+    const report = join(reportsDir, "TEST-ArchitectureRulesTest.xml")
+    const tick = new Date(Date.now() - 60_000)
+    writeFileSync(report, suite('<testcase name="DOMAIN_IS_PURE" classname="ArchitectureTest"/>'))
+    utimesSync(report, tick, tick)
+    const before = snapshotReports(projectDir)
+    writeFileSync(report, fixture("two-rules-violated.xml"))
+    utimesSync(report, tick, tick)
+
+    expect(readArchUnitReport(projectDir, before).failures).toHaveLength(2)
+  })
+
   it("says so when the run wrote no report", () => {
     expect(readArchUnitReport(projectDir, snapshotReports(projectDir))).toEqual({ found: false, failures: [] })
   })

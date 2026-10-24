@@ -31,7 +31,13 @@ interface SurefireProblem {
 
 /** Records the Surefire reports already in `target/`, so a later read can tell them apart from new ones. */
 export function snapshotReports(projectDir: string): ReportSnapshot {
-  return new Map(reportFiles(projectDir).map((path) => [path, statSync(path).mtimeMs]))
+  return new Map(reportFiles(projectDir).map((path) => [path, fingerprint(path)]))
+}
+
+/** Size as well as time: coarse filesystem clocks can give a rewritten report the same mtime. */
+function fingerprint(path: string): string {
+  const { mtimeMs, size } = statSync(path)
+  return `${mtimeMs}:${size}`
 }
 
 /**
@@ -39,7 +45,7 @@ export function snapshotReports(projectDir: string): ReportSnapshot {
  * Reports left in `target/` by previous runs are ignored.
  */
 export function readArchUnitReport(projectDir: string, before: ReportSnapshot): ReportResult {
-  const reports = reportFiles(projectDir).filter((path) => before.get(path) !== statSync(path).mtimeMs)
+  const reports = reportFiles(projectDir).filter((path) => before.get(path) !== fingerprint(path))
   const failures = reports.flatMap((path) => parseSurefireXml(readFileSync(path, "utf8")))
   for (const failure of failures) {
     for (const violation of failure.violations) resolvePath(projectDir, violation)

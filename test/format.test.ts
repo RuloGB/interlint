@@ -62,6 +62,14 @@ describe("formatOutcomes", () => {
     expect(output).not.toContain("violation 11")
   })
 
+  it("says so when a command exits 0 without writing a report", () => {
+    const output = formatOutcomes([
+      { check: architecture, status: "failed", durationMs: 10, exitCode: 0, outputTail: "[INFO] Tests are skipped." },
+    ])
+
+    expect(output).toContain("✗ architecture · the command exited 0 but wrote no ArchUnit report\n")
+  })
+
   it("prints a failed command with the tail of its output", () => {
     const output = formatOutcomes([
       {

@@ -20,8 +20,8 @@ export interface ReportResult {
   failures: RuleFailure[]
 }
 
-/** Report files present before a run, with their modification times. */
-export type ReportSnapshot = ReadonlyMap<string, number>
+/** Report files present before a run, with a fingerprint of each (modification time and size). */
+export type ReportSnapshot = ReadonlyMap<string, string>
 
 /** Reads what one run of a check left behind. */
 export interface ReportReader {

@@ -15,7 +15,9 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
     if (outcome.status === "failed") {
       return [
         [
-          `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ArchUnit failures`,
+          outcome.exitCode === 0
+            ? `✗ ${outcome.check.name} · the command exited 0 but wrote no ArchUnit report`
+            : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ArchUnit failures`,
           "",
           `  Command: ${outcome.check.run}`,
           "  Last lines of its output:",

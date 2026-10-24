@@ -109,6 +109,16 @@ describe("interlint check --when task-end", () => {
     expect(stdout).not.toContain("[ERROR] line 50\n")
   })
 
+  it("fails when the command exits 0 but writes no ArchUnit report, so skipped tests never pass silently", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { exitCode: 0, output: "[INFO] Tests are skipped." }) })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain("✗ architecture · the command exited 0 but wrote no ArchUnit report")
+    expect(stdout).toContain("    [INFO] Tests are skipped.\n")
+  })
+
   it("ignores reports left by earlier runs", async () => {
     writeConfig({ name: "architecture", run: fakeCheck("arch", { report: VIOLATIONS_XML, exitCode: 1 }) })
     await run("check")
