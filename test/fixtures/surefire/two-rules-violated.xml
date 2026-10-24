@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.myorg.api.architecture.ArchitectureRulesTest" time="1.06" tests="27" errors="0" skipped="0" failures="2" flakes="0">
+  <testcase name="APPLICATION_HAS_NO_INFRASTRUCTURE" classname="ArchitectureRulesTest" time="0.891">
+    <failure message="Architecture Violation [Priority: MEDIUM] - Rule &apos;no classes that reside in a package &apos;..application..&apos; should depend on classes that reside in any package [&apos;..infrastructure..&apos;, &apos;org.springframework.web..&apos;, &apos;org.springframework.http..&apos;, &apos;org.springframework.data..&apos;, &apos;org.springframework.kafka..&apos;, &apos;org.apache.kafka..&apos;, &apos;jakarta.persistence..&apos;], because ARCH-01: application has ZERO dependencies on infrastructure&apos; was violated (3 times):&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; calls constructor &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.&lt;init&gt;()&gt; in (Project.java:70)&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; calls method &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.setId(java.lang.String)&gt; in (Project.java:71)&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; has return type &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity&gt; in (Project.java:0)" type="java.lang.AssertionError"><![CDATA[java.lang.AssertionError: 
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..application..' should depend on classes that reside in any package ['..infrastructure..', 'org.springframework.web..', 'org.springframework.http..', 'org.springframework.data..', 'org.springframework.kafka..', 'org.apache.kafka..', 'jakarta.persistence..'], because ARCH-01: application has ZERO dependencies on infrastructure' was violated (3 times):
+Method <com.myorg.api.application.domain.Project.toEntity()> calls constructor <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.<init>()> in (Project.java:70)
+Method <com.myorg.api.application.domain.Project.toEntity()> calls method <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.setId(java.lang.String)> in (Project.java:71)
+Method <com.myorg.api.application.domain.Project.toEntity()> has return type <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity> in (Project.java:0)
+	at com.tngtech.archunit.lang.ArchRule$Assertions.assertNoViolation(ArchRule.java:94)
+	at com.tngtech.archunit.lang.ArchRule$Assertions.check(ArchRule.java:86)
+	at com.tngtech.archunit.library.freeze.FreezingArchRule.check(FreezingArchRule.java:97)
+	at com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:168)
+	at com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:151)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+]]></failure>
+    <system-err><![CDATA[SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+]]></system-err>
+  </testcase>
+  <testcase name="DOMAIN_IS_PURE" classname="ArchitectureRulesTest" time="0.003">
+    <failure message="Architecture Violation [Priority: MEDIUM] - Rule &apos;classes that reside in a package &apos;..application.domain..&apos; should only depend on classes that reside in any package [&apos;..application.domain..&apos;, &apos;..application.exception..&apos;, &apos;java..&apos;], because ARCH-01: domain depends on nothing outside domain (and domain exceptions)&apos; was violated (3 times):&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; calls constructor &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.&lt;init&gt;()&gt; in (Project.java:70)&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; calls method &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.setId(java.lang.String)&gt; in (Project.java:71)&#10;Method &lt;com.myorg.api.application.domain.Project.toEntity()&gt; has return type &lt;com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity&gt; in (Project.java:0)" type="java.lang.AssertionError"><![CDATA[java.lang.AssertionError: 
+Architecture Violation [Priority: MEDIUM] - Rule 'classes that reside in a package '..application.domain..' should only depend on classes that reside in any package ['..application.domain..', '..application.exception..', 'java..'], because ARCH-01: domain depends on nothing outside domain (and domain exceptions)' was violated (3 times):
+Method <com.myorg.api.application.domain.Project.toEntity()> calls constructor <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.<init>()> in (Project.java:70)
+Method <com.myorg.api.application.domain.Project.toEntity()> calls method <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity.setId(java.lang.String)> in (Project.java:71)
+Method <com.myorg.api.application.domain.Project.toEntity()> has return type <com.myorg.api.infrastructure.outbound.dbs.main.entity.ProjectEntity> in (Project.java:0)
+	at com.tngtech.archunit.lang.ArchRule$Assertions.assertNoViolation(ArchRule.java:94)
+	at com.tngtech.archunit.lang.ArchRule$Assertions.check(ArchRule.java:86)
+	at com.tngtech.archunit.library.freeze.FreezingArchRule.check(FreezingArchRule.java:97)
+	at com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:168)
+	at com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:151)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+]]></failure>
+  </testcase>
+  <testcase name="INBOUND_DOES_NOT_USE_OUTBOUND" classname="ArchitectureRulesTest" time="0.006"/>
+  <testcase name="OUTBOUND_DOES_NOT_USE_INBOUND" classname="ArchitectureRulesTest" time="0.004"/>
+  <testcase name="INBOUND_ADAPTERS_USE_PORTS" classname="ArchitectureRulesTest" time="0.003"/>
+  <testcase name="SERVICES_IMPLEMENT_INBOUND_PORTS" classname="ArchitectureRulesTest" time="0.003"/>
+  <testcase name="ADAPTERS_IMPLEMENT_OUTBOUND_PORTS" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="ONE_ADAPTER_PER_OUTBOUND_PORT" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="NO_CYCLES_IN_APPLICATION" classname="ArchitectureRulesTest" time="0.036"/>
+  <testcase name="MAPPERS_ARE_MAPSTRUCT" classname="ArchitectureRulesTest" time="0.005"/>
+  <testcase name="MAPPERS_LIVE_IN_MAPPER_PACKAGES" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="MAPPER_METHOD_NAMES" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="CONTROLLERS_IMPLEMENT_GENERATED_API" classname="ArchitectureRulesTest" time="0.004"/>
+  <testcase name="CONTROLLERS_DO_NOT_REDECLARE_MAPPINGS" classname="ArchitectureRulesTest" time="0.046"/>
+  <testcase name="NO_FIELD_INJECTION" classname="ArchitectureRulesTest" time="0.005"/>
+  <testcase name="NO_IMPLICIT_CLOCK" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="NO_UNPAGINATED_FIND_ALL" classname="ArchitectureRulesTest" time="0.004"/>
+  <testcase name="NO_NATIVE_QUERIES" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="ENTITIES_IN_ENTITY_PACKAGE" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="REPOSITORIES_IN_REPOSITORY_PACKAGE" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="JPA_ONLY_IN_DBS" classname="ArchitectureRulesTest" time="0.003"/>
+  <testcase name="NO_PUBLIC_SETTERS_IN_DOMAIN" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="NO_STANDARD_STREAMS" classname="ArchitectureRulesTest" time="0.006"/>
+  <testcase name="NO_JAVA_UTIL_LOGGING" classname="ArchitectureRulesTest" time="0.003"/>
+  <testcase name="LOGGERS_ONLY_WHERE_ALLOWED" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="ERRORS_LOGGED_ONLY_IN_ADVICE" classname="ArchitectureRulesTest" time="0.002"/>
+  <testcase name="SCHEDULED_TASKS_USE_SHEDLOCK" classname="ArchitectureRulesTest" time="0.002"/>
+</testsuite>
