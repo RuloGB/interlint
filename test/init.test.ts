@@ -50,6 +50,9 @@ async function run(...args: string[]) {
   return { exitCode, stdout, stderr }
 }
 
+const PLUGIN_SOURCE = join(import.meta.dirname, "..", "integrations", "opencode", "interlint", "index.ts")
+const PLUGIN_COPY = join(".opencode", "plugins", "interlint", "index.ts")
+
 const readConfig = () => readFileSync(join(projectDir, "interlint.yaml"), "utf8")
 
 describe("interlint init", () => {
@@ -176,6 +179,17 @@ describe("interlint init", () => {
     expect(stdout).not.toContain("Wrote:")
   })
 
+  it("treats a checked-out copy with Windows line endings as the same file", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    await run("init")
+    writeFile("interlint.yaml", readConfig().replaceAll("\n", "\r\n"))
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Unchanged:\n  interlint.yaml\n")
+  })
+
   it("says there are no ArchUnit tests and writes nothing", async () => {
     writeFile("mvnw", "")
     writeFile("src/test/java/com/acme/OrderServiceTest.java", "class OrderServiceTest {}\n")
@@ -205,5 +219,70 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stderr).toContain('--agent must be opencode (got "cursor")')
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+  })
+})
+
+describe("interlint init --agent opencode", () => {
+  beforeEach(() => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("copies the OpenCode plugin to .opencode/plugins/interlint/", async () => {
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "opencode")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(readFileSync(join(projectDir, PLUGIN_COPY), "utf8")).toBe(readFileSync(PLUGIN_SOURCE, "utf8"))
+    expect(stdout).toContain("Wrote:\n  interlint.yaml\n  .opencode/plugins/interlint/index.ts\n")
+  })
+
+  it("leaves opencode.json and opencode.jsonc as they are", async () => {
+    const config = '{\n  // The team\'s settings\n  "plugins": ["./elsewhere"]\n}\n'
+    writeFile("opencode.jsonc", config)
+
+    await run("init", "--agent", "opencode")
+
+    expect(readFileSync(join(projectDir, "opencode.jsonc"), "utf8")).toBe(config)
+    expect(existsSync(join(projectDir, "opencode.json"))).toBe(false)
+  })
+
+  it("leaves the same result when it runs twice", async () => {
+    await run("init", "--agent", "opencode")
+
+    const { exitCode, stdout } = await run("init", "--agent", "opencode")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Unchanged:\n  interlint.yaml\n  .opencode/plugins/interlint/index.ts\n")
+    expect(readFileSync(join(projectDir, PLUGIN_COPY), "utf8")).toBe(readFileSync(PLUGIN_SOURCE, "utf8"))
+  })
+
+  it("replaces an outdated copy of the plugin without --force", async () => {
+    writeFile(PLUGIN_COPY, "// An older Interlint plugin\n")
+
+    const { exitCode, stdout } = await run("init", "--agent", "opencode")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("  .opencode/plugins/interlint/index.ts\n")
+    expect(readFileSync(join(projectDir, PLUGIN_COPY), "utf8")).toBe(readFileSync(PLUGIN_SOURCE, "utf8"))
+  })
+
+  it("does not copy the plugin when interlint.yaml cannot be written", async () => {
+    writeFile("interlint.yaml", "# The team's own config\n")
+
+    expect((await run("init", "--agent", "opencode")).exitCode).toBe(2)
+    expect(existsSync(join(projectDir, ".opencode"))).toBe(false)
+  })
+
+  it("does not copy the plugin when there are no ArchUnit tests", async () => {
+    rmSync(join(projectDir, "src"), { recursive: true })
+
+    expect((await run("init", "--agent", "opencode")).exitCode).toBe(2)
+    expect(existsSync(join(projectDir, ".opencode"))).toBe(false)
+  })
+
+  it("installs no plugin without --agent", async () => {
+    await run("init")
+
+    expect(existsSync(join(projectDir, ".opencode"))).toBe(false)
   })
 })

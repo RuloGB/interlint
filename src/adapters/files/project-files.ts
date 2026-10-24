@@ -15,8 +15,13 @@ export type FileState = "new" | "changed" | "unchanged" | "conflict"
 export function stateOf(projectDir: string, file: PlannedFile): FileState {
   const path = join(projectDir, file.path)
   if (!existsSync(path)) return "new"
-  if (readFileSync(path, "utf8") === file.content) return "unchanged"
+  // Git may check the file out with Windows line endings: that is still the same file.
+  if (withUnixLineEndings(readFileSync(path, "utf8")) === withUnixLineEndings(file.content)) return "unchanged"
   return file.replace ? "changed" : "conflict"
+}
+
+function withUnixLineEndings(text: string): string {
+  return text.replaceAll("\r\n", "\n")
 }
 
 export function writeProjectFile(projectDir: string, file: PlannedFile) {

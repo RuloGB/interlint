@@ -9,6 +9,7 @@ import { withProjectLock } from "./adapters/lock/project-lock.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
 import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
+import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
 import { architectureCheck, mavenCommand } from "./core/init.js"
@@ -118,6 +119,7 @@ function init(args: string[], io: Io): number {
 
   const files: PlannedFile[] = [
     { path: CONFIG_FILE, content: renderConfig({ checks: [architecture] }), replace: values.force === true },
+    ...(agent === "opencode" ? openCodePluginFiles() : []),
   ]
   const states = files.map((file) => stateOf(projectDir, file))
   // Nothing is written unless every file can be.
