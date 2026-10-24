@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { archUnitReader } from "./adapters/archunit/archunit.js"
+import { decideStop, editNote, HOOK_EXIT, HookInputError, parseHookInput } from "./adapters/claude-code/hooks.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
 import { runCommand } from "./adapters/process/command-runner.js"
@@ -23,6 +24,7 @@ const USAGE = `Usage:
   interlint init [--agent opencode] [--force] [--cwd <dir>]    Detect the project's checks and write interlint.yaml
   interlint check [--when task-end] [--cwd <dir>]              Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
+  interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
 
 An edit check runs only when a changed file inside the project is one of its sources
 (*.java for report: archunit). With mvnd on the PATH, a check whose run starts with mvn,
@@ -32,12 +34,18 @@ init writes an architecture check that runs the test classes with @ArchTest, wit
 Wrapper (or mvn) and when: edit. It never replaces a different interlint.yaml without --force.
 
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
+
+A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 a check failed
+(the failures go to the agent on stderr), 1 Interlint could not run (shown to the user, never a
+block). stop blocks at most 3 times in a row, then lets the task end and shows the failures.
 `
 
 export interface Io {
   cwd: string
   stdout: (text: string) => void
   stderr: (text: string) => void
+  /** The whole of stdin. Only hooks read it. */
+  stdin?: () => Promise<string>
 }
 
 class UsageError extends Error {}
@@ -59,15 +67,20 @@ export async function main(args: string[], io: Io): Promise<number> {
     }
     if (command === "check") return await check(rest, io)
     if (command === "init") return init(rest, io)
+    if (command === "hook") return await hook(rest, io)
     throw new UsageError(`unknown command "${command}"\n\n${USAGE}`)
   } catch (error) {
-    if (error instanceof ConfigError || error instanceof UsageError) {
-      io.stderr(`interlint: ${error.message}\n`)
-    } else {
-      // Node exits with 1 on a crash, which agent integrations would read as a violation.
-      io.stderr(`interlint: unexpected error: ${error instanceof Error ? error.stack : String(error)}\n`)
-    }
+    reportError(error, io)
     return EXIT.error
+  }
+}
+
+function reportError(error: unknown, io: Io) {
+  if (error instanceof ConfigError || error instanceof UsageError || error instanceof HookInputError) {
+    io.stderr(`interlint: ${error.message}\n`)
+  } else {
+    // Node exits with 1 on a crash, which agent integrations would read as a violation.
+    io.stderr(`interlint: unexpected error: ${error instanceof Error ? error.stack : String(error)}\n`)
   }
 }
 
@@ -80,15 +93,59 @@ async function check(args: string[], io: Io): Promise<number> {
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
-  const config = loadConfig(projectDir)
-  const outcomes =
-    when === "edit"
-      ? await runEditChecks(projectDir, config, projectFiles(io.cwd, projectDir, files), DEPS)
-      : await runTaskEndChecks(projectDir, config, DEPS)
-  const output = formatOutcomes(outcomes)
+  const output = await runAndFormat(projectDir, when, projectFiles(io.cwd, projectDir, files))
   if (output === "") return EXIT.passed
   io.stdout(output)
   return EXIT.violations
+}
+
+/** Runs the checks for `when` and formats their failures for the agent: empty when every check passed. */
+async function runAndFormat(projectDir: string, when: "edit" | "task-end", changedFiles: string[]): Promise<string> {
+  const config = loadConfig(projectDir)
+  const outcomes =
+    when === "edit"
+      ? await runEditChecks(projectDir, config, changedFiles, DEPS)
+      : await runTaskEndChecks(projectDir, config, DEPS)
+  return formatOutcomes(outcomes)
+}
+
+const HOOK_EVENTS = ["post-edit", "stop"] as const
+
+/**
+ * A Claude Code hook. Any error exits 1, never 2: Claude Code would read 2 as a block
+ * and keep the agent going on a problem it cannot fix.
+ */
+async function hook(args: string[], io: Io): Promise<number> {
+  try {
+    const [agent, event, ...extra] = args
+    if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code (got "${agent ?? ""}")`)
+    if (!(HOOK_EVENTS as readonly (string | undefined)[]).includes(event) || extra.length > 0) {
+      throw new UsageError(`claude-code hooks are ${HOOK_EVENTS.join(" and ")} (got "${args.slice(1).join(" ")}")`)
+    }
+    const input = parseHookInput(io.stdin ? await io.stdin() : "")
+    const projectDir = resolve(io.cwd, process.env.CLAUDE_PROJECT_DIR || input.cwd || ".")
+
+    if (event === "post-edit") {
+      if (input.filePath === undefined) return HOOK_EXIT.pass
+      const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
+      const output = await runAndFormat(projectDir, "edit", changed)
+      if (output === "") return HOOK_EXIT.pass
+      io.stderr(editNote(output))
+      return HOOK_EXIT.block
+    }
+
+    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", []))
+    if (decision.action === "block") {
+      io.stderr(decision.text)
+      return HOOK_EXIT.block
+    }
+    // Past the limit the task may end, and the user still sees the failures.
+    if (decision.action === "report") io.stdout(`${JSON.stringify({ systemMessage: decision.text })}\n`)
+    return HOOK_EXIT.pass
+  } catch (error) {
+    reportError(error, io)
+    return HOOK_EXIT.error
+  }
 }
 
 /** The changed files as `/`-separated paths relative to the project. Files outside it are left out. */
@@ -195,6 +252,11 @@ if (isEntryPoint()) {
     cwd: process.cwd(),
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
+    stdin: async () => {
+      const chunks: Buffer[] = []
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+      return Buffer.concat(chunks).toString("utf8")
+    },
   })
   process.exitCode = exitCode
 }
