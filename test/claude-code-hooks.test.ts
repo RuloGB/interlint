@@ -1,7 +1,8 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { userStateDir } from "../src/adapters/claude-code/hooks.js"
 import { main } from "../src/cli.js"
 
 const VIOLATIONS_XML = readFileSync(
@@ -255,5 +256,24 @@ describe("interlint hook", () => {
 
     expect(exitCode).toBe(1)
     expect(stderr).toContain("claude-code")
+  })
+})
+
+describe("userStateDir", () => {
+  it("uses XDG_STATE_HOME when it is an absolute path", () => {
+    expect(userStateDir("linux", { XDG_STATE_HOME: "/var/state" })).toBe("/var/state")
+  })
+
+  it("ignores a relative XDG_STATE_HOME, as the XDG spec asks, so the count never lands in the project", () => {
+    expect(userStateDir("linux", { XDG_STATE_HOME: "state" })).toBe(join(homedir(), ".local", "state"))
+  })
+
+  it("falls back to ~/.local/state without XDG_STATE_HOME", () => {
+    expect(userStateDir("linux", {})).toBe(join(homedir(), ".local", "state"))
+  })
+
+  it("uses LOCALAPPDATA on Windows, and ignores it when it is relative", () => {
+    expect(userStateDir("win32", { LOCALAPPDATA: "C:/Users/me/AppData/Local" })).toBe("C:/Users/me/AppData/Local")
+    expect(userStateDir("win32", { LOCALAPPDATA: "AppData" })).toBe(join(homedir(), "AppData", "Local"))
   })
 })
