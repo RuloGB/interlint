@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import plugin, {
   type CheckRun,
   createInterlintPlugin,
   MAX_CONSECUTIVE_BLOCKS,
+  MAX_OUTPUT_CHARS,
+  runInterlint,
   TaskEndGate,
 } from "../adapters/opencode/interlint/index.js"
 
@@ -51,11 +56,56 @@ describe("TaskEndGate", () => {
     expect(gate.decide("s2", VIOLATIONS)).toMatchObject({ text: expect.stringContaining("attempt 1 of 3") })
   })
 
+  it("reports an exit 1 that is not an Interlint report, such as cmd.exe not finding the CLI", () => {
+    const notFound = { exitCode: 1, output: "'interlint' is not recognized as an internal or external command\n" }
+
+    expect(new TaskEndGate().decide("s1", notFound)).toEqual({
+      action: "report",
+      text: `Interlint could not run the checks (exit code 1).\n\n${notFound.output}`,
+    })
+  })
+
   it("reports a configuration error without making the agent continue", () => {
     expect(new TaskEndGate().decide("s1", { exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" })).toEqual({
       action: "report",
       text: "Interlint could not run the checks (exit code 2).\n\ninterlint: interlint.yaml not found in /repo\n",
     })
+  })
+})
+
+describe("runInterlint", () => {
+  let scratch: string
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "interlint-plugin-"))
+  })
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  function script(name: string, body: string) {
+    writeFileSync(join(scratch, name), body)
+    return `node ${name}`
+  }
+
+  it("gives up after the timeout, so a hung build never disables the gate", async () => {
+    const command = script("hang.mjs", "setTimeout(() => {}, 60_000)\n")
+
+    const run = await runInterlint(scratch, command, 300)
+
+    expect(run).toEqual({ exitCode: 2, output: "The checks did not finish within 0.3 s.\n" })
+  })
+
+  it("caps the output it sends to the session", async () => {
+    const command = script("noisy.mjs", "process.stdout.write('✗ ' + 'x'.repeat(200_000))\nprocess.exit(1)\n")
+
+    const run = await runInterlint(scratch, command, 10_000)
+
+    expect(run.exitCode).toBe(1)
+    expect(run.output.length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 100)
+    expect(run.output.startsWith("✗ xxx")).toBe(true)
+    expect(run.output.endsWith("… output truncated by Interlint.\n")).toBe(true)
   })
 })
 
@@ -87,9 +137,9 @@ describe("OpenCode plugin", () => {
     expect(plugin.id).toBe("interlint")
   })
 
-  it("runs the task-end checks in the project directory when a session goes idle", async () => {
+  it("runs the task-end checks in the project directory when an agent turn ends", async () => {
     const runs: string[] = []
-    const { ctx, done } = fakeContext([{ type: "session.idle", data: { sessionID: "s1" } }])
+    const { ctx, done } = fakeContext([{ type: "session.execution.succeeded", data: { sessionID: "s1" } }])
 
     await createInterlintPlugin(async (directory) => {
       runs.push(directory)
@@ -101,7 +151,7 @@ describe("OpenCode plugin", () => {
   })
 
   it("resumes the session with the failures", async () => {
-    const { ctx, sent, done } = fakeContext([{ type: "session.idle", data: { sessionID: "s1" } }])
+    const { ctx, sent, done } = fakeContext([{ type: "session.execution.succeeded", data: { sessionID: "s1" } }])
 
     await createInterlintPlugin(async () => VIOLATIONS).setup(ctx)
     await done
