@@ -19,7 +19,13 @@ export const runCommand: CommandRunner = (command, cwd) =>
     const append = (chunk: Buffer) => {
       output = (output + chunk.toString("utf8")).slice(-MAX_OUTPUT_CHARS)
     }
-    const child = spawn(toPlatformCommand(command), { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] })
+    // windowsHide: a parent without a console, such as an agent's desktop app, would otherwise get a console window.
+    const child = spawn(toPlatformCommand(command), {
+      cwd,
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    })
     child.stdout.on("data", append)
     child.stderr.on("data", append)
     child.on("error", (error) => resolve({ exitCode: 127, output: `${output}${error.message}\n` }))

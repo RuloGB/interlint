@@ -225,6 +225,8 @@ export function runInterlint(
       shell: true,
       // Its own process group on POSIX, so a timeout can stop the whole build, not only the shell.
       detached: process.platform !== "win32",
+      // OpenCode Desktop has no console, so without this Windows opens a console window on every run.
+      windowsHide: true,
     })
     // A hung build must not keep the session marked as running: give up and report it.
     const timer = setTimeout(async () => {
@@ -244,7 +246,7 @@ function killTree(pid: number | undefined): Promise<void> {
   return new Promise((done) => {
     if (pid === undefined) return done()
     if (process.platform === "win32") {
-      const taskkill = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" })
+      const taskkill = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
       taskkill.on("close", () => done())
       taskkill.on("error", () => done())
       return
