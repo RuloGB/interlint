@@ -8,6 +8,7 @@ import { decideStop, editNote, HOOK_EXIT, HookInputError, parseHookInput } from 
 import { claudeCodeSettingsFile, SettingsError } from "./adapters/claude-code/settings.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
+import { mavenQualityReader } from "./adapters/maven/quality-reports.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
 import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
@@ -57,7 +58,7 @@ class UsageError extends Error {}
 /** Wires the core to its adapters. This file is the only place that knows both. */
 const DEPS: CheckDeps = {
   run: runCommand,
-  readers: { archunit: archUnitReader },
+  readers: { archunit: archUnitReader, maven: mavenQualityReader },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
 }

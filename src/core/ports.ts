@@ -29,6 +29,11 @@ export type ReportSnapshot = ReadonlyMap<string, string>
 export interface ReportReader {
   snapshot(projectDir: string): ReportSnapshot
   read(projectDir: string, before: ReportSnapshot): ReportResult
+  /**
+   * Whether the report also lists what the build accepted, such as warnings under the project's threshold.
+   * Its failures then count only when the command failed.
+   */
+  alsoListsAccepted?: boolean
 }
 
 /** One reader per report format a check can declare. */

@@ -77,7 +77,8 @@ async function runCheck(
   const durationMs = Math.round(performance.now() - startedAt)
   const { found, failures } = reader.read(projectDir, before)
 
-  if (failures.length > 0) return { check, durationMs, status: "violations", failures }
+  const failuresCount = exitCode !== 0 || reader.alsoListsAccepted !== true
+  if (failures.length > 0 && failuresCount) return { check, durationMs, status: "violations", failures }
   // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
   if (exitCode !== 0 || !found) {
     return { check, durationMs, status: "failed", command, exitCode, outputTail: tail(output) }

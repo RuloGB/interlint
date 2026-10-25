@@ -104,3 +104,52 @@ describe("formatOutcomes", () => {
     )
   })
 })
+
+describe("formatOutcomes for Checkstyle and PMD", () => {
+  const checkstyle: Check = { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "task-end" }
+
+  it("prints each rule with its text and file:line, like an ArchUnit rule", () => {
+    const output = formatOutcomes([
+      {
+        check: checkstyle,
+        status: "violations",
+        durationMs: 10,
+        failures: [
+          {
+            title: "LineLength",
+            violations: [
+              {
+                text: "Line is longer than 80 characters (found 87).",
+                file: "Order.java",
+                line: 8,
+                path: "src/main/java/shop/Order.java",
+              },
+            ],
+          },
+        ],
+      },
+    ])
+
+    expect(output).toBe(
+      [
+        "✗ checkstyle · LineLength",
+        "",
+        "  Line is longer than 80 characters (found 87).",
+        "    at src/main/java/shop/Order.java:8",
+        "",
+        "Fix these problems before continuing.",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("names Checkstyle and PMD when Maven fails without leaving failures in their reports", () => {
+    const failed = (exitCode: number) =>
+      formatOutcomes([
+        { check: checkstyle, status: "failed", durationMs: 10, command: checkstyle.run, exitCode, outputTail: "" },
+      ])
+
+    expect(failed(1)).toContain("✗ checkstyle · the command failed (exit code 1) and left no Checkstyle or PMD failures\n")
+    expect(failed(0)).toContain("✗ checkstyle · the command exited 0 but wrote no Checkstyle or PMD report\n")
+  })
+})

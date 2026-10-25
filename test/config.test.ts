@@ -50,6 +50,18 @@ checks:
     })
   })
 
+  it("reads a Checkstyle or PMD check with report: maven", () => {
+    writeConfig(`
+checks:
+  - name: checkstyle
+    run: ./mvnw -q checkstyle:check
+    report: maven
+    when: task-end
+`)
+
+    expect(loadConfig(projectDir).checks[0]?.report).toBe("maven")
+  })
+
   it("fails when interlint.yaml does not exist", () => {
     expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
       `interlint.yaml not found in ${projectDir}`,
@@ -93,13 +105,13 @@ checks:
     report: archunit
     when: task-end
   - name: quality
-    run: ./mvnw checkstyle:check
-    report: maven
+    run: ./gradlew checkstyleMain
+    report: gradle
     when: task-end
 `)
 
     expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
-      'interlint.yaml: checks[1].report must be one of: archunit (got "maven")',
+      'interlint.yaml: checks[1].report must be one of: archunit, maven (got "gradle")',
     )
   })
 

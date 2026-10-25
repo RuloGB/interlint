@@ -13,7 +13,7 @@ function fakeDeps(options: { mvnd: boolean }) {
       launched.push(command)
       return { exitCode: 0, output: "" }
     },
-    readers: { archunit: PASSING_READER },
+    readers: { archunit: PASSING_READER, maven: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
   }
@@ -103,10 +103,41 @@ describe("runTaskEndChecks", () => {
   it("shows the command it actually launched when a check fails", async () => {
     const { deps } = fakeDeps({ mvnd: true })
     deps.run = async () => ({ exitCode: 1, output: "[ERROR] COMPILATION ERROR" })
-    deps.readers = { archunit: { ...PASSING_READER, read: () => ({ found: false, failures: [] }) } }
+    deps.readers = { ...deps.readers, archunit: { ...PASSING_READER, read: () => ({ found: false, failures: [] }) } }
 
     const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
 
     expect(outcome).toMatchObject({ status: "failed", command: "mvnd -q test -Dtest=ArchitectureRulesTest" })
+  })
+})
+
+describe("a report that also lists what the build accepted", () => {
+  const quality: Check = { name: "pmd", run: "./mvnw -q compile pmd:check", report: "maven", when: "task-end" }
+  const failure = { title: "EmptyCatchBlock", violations: [{ text: "Avoid empty catch blocks" }] }
+
+  function depsExiting(exitCode: number) {
+    const { deps } = fakeDeps({ mvnd: false })
+    const reader = { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure] }) }
+    deps.run = async () => ({ exitCode, output: "" })
+    deps.readers = { archunit: reader, maven: { ...reader, alsoListsAccepted: true } }
+    return deps
+  }
+
+  it("passes when Maven exits 0, whatever the report lists", async () => {
+    const [outcome] = await runTaskEndChecks("/repo", config(quality), depsExiting(0))
+
+    expect(outcome).toMatchObject({ status: "passed" })
+  })
+
+  it("shows the report's failures when Maven fails", async () => {
+    const [outcome] = await runTaskEndChecks("/repo", config(quality), depsExiting(1))
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
+  })
+
+  it("leaves the ArchUnit rule as it was: its failures count even when the command exits 0", async () => {
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), depsExiting(0))
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
   })
 })
