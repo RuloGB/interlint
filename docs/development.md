@@ -1,6 +1,10 @@
 # Development
 
-Requires Node 22 or later.
+Requires Node 22 or later. To use your build as the `interlint` on your `PATH`:
+
+```bash
+npm install && npm run build && npm link
+```
 
 | Command | What it does |
 |---|---|

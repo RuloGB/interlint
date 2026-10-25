@@ -4,7 +4,7 @@
 
 Interlint runs the checks your project **already has**, such as ArchUnit, inside the agent's session. When the agent breaks a rule, it hears about it right away and fixes it in the same session, not in CI and not by hand.
 
-> **Status:** in development. It works today with ArchUnit, Maven, OpenCode V2 and Claude Code, from a local build. It is not on npm yet.
+> **Status:** 1.0.0. It works today with ArchUnit, Maven, OpenCode V2 and Claude Code.
 
 ## The problem
 
@@ -45,10 +45,10 @@ The agent reads the rule, removes the dependency and carries on.
 
 Requires Node 22 or later and a Maven project with ArchUnit tests.
 
-1. Build and link the CLI from this repository:
+1. Install the CLI:
 
    ```bash
-   npm install && npm run build && npm link
+   npm install -g interlint
    ```
 
 2. In the root of your project, set up your agent:
@@ -77,7 +77,6 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 
 ## Known limits
 
-- Not published on npm yet: install it from a local build.
 - Only ArchUnit for now. Checkstyle and PMD are planned.
 - Only Maven projects.
 
@@ -95,5 +94,4 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 ## Planned
 
 - Checkstyle and PMD (`report: maven`).
-- Distribution through npm.
 - `interlint audit`, to find mismatches between `AGENTS.md` and your ArchUnit rules.

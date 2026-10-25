@@ -2,15 +2,15 @@
 
 How to set Interlint up in a project, what `interlint.yaml` holds and how the checks run. For the agent side, see [OpenCode](opencode.md) and [Claude Code](claude-code.md).
 
-## Install from a local build
+## Install
 
 Requires Node 22 or later.
 
 ```bash
-npm install && npm run build && npm link
+npm install -g interlint
 ```
 
-`interlint` is then on your `PATH`.
+`interlint` is then on your `PATH`, where the OpenCode plugin and the Claude Code hooks look for it. To run a build of this repository instead, see [Development](development.md).
 
 ## `interlint init`
 
