@@ -538,3 +538,111 @@ describe("interlint init --agent claude-code with an older hook next to the curr
     })
   })
 })
+
+describe("interlint init with Checkstyle and PMD", () => {
+  const plugin = (artifactId: string) =>
+    `      <plugin>\n        <groupId>org.apache.maven.plugins</groupId>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
+
+  function pom({ build = "", rest = "" }: { build?: string; rest?: string }) {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n${rest}</project>\n`,
+    )
+  }
+
+  it("adds a checkstyle and a pmd check at task end when pom.xml declares both plugins", async () => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
+
+    const { exitCode, stderr } = await run("init")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "architecture", run: "./mvnw -q test -Dtest=ArchitectureRulesTest", report: "archunit", when: "edit" },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "task-end" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check", report: "maven", when: "task-end" },
+    ])
+  })
+
+  it("adds only the check of the plugin it finds, in build or pluginManagement", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${plugin("maven-pmd-plugin")}      </plugins>\n    </pluginManagement>\n  </build>\n</project>\n`,
+    )
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture", "pmd"])
+  })
+
+  it("ignores a plugin that is only in a comment, a profile or the reporting section", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({
+      build: `      <!--\n${plugin("maven-checkstyle-plugin")}      -->\n`,
+      rest: `  <profiles>\n    <profile>\n      <build>\n        <plugins>\n${plugin("maven-checkstyle-plugin")}        </plugins>\n      </build>\n    </profile>\n  </profiles>\n  <reporting>\n    <plugins>\n${plugin("maven-pmd-plugin")}    </plugins>\n  </reporting>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+  })
+
+  it("says what it detected", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
+    installMavenDaemon()
+
+    const { stdout } = await run("init")
+
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: ArchitectureRulesTest",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+        "  PMD: maven-pmd-plugin in pom.xml, checked at task end",
+        "  Maven: mvn (no Maven Wrapper)",
+        "  mvnd: on the PATH, so the architecture check runs after each edit",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("writes the Checkstyle check alone when there are no ArchUnit tests", async () => {
+    pom({ build: plugin("maven-checkstyle-plugin") })
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "task-end" },
+    ])
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: none",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+        "  Maven: mvn (no Maven Wrapper)",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("still writes nothing when there are neither ArchUnit tests nor plugins", async () => {
+    pom({})
+
+    const { exitCode, stderr } = await run("init")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toBe(
+      "interlint: no ArchUnit tests found: no file under src/test/java contains @ArchTest, so there is nothing to check. Nothing was written.\n",
+    )
+  })
+})

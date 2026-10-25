@@ -1,11 +1,19 @@
 import type { Check } from "./check.js"
 
+export const QUALITY_PLUGINS = ["checkstyle", "pmd"] as const
+export type QualityPlugin = (typeof QUALITY_PLUGINS)[number]
+
 /** What `interlint init` found in the project. */
 export interface ProjectFacts {
   /** Simple names of the test classes with `@ArchTest`. */
   archTestClasses: string[]
   hasMavenWrapper: boolean
+  /** The Checkstyle and PMD plugins the project's own build declares. */
+  qualityPlugins: QualityPlugin[]
 }
+
+/** PMD resolves types from the compiled classes, so its check compiles first. Checkstyle reads only the sources. */
+const QUALITY_GOALS: Record<QualityPlugin, string> = { checkstyle: "checkstyle:check", pmd: "compile pmd:check" }
 
 /** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */
 const PLAIN_CLASS_NAME = /^[\p{L}_][\p{L}\p{N}_]*$/u
@@ -39,4 +47,17 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
     report: "archunit",
     when: "edit",
   }
+}
+
+/**
+ * One check per Checkstyle or PMD plugin the build declares. Each runs its own goal: in one Maven call the
+ * first failing goal stops the rest. They run at task end, since they check the whole project, not the edit.
+ */
+export function qualityChecks(facts: ProjectFacts): Check[] {
+  return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
+    name: plugin,
+    run: `${mavenCommand(facts)} -q ${QUALITY_GOALS[plugin]}`,
+    report: "maven",
+    when: "task-end",
+  }))
 }

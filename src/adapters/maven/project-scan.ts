@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { basename, join } from "node:path"
-import type { ProjectFacts } from "../../core/init.js"
+import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin } from "../../core/init.js"
 
 export const TEST_SOURCES = "src/test/java"
 const ARCH_TEST = /@(?:[\w.]+\.)?ArchTest\b/
@@ -10,12 +10,27 @@ const ARCH_TEST = /@(?:[\w.]+\.)?ArchTest\b/
  */
 const COMMENTS_AND_STRINGS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])+'/g
 
+const XML_COMMENTS = /<!--[\s\S]*?-->/g
+/** Sections whose plugins `mvn checkstyle:check` does not use: a profile may be off, reporting is for the site. */
+const UNUSED_SECTIONS = /<(profiles|reporting)>[\s\S]*?<\/\1>/g
+
 /** What `interlint init` needs to know about a Maven project. */
 export function scanProject(projectDir: string): ProjectFacts {
   return {
     archTestClasses: findArchTestClasses(projectDir),
     hasMavenWrapper: ["mvnw", "mvnw.cmd"].some((name) => existsSync(join(projectDir, name))),
+    qualityPlugins: findQualityPlugins(projectDir),
   }
+}
+
+/** The Checkstyle and PMD plugins in the build of `pom.xml`, in `plugins` or `pluginManagement`. */
+function findQualityPlugins(projectDir: string): QualityPlugin[] {
+  const pom = join(projectDir, "pom.xml")
+  if (!existsSync(pom)) return []
+  const build = readFileSync(pom, "utf8").replace(XML_COMMENTS, " ").replace(UNUSED_SECTIONS, " ")
+  return QUALITY_PLUGINS.filter((plugin) =>
+    new RegExp(`<artifactId>\\s*maven-${plugin}-plugin\\s*</artifactId>`).test(build),
+  )
 }
 
 /** The test classes whose code has an `@ArchTest` field or method, by simple name. */

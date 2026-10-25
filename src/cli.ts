@@ -15,7 +15,7 @@ import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
 import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
-import { architectureCheck, mavenCommand, runnableClasses } from "./core/init.js"
+import { architectureCheck, mavenCommand, type QualityPlugin, qualityChecks, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-checks.js"
 
@@ -163,6 +163,7 @@ function projectFiles(cwd: string, projectDir: string, files: string[]): string[
 }
 
 const AGENTS = ["opencode", "claude-code"] as const
+const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD" }
 
 function init(args: string[], io: Io): number {
   const { values } = parseInitArgs(args)
@@ -175,14 +176,15 @@ function init(args: string[], io: Io): number {
   if (!existsSync(projectDir)) throw new UsageError(`${projectDir} does not exist`)
   const facts = scanProject(projectDir)
   const architecture = architectureCheck(facts)
-  if (architecture === undefined) {
+  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
+  if (checks.length === 0) {
     throw new UsageError(
       `no ArchUnit tests found: no file under ${TEST_SOURCES} contains @ArchTest, so there is nothing to check. Nothing was written.`,
     )
   }
 
   const files: PlannedFile[] = [
-    { path: CONFIG_FILE, content: renderConfig({ checks: [architecture] }), replace: values.force === true },
+    { path: CONFIG_FILE, content: renderConfig({ checks }), replace: values.force === true },
     ...(agent === "opencode" ? openCodePluginFiles() : []),
     ...(agent === "claude-code" ? [claudeCodeSettings(projectDir)] : []),
   ]
@@ -208,9 +210,10 @@ function init(args: string[], io: Io): number {
   io.stdout(
     [
       "Detected:",
-      `  ArchUnit tests: ${runnableClasses(facts).join(", ")}`,
+      `  ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}`,
+      ...facts.qualityPlugins.map((plugin) => `  ${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml, checked at task end`),
       `  Maven: ${maven} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
-      `  mvnd: ${daemon}`,
+      ...(architecture ? [`  mvnd: ${daemon}`] : []),
       "",
       ...section("Wrote:", written),
       ...section("Unchanged:", unchanged),
