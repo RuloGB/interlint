@@ -74,7 +74,7 @@ Fix these problems before continuing.
 | Exit code | Meaning |
 |---|---|
 | 0 | Every check passed |
-| 1 | A check failed: violations, a command that failed without leaving any, or a command that wrote no report |
+| 1 | A check failed: violations, a command that failed without leaving any, or an ArchUnit command that wrote no report |
 | 2 | Configuration or usage error, or an unexpected Interlint error |
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
@@ -92,7 +92,7 @@ A check with `report: maven` reads the reports Checkstyle and PMD write in `targ
 Fix these problems before continuing.
 ```
 
-- The project's build decides, not Interlint. The reports also list what the build accepts, such as warnings under Checkstyle's `violationSeverity` or violations under PMD's `failurePriority`. So a `report: maven` check fails only when Maven fails.
+- The project's build decides, not Interlint. The reports also list what the build accepts, such as warnings under Checkstyle's `violationSeverity` or violations under PMD's `failurePriority`. So a `report: maven` check fails only when Maven fails. When Maven exits 0 it passes, with or without a report: the build may skip the plugin, for example with `<skip>true</skip>` outside CI.
 - When Maven fails, only the most severe level in the reports is shown: Checkstyle `error` before `warning` and `info`, the lowest PMD `priority` number first. That level always failed the build, so nothing the build accepts is shown. Less severe failures, if any, show on the next run.
 - A report counts only when Maven says its plugin's `check` goal failed. When Maven fails for another reason, such as code that does not compile, the check shows the last lines of Maven's output instead.
 - Messages are in the language of the JVM, as Checkstyle and PMD write them.

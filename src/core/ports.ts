@@ -32,7 +32,8 @@ export interface ReportReader {
   read(projectDir: string, before: ReportSnapshot, output: string): ReportResult
   /**
    * Whether the report also lists what the build accepted, such as warnings under the project's threshold.
-   * Its failures then count only when the command failed.
+   * The exit code then decides: its failures count only when the command failed, and a zero exit passes even
+   * without a report.
    */
   alsoListsAccepted?: boolean
 }

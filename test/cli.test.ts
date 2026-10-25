@@ -40,11 +40,14 @@ process.exit(${options.exitCode})
   return `node ${script}.mjs`
 }
 
-function writeConfig(...checks: { name: string; run: string; when?: string }[]) {
+function writeConfig(...checks: { name: string; run: string; report?: string; when?: string }[]) {
   writeFileSync(
     join(projectDir, "interlint.yaml"),
     `checks:\n${checks
-      .map((check) => `  - name: ${check.name}\n    run: ${check.run}\n    report: archunit\n    when: ${check.when ?? "task-end"}\n`)
+      .map(
+        (check) =>
+          `  - name: ${check.name}\n    run: ${check.run}\n    report: ${check.report ?? "archunit"}\n    when: ${check.when ?? "task-end"}\n`,
+      )
       .join("")}`,
   )
 }
@@ -172,6 +175,53 @@ describe("interlint check --when task-end", () => {
       stdout: "",
       stderr: "interlint: --file is only valid with --when edit\n",
     })
+  })
+})
+
+describe("interlint check with report: maven", () => {
+  /** A stand-in for Maven running pmd:check: writes target/pmd.xml (or not), prints some output and exits. */
+  function fakePmd(options: { violation?: boolean; exitCode: number; output?: string }) {
+    const report = options.violation
+      ? `<pmd><file name="${join(projectDir, "src", "main", "java", "shop", "Order.java")}"><violation beginline="11" rule="EmptyCatchBlock" priority="3">Avoid empty catch blocks</violation></file></pmd>`
+      : undefined
+    writeFileSync(
+      join(projectDir, "pmd.mjs"),
+      `import { mkdirSync, writeFileSync } from "node:fs"
+const report = ${JSON.stringify(report ?? "")}
+if (report) {
+  mkdirSync("target", { recursive: true })
+  writeFileSync("target/pmd.xml", report)
+}
+console.log(${JSON.stringify(options.output ?? "")})
+process.exit(${options.exitCode})
+`,
+    )
+    writeConfig({ name: "pmd", run: "node pmd.mjs", report: "maven" })
+  }
+
+  it("shows the rule and file:line when Maven says PMD's check failed", async () => {
+    fakePmd({
+      violation: true,
+      exitCode: 1,
+      output: "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-pmd-plugin:3.26.0:check (default-cli) on project shop",
+    })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain("✗ pmd · EmptyCatchBlock\n\n  Avoid empty catch blocks\n    at src/main/java/shop/Order.java:11\n")
+  })
+
+  it("passes when Maven exits 0, even if the report lists what the build accepts", async () => {
+    fakePmd({ violation: true, exitCode: 0 })
+
+    expect(await run("check")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("passes when Maven exits 0 without writing a report, as when the build skips the plugin", async () => {
+    fakePmd({ exitCode: 0, output: "[INFO] Skipping PMD execution" })
+
+    expect(await run("check")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
 })
 
