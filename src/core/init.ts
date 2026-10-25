@@ -10,6 +10,8 @@ export interface ProjectFacts {
   hasMavenWrapper: boolean
   /** The Checkstyle and PMD plugins the project's own build declares. */
   qualityPlugins: QualityPlugin[]
+  /** The ids of the build's executions that run each plugin's `check` goal. */
+  checkExecutions: Record<QualityPlugin, string[]>
 }
 
 /**
@@ -18,9 +20,21 @@ export interface ProjectFacts {
  * Checkstyle failure out of the `pmd` check, which the `checkstyle` check already reports. Checkstyle reads only
  * the sources and runs no lifecycle.
  */
-const QUALITY_GOALS: Record<QualityPlugin, string> = {
-  checkstyle: "checkstyle:check",
-  pmd: "compile pmd:check -Dcheckstyle.skip",
+const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string) => string> = {
+  checkstyle: (goal) => goal,
+  pmd: (goal) => `compile ${goal} -Dcheckstyle.skip`,
+}
+
+/** An execution id made of letters, digits, `_`, `.` and `-` only. Anything else could mean something to the shell. */
+const PLAIN_EXECUTION_ID = /^[\w.-]+$/
+
+/**
+ * The plugin's `check` goal as the build runs it. Maven applies the configuration inside an `<execution>` only when
+ * the goal names that execution (`checkstyle:check@id`); called plainly, it runs with the plugin's defaults.
+ */
+function checkGoal(facts: ProjectFacts, plugin: QualityPlugin): string {
+  const ids = facts.checkExecutions[plugin].filter((id) => PLAIN_EXECUTION_ID.test(id))
+  return ids.length === 0 ? `${plugin}:check` : ids.map((id) => `${plugin}:check@${id}`).join(" ")
 }
 
 /** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */
@@ -67,7 +81,7 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
-    run: `${mavenCommand(facts)} -q ${QUALITY_GOALS[plugin]}`,
+    run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin))}`,
     report: "maven",
     when: "task-end",
   }))

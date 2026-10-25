@@ -621,6 +621,53 @@ describe("interlint init with Checkstyle and PMD", () => {
     expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture", "checkstyle", "pmd"])
   })
 
+  describe("when the build runs check in an <execution>", () => {
+    const execution = (inner: string) =>
+      `          <execution>\n${inner}            <goals>\n              <goal>check</goal>\n            </goals>\n            <configuration>\n              <violationSeverity>warning</violationSeverity>\n            </configuration>\n          </execution>\n`
+    const withExecutions = (artifactId: string, executions: string) =>
+      `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n        <executions>\n${executions}        </executions>\n      </plugin>\n`
+    const runs = () => loadConfig(projectDir).checks.map((check) => check.run)
+
+    it("runs that execution, so its configuration applies, and calls one without id `default`", async () => {
+      pom({
+        build:
+          withExecutions("maven-checkstyle-plugin", execution("            <id>style</id>\n            <phase>validate</phase>\n")) +
+          withExecutions("maven-pmd-plugin", execution("            <phase>verify</phase>\n")),
+      })
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check@style", "mvn -q compile pmd:check@default -Dcheckstyle.skip"])
+    })
+
+    it("finds the execution in pluginManagement too", async () => {
+      writeFile(
+        "pom.xml",
+        `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${withExecutions("maven-checkstyle-plugin", execution("            <id>style</id>\n"))}      </plugins>\n    </pluginManagement>\n  </build>\n</project>\n`,
+      )
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check@style"])
+    })
+
+    it("runs the plain goal when no execution runs check, one is turned off, or an id could mean something to the shell", async () => {
+      const cpdOnly =
+        "          <execution>\n            <id>cpd</id>\n            <goals>\n              <goal>cpd-check</goal>\n            </goals>\n          </execution>\n"
+      pom({
+        build:
+          withExecutions(
+            "maven-checkstyle-plugin",
+            execution("            <id>inherited</id>\n            <phase>none</phase>\n") + execution("            <id>a;rm</id>\n"),
+          ) + withExecutions("maven-pmd-plugin", cpdOnly),
+      })
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check", "mvn -q compile pmd:check -Dcheckstyle.skip"])
+    })
+  })
+
   it("ignores a plugin that is only a dependency", async () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
     const dependency = (artifactId: string) =>
