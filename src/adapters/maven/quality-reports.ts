@@ -150,12 +150,17 @@ function violationAt(projectDir: string, name: string | undefined, line: string 
  * The findings of the most severe level present, grouped by rule in the order they first appear.
  * When Maven failed, that level is always one that failed the build, so nothing the build accepted is shown.
  * Less severe failures, if any, show on the next run.
+ * A loop rather than `Math.min(...ranks)`: a large codebase can have more findings than a call takes arguments.
  */
 function mostSevere(findings: Finding[]): RuleFailure[] {
-  const top = Math.min(...findings.map((finding) => finding.rank))
+  let top = Number.POSITIVE_INFINITY
+  for (const finding of findings) top = Math.min(top, finding.rank)
   const byRule = new Map<string, Violation[]>()
-  for (const finding of findings.filter((finding) => finding.rank === top)) {
-    byRule.set(finding.rule, [...(byRule.get(finding.rule) ?? []), finding.violation])
+  for (const finding of findings) {
+    if (finding.rank !== top) continue
+    const violations = byRule.get(finding.rule)
+    if (violations) violations.push(finding.violation)
+    else byRule.set(finding.rule, [finding.violation])
   }
   return [...byRule].map(([title, violations]) => ({ title, violations }))
 }

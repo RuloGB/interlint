@@ -113,6 +113,18 @@ describe("parseCheckstyleXml", () => {
     expect(parseCheckstyleXml(checkstyleXml({ [ORDER]: [] }), PROJECT)).toEqual([])
     expect(parseCheckstyleXml(checkstyleXml({}), PROJECT)).toEqual([])
   })
+
+  it("reads a report with as many errors as a large legacy codebase can have", () => {
+    const errors = Array.from({ length: 150_000 }, (_, index) =>
+      checkstyleError(index + 1, "error", "sizes.LineLengthCheck", "Too long."),
+    )
+
+    const [failure, ...others] = parseCheckstyleXml(checkstyleXml({ [ORDER]: errors }), PROJECT)
+
+    expect(others).toEqual([])
+    expect(failure?.title).toBe("LineLength")
+    expect(failure?.violations).toHaveLength(150_000)
+  }, 60_000)
 })
 
 describe("parsePmdXml", () => {
