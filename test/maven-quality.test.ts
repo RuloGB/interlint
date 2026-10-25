@@ -269,6 +269,20 @@ describe("readQualityReports", () => {
     expect(result.failures.map((failure) => failure.title)).toEqual(["EmptyCatchBlock"])
   })
 
+  it("recognises the failed goal when Maven colors its output", () => {
+    const before = snapshotQualityReports(projectDir)
+    write(
+      "target/pmd.xml",
+      pmdXml({ [source("src/main/java/shop/Order.java")]: [pmdViolation(11, 3, "EmptyCatchBlock", "Avoid empty catch blocks")] }),
+    )
+    const colored =
+      "[\u001b[1;31mERROR\u001b[m] Failed to execute goal \u001b[32morg.apache.maven.plugins:maven-pmd-plugin:3.26.0:check\u001b[m \u001b[1m(default-cli)\u001b[m on project \u001b[36mshop\u001b[m"
+
+    expect(readQualityReports(projectDir, before, colored).failures.map((failure) => failure.title)).toEqual([
+      "EmptyCatchBlock",
+    ])
+  })
+
   it("shows nothing from the reports when Maven failed for another reason, such as a module that does not compile", () => {
     const before = snapshotQualityReports(projectDir)
     write(

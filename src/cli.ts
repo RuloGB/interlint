@@ -30,11 +30,15 @@ const USAGE = `Usage:
   interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
 
 An edit check runs only when a changed file inside the project is one of its sources
-(*.java for report: archunit). With mvnd on the PATH, a check whose run starts with mvn,
+(*.java for report: archunit and maven). With mvnd on the PATH, a check whose run starts with mvn,
 mvnw or ./mvnw runs with mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn) and when: edit. It never replaces a different interlint.yaml without --force.
+Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
+for the plugins in the build of pom.xml. It never replaces a different interlint.yaml without --force.
+
+A report: maven check fails only when Maven fails, and shows the most severe level in the
+Checkstyle and PMD reports, so nothing the project's build accepts is shown.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit and stop hooks to .claude/settings.json and keeps the rest of the file.
 
