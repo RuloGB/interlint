@@ -183,7 +183,7 @@ function init(args: string[], io: Io): number {
   const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
   if (checks.length === 0) {
     throw new UsageError(
-      `no ArchUnit tests found: no file under ${TEST_SOURCES} contains @ArchTest, so there is nothing to check. Nothing was written.`,
+      `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.`,
     )
   }
 

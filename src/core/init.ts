@@ -12,8 +12,16 @@ export interface ProjectFacts {
   qualityPlugins: QualityPlugin[]
 }
 
-/** PMD resolves types from the compiled classes, so its check compiles first. Checkstyle reads only the sources. */
-const QUALITY_GOALS: Record<QualityPlugin, string> = { checkstyle: "checkstyle:check", pmd: "compile pmd:check" }
+/**
+ * PMD resolves types from the compiled classes, so its check compiles first. Compiling runs the lifecycle, and a
+ * build may bind `checkstyle:check` to an early phase such as `validate`: skipping Checkstyle there keeps a
+ * Checkstyle failure out of the `pmd` check, which the `checkstyle` check already reports. Checkstyle reads only
+ * the sources and runs no lifecycle.
+ */
+const QUALITY_GOALS: Record<QualityPlugin, string> = {
+  checkstyle: "checkstyle:check",
+  pmd: "compile pmd:check -Dcheckstyle.skip",
+}
 
 /** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */
 const PLAIN_CLASS_NAME = /^[\p{L}_][\p{L}\p{N}_]*$/u
@@ -37,13 +45,16 @@ export function mavenCommand(facts: ProjectFacts): string {
 /**
  * The check that runs only the ArchUnit test classes, or nothing when there are none.
  * Always `when: edit`: without mvnd it waits for task end anyway, so the file is the same on every machine.
+ * `test` runs the lifecycle, so it skips the Checkstyle and PMD plugins the build declares: bound to an early
+ * phase, their failure would stop the build before ArchUnit runs, and their own checks already report it.
  */
 export function architectureCheck(facts: ProjectFacts): Check | undefined {
   const classes = runnableClasses(facts).join(",")
   if (classes === "") return undefined
+  const skips = QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ` -D${plugin}.skip`)
   return {
     name: "architecture",
-    run: `${mavenCommand(facts)} -q test -Dtest=${classes}`,
+    run: `${mavenCommand(facts)} -q test -Dtest=${classes}${skips.join("")}`,
     report: "archunit",
     when: "edit",
   }

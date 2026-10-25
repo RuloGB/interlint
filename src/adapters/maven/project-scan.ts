@@ -11,8 +11,11 @@ const ARCH_TEST = /@(?:[\w.]+\.)?ArchTest\b/
 const COMMENTS_AND_STRINGS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])+'/g
 
 const XML_COMMENTS = /<!--[\s\S]*?-->/g
-/** Sections whose plugins `mvn checkstyle:check` does not use: a profile may be off, reporting is for the site. */
-const UNUSED_SECTIONS = /<(profiles|reporting)>[\s\S]*?<\/\1>/g
+/**
+ * Sections where a Checkstyle or PMD artifactId does not declare a plugin the `check` goals use: a profile may be
+ * off, reporting is for the site, and a dependency is a jar on a classpath, not a plugin of the build.
+ */
+const UNUSED_SECTIONS = /<(profiles|reporting|dependencyManagement|dependencies)>[\s\S]*?<\/\1>/g
 
 /** What `interlint init` needs to know about a Maven project. */
 export function scanProject(projectDir: string): ProjectFacts {

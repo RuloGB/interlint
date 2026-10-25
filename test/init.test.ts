@@ -274,7 +274,7 @@ describe("interlint init", () => {
     expect(stdout).toContain("Unchanged:\n  interlint.yaml\n")
   })
 
-  it("says there are no ArchUnit tests and writes nothing", async () => {
+  it("says there is nothing to check and writes nothing", async () => {
     writeFile("mvnw", "")
     writeFile("src/test/java/com/acme/OrderServiceTest.java", "class OrderServiceTest {}\n")
 
@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: no ArchUnit tests found: no file under src/test/java contains @ArchTest, so there is nothing to check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -559,9 +559,26 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
     expect(loadConfig(projectDir).checks).toEqual([
-      { name: "architecture", run: "./mvnw -q test -Dtest=ArchitectureRulesTest", report: "archunit", when: "edit" },
+      {
+        name: "architecture",
+        run: "./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip",
+        report: "archunit",
+        when: "edit",
+      },
       { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "task-end" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check", report: "maven", when: "task-end" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "task-end" },
+    ])
+  })
+
+  it("skips in each check the plugins the other checks run, so one failure shows in one check", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-pmd-plugin") })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q test -Dtest=ArchitectureRulesTest -Dpmd.skip",
+      "mvn -q compile pmd:check -Dcheckstyle.skip",
     ])
   })
 
@@ -582,6 +599,19 @@ describe("interlint init with Checkstyle and PMD", () => {
     pom({
       build: `      <!--\n${plugin("maven-checkstyle-plugin")}      -->\n`,
       rest: `  <profiles>\n    <profile>\n      <build>\n        <plugins>\n${plugin("maven-checkstyle-plugin")}        </plugins>\n      </build>\n    </profile>\n  </profiles>\n  <reporting>\n    <plugins>\n${plugin("maven-pmd-plugin")}    </plugins>\n  </reporting>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+  })
+
+  it("ignores a plugin that is only a dependency", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    const dependency = (artifactId: string) =>
+      `      <dependency>\n        <groupId>org.apache.maven.plugins</groupId>\n        <artifactId>${artifactId}</artifactId>\n      </dependency>\n`
+    pom({
+      rest: `  <dependencyManagement>\n    <dependencies>\n${dependency("maven-checkstyle-plugin")}    </dependencies>\n  </dependencyManagement>\n  <dependencies>\n${dependency("maven-pmd-plugin")}  </dependencies>\n`,
     })
 
     await run("init")
@@ -642,7 +672,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toBe(
-      "interlint: no ArchUnit tests found: no file under src/test/java contains @ArchTest, so there is nothing to check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
     )
   })
 })
