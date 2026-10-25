@@ -102,7 +102,8 @@ describe("runInterlint", () => {
   })
 
   it("caps the output it sends to the session", async () => {
-    const command = script("noisy.mjs", "process.stdout.write('✗ ' + 'x'.repeat(200_000))\nprocess.exit(1)\n")
+    // exitCode, not exit(): on macOS writes to a pipe are asynchronous, so exit() would drop most of the output.
+    const command = script("noisy.mjs", "process.stdout.write('✗ ' + 'x'.repeat(200_000))\nprocess.exitCode = 1\n")
 
     const run = await runInterlint(scratch, command, 10_000)
 

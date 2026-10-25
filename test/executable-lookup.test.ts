@@ -16,7 +16,8 @@ afterEach(() => {
 
 describe("hasExecutable", () => {
   it("finds a Windows executable through PATHEXT", () => {
-    writeFileSync(join(binDir, "mvnd.cmd"), "@echo off\n")
+    // The same case as in PATHEXT: Windows ignores case, but the test may run on a file system that does not.
+    writeFileSync(join(binDir, "mvnd.CMD"), "@echo off\n")
 
     expect(hasExecutable("mvnd", { PATH: binDir, PATHEXT: ".EXE;.CMD" }, "win32")).toBe(true)
   })
