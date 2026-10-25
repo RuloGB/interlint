@@ -606,6 +606,21 @@ describe("interlint init with Checkstyle and PMD", () => {
     expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
   })
 
+  it("still finds a plugin that pins its own dependencies, before or after its artifactId", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    const puppycrawl =
+      "        <dependencies>\n          <dependency>\n            <groupId>com.puppycrawl.tools</groupId>\n            <artifactId>checkstyle</artifactId>\n          </dependency>\n        </dependencies>\n"
+    pom({
+      build:
+        `      <plugin>\n        <artifactId>maven-checkstyle-plugin</artifactId>\n${puppycrawl}      </plugin>\n` +
+        `      <plugin>\n${puppycrawl}        <artifactId>maven-pmd-plugin</artifactId>\n      </plugin>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture", "checkstyle", "pmd"])
+  })
+
   it("ignores a plugin that is only a dependency", async () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
     const dependency = (artifactId: string) =>
