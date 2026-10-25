@@ -38,6 +38,14 @@ ${body}
 `
 }
 
+/** The line Maven prints when a plugin goal fails, the same with or without -q. */
+function failedGoal(plugin: "checkstyle" | "pmd") {
+  const version = plugin === "checkstyle" ? "3.6.0" : "3.26.0"
+  return `[ERROR] Failed to execute goal org.apache.maven.plugins:maven-${plugin}-plugin:${version}:check (default-cli) on project shop: violations found -> [Help 1]`
+}
+
+const BOTH_FAILED = [failedGoal("checkstyle"), failedGoal("pmd")].join("\n")
+
 function pmdViolation(line: number, priority: number, rule: string, message: string) {
   return `<violation beginline="${line}" endline="${line}" begincolumn="7" endcolumn="6" rule="${rule}" ruleset="Error Prone" package="shop" class="Order" priority="${priority}">
 ${message}
@@ -188,7 +196,7 @@ describe("readQualityReports", () => {
       }),
     )
 
-    const result = readQualityReports(projectDir, before)
+    const result = readQualityReports(projectDir, before, BOTH_FAILED)
 
     expect(result.found).toBe(true)
     expect(result.failures).toEqual([
@@ -210,7 +218,7 @@ describe("readQualityReports", () => {
     )
     utimesSync(join(projectDir, "target/pmd.xml"), tick, tick)
 
-    expect(readQualityReports(projectDir, before).failures.map((failure) => failure.title)).toEqual(["EmptyCatchBlock"])
+    expect(readQualityReports(projectDir, before, BOTH_FAILED).failures.map((failure) => failure.title)).toEqual(["EmptyCatchBlock"])
   })
 
   it("reads the reports of the project's modules", () => {
@@ -224,7 +232,7 @@ describe("readQualityReports", () => {
       }),
     )
 
-    expect(readQualityReports(projectDir, before).failures).toEqual([
+    expect(readQualityReports(projectDir, before, BOTH_FAILED).failures).toEqual([
       {
         title: "EmptyCatchBlock",
         violations: [
@@ -240,7 +248,46 @@ describe("readQualityReports", () => {
   })
 
   it("says so when the run wrote no report", () => {
-    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir))).toEqual({ found: false, failures: [] })
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), BOTH_FAILED)).toEqual({ found: false, failures: [] })
+  })
+
+  it("shows only the reports of the plugins whose check failed, so accepted entries of the other one stay out", () => {
+    const before = snapshotQualityReports(projectDir)
+    write(
+      "target/checkstyle-result.xml",
+      checkstyleXml({
+        [source("src/main/java/shop/Order.java")]: [checkstyleError(8, "warning", "javadoc.MissingJavadocMethodCheck", "Missing.")],
+      }),
+    )
+    write(
+      "target/pmd.xml",
+      pmdXml({ [source("src/main/java/shop/Order.java")]: [pmdViolation(11, 3, "EmptyCatchBlock", "Avoid empty catch blocks")] }),
+    )
+
+    const result = readQualityReports(projectDir, before, `[INFO] BUILD FAILURE\n${failedGoal("pmd")}`)
+
+    expect(result.failures.map((failure) => failure.title)).toEqual(["EmptyCatchBlock"])
+  })
+
+  it("shows nothing from the reports when Maven failed for another reason, such as a module that does not compile", () => {
+    const before = snapshotQualityReports(projectDir)
+    write(
+      "target/pmd.xml",
+      pmdXml({ [source("src/main/java/shop/Order.java")]: [pmdViolation(3, 4, "UnnecessaryImport", "Unused import")] }),
+    )
+    const output = "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile (default-compile) on project api: Compilation failure"
+
+    expect(readQualityReports(projectDir, before, output)).toEqual({ found: true, failures: [] })
+  })
+
+  it("skips a report cut short, as Checkstyle leaves it when a source cannot be parsed, so Maven's output shows instead", () => {
+    const before = snapshotQualityReports(projectDir)
+    const full = checkstyleXml({
+      [source("src/main/java/shop/Order.java")]: [checkstyleError(8, "error", "sizes.LineLengthCheck", "Too long.")],
+    })
+    write("target/checkstyle-result.xml", full.slice(0, full.indexOf("source=") + 20))
+
+    expect(readQualityReports(projectDir, before, failedGoal("checkstyle"))).toEqual({ found: true, failures: [] })
   })
 
   it("is the reader of a report that also lists what the build accepted", () => {

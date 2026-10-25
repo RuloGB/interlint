@@ -75,7 +75,7 @@ async function runCheck(
   const startedAt = performance.now()
   const { exitCode, output } = await run(command, projectDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { found, failures } = reader.read(projectDir, before)
+  const { found, failures } = reader.read(projectDir, before, output)
 
   const failuresCount = exitCode !== 0 || reader.alsoListsAccepted !== true
   if (failures.length > 0 && failuresCount) return { check, durationMs, status: "violations", failures }

@@ -8,6 +8,9 @@ const CHECKSTYLE_REPORT = join("target", "checkstyle-result.xml")
 const PMD_REPORT = join("target", "pmd.xml")
 const REPORTS = [CHECKSTYLE_REPORT, PMD_REPORT]
 
+/** The line Maven prints when a Checkstyle or PMD `check` goal fails, with or without -q. */
+const FAILED_CHECK_GOAL = /Failed to execute goal [^:\s]+:maven-(checkstyle|pmd)-plugin:[^:\s]+:check\b/g
+
 /** How many levels of Maven modules below the project are searched for reports. */
 const MAX_MODULE_DEPTH = 3
 const NOT_MODULES = new Set(["src", "target", "node_modules"])
@@ -52,18 +55,33 @@ function fingerprint(path: string): string {
 
 /**
  * Reads the Checkstyle and PMD reports written or rewritten since `before`, in the project and its modules.
- * Reports left in `target/` by previous runs are ignored.
+ * Reports left in `target/` by previous runs are ignored, and so are the reports of a plugin whose `check`
+ * did not fail according to `output`: when Maven failed for another reason, such as a module that does not
+ * compile, the reports only hold what the build accepted.
  */
-export function readQualityReports(projectDir: string, before: ReportSnapshot): ReportResult {
+export function readQualityReports(projectDir: string, before: ReportSnapshot, output: string): ReportResult {
   const reports = reportFiles(projectDir).filter((path) => before.get(path) !== fingerprint(path))
+  const failed = new Set([...output.matchAll(FAILED_CHECK_GOAL)].map((match) => match[1]))
   const findingsOf = (report: string, parse: (xml: string, projectDir: string) => Finding[]) =>
-    reports.filter((path) => path.endsWith(report)).flatMap((path) => parse(readFileSync(path, "utf8"), projectDir))
+    reports.filter((path) => path.endsWith(report)).flatMap((path) => readReport(path, projectDir, parse))
   return {
     found: reports.length > 0,
     failures: [
-      ...mostSevere(findingsOf(CHECKSTYLE_REPORT, checkstyleFindings)),
-      ...mostSevere(findingsOf(PMD_REPORT, pmdFindings)),
+      ...(failed.has("checkstyle") ? mostSevere(findingsOf(CHECKSTYLE_REPORT, checkstyleFindings)) : []),
+      ...(failed.has("pmd") ? mostSevere(findingsOf(PMD_REPORT, pmdFindings)) : []),
     ],
+  }
+}
+
+/**
+ * A report that is not well-formed XML gives no findings, so the check shows Maven's output instead.
+ * Checkstyle leaves one cut short when it stops on a source it cannot parse.
+ */
+function readReport(path: string, projectDir: string, parse: (xml: string, projectDir: string) => Finding[]): Finding[] {
+  try {
+    return parse(readFileSync(path, "utf8"), projectDir)
+  } catch {
+    return []
   }
 }
 

@@ -141,3 +141,19 @@ describe("a report that also lists what the build accepted", () => {
     expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
   })
 })
+
+describe("the command output", () => {
+  it("reaches the report reader, for reports that cannot say why the command failed", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const seen: string[] = []
+    deps.run = async () => ({ exitCode: 1, output: "[ERROR] Failed to execute goal" })
+    deps.readers = {
+      ...deps.readers,
+      archunit: { ...PASSING_READER, read: (_dir: string, _before: ReadonlyMap<string, string>, output: string) => (seen.push(output), { found: true, failures: [] }) },
+    }
+
+    await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(seen).toEqual(["[ERROR] Failed to execute goal"])
+  })
+})
