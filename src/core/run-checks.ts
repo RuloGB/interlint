@@ -75,11 +75,16 @@ async function runCheck(
   const startedAt = performance.now()
   const { exitCode, output } = await run(command, projectDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { found, failures } = reader.read(projectDir, before)
+  const { found, failures } = reader.read(projectDir, before, output)
 
-  if (failures.length > 0) return { check, durationMs, status: "violations", failures }
+  // A report that also lists what the build accepted leaves the decision to the exit code: its failures count only
+  // when the command failed, and a zero exit passes even without a report, since the build may skip the plugin.
+  const exitCodeDecides = reader.alsoListsAccepted === true
+  if (failures.length > 0 && (exitCode !== 0 || !exitCodeDecides)) {
+    return { check, durationMs, status: "violations", failures }
+  }
   // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
-  if (exitCode !== 0 || !found) {
+  if (exitCode !== 0 || (!found && !exitCodeDecides)) {
     return { check, durationMs, status: "failed", command, exitCode, outputTail: tail(output) }
   }
   return { check, durationMs, status: "passed" }

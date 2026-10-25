@@ -38,12 +38,12 @@ The agent reads the rule, removes the dependency and carries on.
 - **No new rules to write.** Interlint has no rules and no analysis engine of its own. Your existing checks stay the single source of truth.
 - **Deterministic.** Your own build decides, not a prompt the agent may ignore.
 - **Feedback when it is cheap.** The agent fixes the violation while it still has the context, before it builds on top of it.
-- **One command to set up.** `interlint init` finds your ArchUnit tests and wires your agent.
+- **One command to set up.** `interlint init` finds your ArchUnit tests and your Checkstyle and PMD plugins, and wires your agent.
 - **No endless loops.** After 3 failed attempts in a row, Interlint lets the task end and shows you what is still failing.
 
 ## Quick start
 
-Requires Node 22 or later and a Maven project with ArchUnit tests.
+Requires Node 22 or later and a Maven project with ArchUnit tests, or with Checkstyle or PMD in its `pom.xml`.
 
 1. Install the CLI:
 
@@ -72,13 +72,13 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 | | |
 |---|---|
 | Agents | OpenCode V2, Claude Code |
-| Checks | ArchUnit |
+| Checks | ArchUnit, Checkstyle, PMD |
 | Build | Maven, with or without the Maven Wrapper or `mvnd` |
 
 ## Known limits
 
-- Only ArchUnit for now. Checkstyle and PMD are planned.
 - Only Maven projects.
+- Checkstyle and PMD run over the whole project, so `init` sets them to run at task end, not after each edit.
 
 ## Documentation
 
@@ -93,5 +93,4 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 
 ## Planned
 
-- Checkstyle and PMD (`report: maven`).
 - `interlint audit`, to find mismatches between `AGENTS.md` and your ArchUnit rules.

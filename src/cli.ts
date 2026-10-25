@@ -8,13 +8,14 @@ import { decideStop, editNote, HOOK_EXIT, HookInputError, parseHookInput } from 
 import { claudeCodeSettingsFile, SettingsError } from "./adapters/claude-code/settings.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
+import { mavenQualityReader } from "./adapters/maven/quality-reports.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
 import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
 import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
-import { architectureCheck, mavenCommand, runnableClasses } from "./core/init.js"
+import { architectureCheck, mavenCommand, type QualityPlugin, qualityChecks, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-checks.js"
 
@@ -29,11 +30,15 @@ const USAGE = `Usage:
   interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
 
 An edit check runs only when a changed file inside the project is one of its sources
-(*.java for report: archunit). With mvnd on the PATH, a check whose run starts with mvn,
+(*.java for report: archunit and maven). With mvnd on the PATH, a check whose run starts with mvn,
 mvnw or ./mvnw runs with mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn) and when: edit. It never replaces a different interlint.yaml without --force.
+Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
+for the plugins in the build of pom.xml. It never replaces a different interlint.yaml without --force.
+
+A report: maven check fails only when Maven fails, and shows the most severe level in the
+Checkstyle and PMD reports, so nothing the project's build accepts is shown.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit and stop hooks to .claude/settings.json and keeps the rest of the file.
 
@@ -57,7 +62,7 @@ class UsageError extends Error {}
 /** Wires the core to its adapters. This file is the only place that knows both. */
 const DEPS: CheckDeps = {
   run: runCommand,
-  readers: { archunit: archUnitReader },
+  readers: { archunit: archUnitReader, maven: mavenQualityReader },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
 }
@@ -162,6 +167,7 @@ function projectFiles(cwd: string, projectDir: string, files: string[]): string[
 }
 
 const AGENTS = ["opencode", "claude-code"] as const
+const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD" }
 
 function init(args: string[], io: Io): number {
   const { values } = parseInitArgs(args)
@@ -174,14 +180,15 @@ function init(args: string[], io: Io): number {
   if (!existsSync(projectDir)) throw new UsageError(`${projectDir} does not exist`)
   const facts = scanProject(projectDir)
   const architecture = architectureCheck(facts)
-  if (architecture === undefined) {
+  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
+  if (checks.length === 0) {
     throw new UsageError(
-      `no ArchUnit tests found: no file under ${TEST_SOURCES} contains @ArchTest, so there is nothing to check. Nothing was written.`,
+      `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.`,
     )
   }
 
   const files: PlannedFile[] = [
-    { path: CONFIG_FILE, content: renderConfig({ checks: [architecture] }), replace: values.force === true },
+    { path: CONFIG_FILE, content: renderConfig({ checks }), replace: values.force === true },
     ...(agent === "opencode" ? openCodePluginFiles() : []),
     ...(agent === "claude-code" ? [claudeCodeSettings(projectDir)] : []),
   ]
@@ -207,9 +214,10 @@ function init(args: string[], io: Io): number {
   io.stdout(
     [
       "Detected:",
-      `  ArchUnit tests: ${runnableClasses(facts).join(", ")}`,
+      `  ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}`,
+      ...facts.qualityPlugins.map((plugin) => `  ${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml, checked at task end`),
       `  Maven: ${maven} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
-      `  mvnd: ${daemon}`,
+      ...(architecture ? [`  mvnd: ${daemon}`] : []),
       "",
       ...section("Wrote:", written),
       ...section("Unchanged:", unchanged),

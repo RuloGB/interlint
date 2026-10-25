@@ -274,7 +274,7 @@ describe("interlint init", () => {
     expect(stdout).toContain("Unchanged:\n  interlint.yaml\n")
   })
 
-  it("says there are no ArchUnit tests and writes nothing", async () => {
+  it("says there is nothing to check and writes nothing", async () => {
     writeFile("mvnw", "")
     writeFile("src/test/java/com/acme/OrderServiceTest.java", "class OrderServiceTest {}\n")
 
@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: no ArchUnit tests found: no file under src/test/java contains @ArchTest, so there is nothing to check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -536,5 +536,205 @@ describe("interlint init --agent claude-code with an older hook next to the curr
       ],
       Stop: [{ hooks: [STOP] }],
     })
+  })
+})
+
+describe("interlint init with Checkstyle and PMD", () => {
+  const plugin = (artifactId: string) =>
+    `      <plugin>\n        <groupId>org.apache.maven.plugins</groupId>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
+
+  function pom({ build = "", rest = "" }: { build?: string; rest?: string }) {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n${rest}</project>\n`,
+    )
+  }
+
+  it("adds a checkstyle and a pmd check at task end when pom.xml declares both plugins", async () => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
+
+    const { exitCode, stderr } = await run("init")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(loadConfig(projectDir).checks).toEqual([
+      {
+        name: "architecture",
+        run: "./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip",
+        report: "archunit",
+        when: "edit",
+      },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "task-end" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "task-end" },
+    ])
+  })
+
+  it("skips in each check the plugins the other checks run, so one failure shows in one check", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-pmd-plugin") })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q test -Dtest=ArchitectureRulesTest -Dpmd.skip",
+      "mvn -q compile pmd:check -Dcheckstyle.skip",
+    ])
+  })
+
+  it("adds only the check of the plugin it finds, in build or pluginManagement", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${plugin("maven-pmd-plugin")}      </plugins>\n    </pluginManagement>\n  </build>\n</project>\n`,
+    )
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture", "pmd"])
+  })
+
+  it("ignores a plugin that is only in a comment, a profile or the reporting section", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({
+      build: `      <!--\n${plugin("maven-checkstyle-plugin")}      -->\n`,
+      rest: `  <profiles>\n    <profile>\n      <build>\n        <plugins>\n${plugin("maven-checkstyle-plugin")}        </plugins>\n      </build>\n    </profile>\n  </profiles>\n  <reporting>\n    <plugins>\n${plugin("maven-pmd-plugin")}    </plugins>\n  </reporting>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+  })
+
+  it("still finds a plugin that pins its own dependencies, before or after its artifactId", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    const puppycrawl =
+      "        <dependencies>\n          <dependency>\n            <groupId>com.puppycrawl.tools</groupId>\n            <artifactId>checkstyle</artifactId>\n          </dependency>\n        </dependencies>\n"
+    pom({
+      build:
+        `      <plugin>\n        <artifactId>maven-checkstyle-plugin</artifactId>\n${puppycrawl}      </plugin>\n` +
+        `      <plugin>\n${puppycrawl}        <artifactId>maven-pmd-plugin</artifactId>\n      </plugin>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture", "checkstyle", "pmd"])
+  })
+
+  describe("when the build runs check in an <execution>", () => {
+    const execution = (inner: string) =>
+      `          <execution>\n${inner}            <goals>\n              <goal>check</goal>\n            </goals>\n            <configuration>\n              <violationSeverity>warning</violationSeverity>\n            </configuration>\n          </execution>\n`
+    const withExecutions = (artifactId: string, executions: string) =>
+      `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n        <executions>\n${executions}        </executions>\n      </plugin>\n`
+    const runs = () => loadConfig(projectDir).checks.map((check) => check.run)
+
+    it("runs that execution, so its configuration applies, and calls one without id `default`", async () => {
+      pom({
+        build:
+          withExecutions("maven-checkstyle-plugin", execution("            <id>style</id>\n            <phase>validate</phase>\n")) +
+          withExecutions("maven-pmd-plugin", execution("            <phase>verify</phase>\n")),
+      })
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check@style", "mvn -q compile pmd:check@default -Dcheckstyle.skip"])
+    })
+
+    it("finds the execution in pluginManagement too", async () => {
+      writeFile(
+        "pom.xml",
+        `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${withExecutions("maven-checkstyle-plugin", execution("            <id>style</id>\n"))}      </plugins>\n    </pluginManagement>\n  </build>\n</project>\n`,
+      )
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check@style"])
+    })
+
+    it("runs the plain goal when no execution runs check, one is turned off, or an id could mean something to the shell", async () => {
+      const cpdOnly =
+        "          <execution>\n            <id>cpd</id>\n            <goals>\n              <goal>cpd-check</goal>\n            </goals>\n          </execution>\n"
+      pom({
+        build:
+          withExecutions(
+            "maven-checkstyle-plugin",
+            execution("            <id>inherited</id>\n            <phase>none</phase>\n") + execution("            <id>a;rm</id>\n"),
+          ) + withExecutions("maven-pmd-plugin", cpdOnly),
+      })
+
+      await run("init")
+
+      expect(runs()).toEqual(["mvn -q checkstyle:check", "mvn -q compile pmd:check -Dcheckstyle.skip"])
+    })
+  })
+
+  it("ignores a plugin that is only a dependency", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    const dependency = (artifactId: string) =>
+      `      <dependency>\n        <groupId>org.apache.maven.plugins</groupId>\n        <artifactId>${artifactId}</artifactId>\n      </dependency>\n`
+    pom({
+      rest: `  <dependencyManagement>\n    <dependencies>\n${dependency("maven-checkstyle-plugin")}    </dependencies>\n  </dependencyManagement>\n  <dependencies>\n${dependency("maven-pmd-plugin")}  </dependencies>\n`,
+    })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+  })
+
+  it("says what it detected", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
+    installMavenDaemon()
+
+    const { stdout } = await run("init")
+
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: ArchitectureRulesTest",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+        "  PMD: maven-pmd-plugin in pom.xml, checked at task end",
+        "  Maven: mvn (no Maven Wrapper)",
+        "  mvnd: on the PATH, so the architecture check runs after each edit",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("writes the Checkstyle check alone when there are no ArchUnit tests", async () => {
+    pom({ build: plugin("maven-checkstyle-plugin") })
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "task-end" },
+    ])
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: none",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+        "  Maven: mvn (no Maven Wrapper)",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("still writes nothing when there are neither ArchUnit tests nor plugins", async () => {
+    pom({})
+
+    const { exitCode, stderr } = await run("init")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toBe(
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
+    )
   })
 })

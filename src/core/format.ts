@@ -1,3 +1,4 @@
+import { REPORT_TOOLS } from "./check.js"
 import type { CheckOutcome } from "./run-checks.js"
 import type { Violation } from "./violation.js"
 
@@ -13,11 +14,12 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
       )
     }
     if (outcome.status === "failed") {
+      const tool = REPORT_TOOLS[outcome.check.report]
       return [
         [
           outcome.exitCode === 0
-            ? `✗ ${outcome.check.name} · the command exited 0 but wrote no ArchUnit report`
-            : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ArchUnit failures`,
+            ? `✗ ${outcome.check.name} · the command exited 0 but wrote no ${tool} report`
+            : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ${tool} failures`,
           "",
           `  Command: ${outcome.command}`,
           "  Last lines of its output:",
