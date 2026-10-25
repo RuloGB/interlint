@@ -4,7 +4,7 @@
   "description": "Deterministic harness that runs a project's existing checks inside an AI coding agent's session.",
   "type": "module",
   "license": "MIT",
-  "author": "Raul Garcia",
+  "author": "Raul Garcia Barciela",
   "keywords": [
     "ai",
     "coding-agent",
