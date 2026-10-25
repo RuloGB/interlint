@@ -1,141 +1,94 @@
 # Interlint
 
-A deterministic harness for AI coding agents. Interlint runs the checks your project **already has** (ArchUnit, Checkstyle, PMD…) as early as possible inside the agent's session, and makes the agent fix any violation in that same session before it moves on.
+**Your AI coding agent breaks your architecture rules. Interlint makes it fix them before it moves on.**
 
-> **Status:** in development. `interlint init`, edit-time and task-end checks with ArchUnit, and the OpenCode V2 and Claude Code adapters work from a local build. Nothing is published yet.
+Interlint runs the checks your project **already has**, such as ArchUnit, inside the agent's session. When the agent breaks a rule, it hears about it right away and fixes it in the same session, not in CI and not by hand.
 
-## Why
+> **Status:** in development. It works today with ArchUnit, Maven, OpenCode V2 and Claude Code, from a local build. It is not on npm yet.
 
-Code rules usually live in two disconnected places:
+## The problem
 
-- As text in `AGENTS.md`, which the agent may forget and nobody enforces.
-- As checks (ArchUnit tests, Checkstyle, PMD), which the agent only hears about when someone builds or CI fails.
+Your code rules live in two places that never meet:
 
-By then the fix comes late, outside the session, and by hand.
+- **As text in `AGENTS.md`.** The agent may forget it, and nobody enforces it.
+- **As checks** (ArchUnit tests, Checkstyle, PMD). The agent only hears about them when someone builds or CI fails.
 
-## How it works
+By then the agent's session is over, and someone has to fix the code by hand.
 
-- **After each edit:** fast checks run through the agent's post-edit hook, and failures go straight back to the agent.
-- **At task end:** slower checks that need a full build run through the agent's stop hook. If they fail, the agent cannot finish until everything is green.
+## What Interlint does
 
-Interlint defines no rules and has no analysis engine of its own: your existing tools remain the single source of truth.
+- **After each edit,** fast checks run and any violation goes straight back to the agent.
+- **At task end,** the full checks run. If a rule is broken, the agent cannot finish until everything is green.
 
-## Try it from a local build
+This is what the agent sees when it puts infrastructure code in the domain:
 
-Requires Node 22 or later.
+```text
+✗ architecture · ARCH-01: domain depends on nothing outside domain
 
-1. Build and link the CLI:
+  Method <com.acme.domain.Order.toEntity()> calls constructor <com.acme.infra.OrderEntity.<init>()> in (Order.java:27)
+    at src/main/java/com/acme/domain/Order.java:27
+
+Fix these problems before continuing.
+```
+
+The agent reads the rule, removes the dependency and carries on.
+
+## Why teams use it
+
+- **No new rules to write.** Interlint has no rules and no analysis engine of its own. Your existing checks stay the single source of truth.
+- **Deterministic.** Your own build decides, not a prompt the agent may ignore.
+- **Feedback when it is cheap.** The agent fixes the violation while it still has the context, before it builds on top of it.
+- **One command to set up.** `interlint init` finds your ArchUnit tests and wires your agent.
+- **No endless loops.** After 3 failed attempts in a row, Interlint lets the task end and shows you what is still failing.
+
+## Quick start
+
+Requires Node 22 or later and a Maven project with ArchUnit tests.
+
+1. Build and link the CLI from this repository:
 
    ```bash
    npm install && npm run build && npm link
    ```
 
-2. In the root of your Maven project, generate `interlint.yaml` and set up your agent (`opencode` or `claude-code`):
+2. In the root of your project, set up your agent:
 
    ```bash
    interlint init --agent opencode
    ```
 
-3. Run the checks:
+   or, for Claude Code:
 
    ```bash
-   interlint check --when task-end
+   interlint init --agent claude-code
    ```
 
-   It prints nothing and exits with 0 when every check passes. Otherwise it prints each violated rule, with the text of its `because()` and every violation with its source file and line.
+3. Commit the generated `interlint.yaml` (and `.opencode/` or `.claude/settings.json`), then start your agent as usual.
 
-| Exit code | Meaning |
+For the fastest feedback after each edit, install [`mvnd`](https://github.com/apache/maven-mvnd). Without it, Maven checks run only at task end.
+
+## Supported today
+
+| | |
 |---|---|
-| 0 | Every check passed |
-| 1 | A check failed: violations, a command that failed without leaving any, or a command that wrote no report |
-| 2 | Configuration or usage error, or an unexpected Interlint error |
+| Agents | OpenCode V2, Claude Code |
+| Checks | ArchUnit |
+| Build | Maven, with or without the Maven Wrapper or `mvnd` |
 
-On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
+## Known limits
 
-### `interlint init`
+- Not published on npm yet: install it from a local build.
+- Only ArchUnit for now. Checkstyle and PMD are planned.
+- Only Maven projects.
 
-`init` looks for the test classes under `src/test/java` that use `@ArchTest` and writes an `interlint.yaml` with one check that runs only them:
+## Documentation
 
-```yaml
-# Generated by interlint init.
-checks:
-  - name: architecture
-    run: ./mvnw -q test -Dtest=ArchitectureRulesTest
-    report: archunit
-    when: edit
-```
-
-- The check uses the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it: with `mvnd` the check runs after each edit, without it at task end (see below). `init` says which applies on yours.
-- It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
-- Without `@ArchTest` classes it says so, writes nothing and exits with 2.
-- `--agent opencode` also copies the OpenCode plugin to `.opencode/plugins/interlint/`, replacing an older copy. It does not touch `opencode.json(c)`: OpenCode loads that directory by itself.
-- `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json` and keeps everything else in it. See [Claude Code](#claude-code).
-- At the end it prints what it detected and which files it wrote or left unchanged. `--cwd <dir>` runs it on another directory.
-
-The generated file is yours: edit it to change `when` or the command.
-
-### After each edit
-
-A check with `when: edit` also runs after the agent changes one of its sources:
-
-```bash
-interlint check --when edit --file src/main/java/shop/Order.java
-```
-
-- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit`. Any other file, such as `README.md`, runs nothing and exits with 0.
-- The output and exit codes are the same as at task end. `--file` can be repeated.
-- With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
-- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end.
-- Check runs on the same project never overlap: a second edit waits until the first one's checks finish.
-
-At task end every check runs, `edit` ones included.
-
-### OpenCode V2
-
-`interlint init --agent opencode` copies `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project (you can also copy it by hand). OpenCode loads it on start; `interlint` must be on the `PATH` of the OpenCode server.
-
-After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. The agent waits for these checks, so they give up after 2 minutes; if they cannot run, the edit result stays as it was and the task-end check reports the problem.
-
-When an agent turn ends, the plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them. After 3 failed attempts in a row it reports the failures and lets the task end. If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
-
-Tested with OpenCode 2.1.4.
-
-### Claude Code
-
-`interlint init --agent claude-code` adds two hooks to the project's `.claude/settings.json`, the one you commit:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [{ "type": "command", "command": "interlint hook claude-code post-edit", "timeout": 120 }]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [{ "type": "command", "command": "interlint hook claude-code stop", "timeout": 600 }]
-      }
-    ]
-  }
-}
-```
-
-Other settings and hooks in the file stay as they are. Running `init` again leaves the file unchanged, and replaces an older Interlint hook instead of adding a second one. If the file is not valid JSON, `init` writes nothing. `interlint` must be on the `PATH` that Claude Code runs hooks with.
-
-`interlint hook claude-code post-edit|stop` reads the hook's JSON on stdin and runs the checks in the project (`CLAUDE_PROJECT_DIR`). It exits with Claude Code's codes instead of the ones above:
-
-| Exit code | Meaning |
-|---|---|
-| 0 | Nothing for the agent: the checks passed, or no check reads the edited file |
-| 2 | A check failed: the failures go to Claude on stderr |
-| 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |
-
-- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit.
-- **When Claude finishes,** `stop` runs every check. If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. The count is kept per session in your user's state directory (`%LOCALAPPDATA%\interlint` on Windows, `$XDG_STATE_HOME/interlint` or `~/.local/state/interlint` elsewhere; a relative `LOCALAPPDATA` or `XDG_STATE_HOME` is ignored).
+- [Using Interlint](docs/usage.md): `init`, `interlint.yaml`, `check` and exit codes.
+- [OpenCode](docs/opencode.md): the plugin and what it does after edits and at turn end.
+- [Claude Code](docs/claude-code.md): the hooks, their exit codes and the retry limit.
 
 ## Planned
 
-- `report: maven` for Checkstyle and PMD.
+- Checkstyle and PMD (`report: maven`).
 - Distribution through npm.
+- `interlint audit`, to find mismatches between `AGENTS.md` and your ArchUnit rules.
