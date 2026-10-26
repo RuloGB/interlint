@@ -41,7 +41,7 @@ function writeCheck(when: "edit" | "task-end", report: string) {
 const report = readFileSync("report.xml", "utf8")
 mkdirSync("target/surefire-reports", { recursive: true })
 writeFileSync("target/surefire-reports/TEST-ArchitectureRulesTest.xml", report)
-writeFileSync("ran", "")
+writeFileSync("target/ran", "")
 process.exit(report.includes("<failure") ? 1 : 0)
 `,
   )
@@ -111,7 +111,7 @@ describe("interlint hook claude-code post-edit", () => {
     const result = await hook("post-edit", postToolUse(join(projectDir, "README.md")))
 
     expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    expect(() => readFileSync(join(projectDir, "ran"))).toThrow()
+    expect(() => readFileSync(join(projectDir, "target", "ran"))).toThrow()
   })
 
   it("runs only edit checks", async () => {
@@ -159,7 +159,7 @@ describe("interlint hook claude-code stop", () => {
     writeCheck("task-end", VIOLATIONS_XML)
 
     expect(await hook("stop", stopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    expect(existsSync(join(projectDir, "ran"))).toBe(false)
+    expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
   })
 
   it("runs the checks again once a file changed after they passed, whoever changed it", async () => {
@@ -193,7 +193,7 @@ describe("interlint hook claude-code stop", () => {
     await agentEdits()
 
     expect(await hook("stop", stopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    expect(readFileSync(join(projectDir, "ran"), "utf8")).toBe("")
+    expect(readFileSync(join(projectDir, "target", "ran"), "utf8")).toBe("")
   })
 
   it("lets the task end after 3 blocks in a row and shows the failures to the user", async () => {

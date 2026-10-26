@@ -289,6 +289,27 @@ describe("interlint check --when task-end --changed", () => {
     expect((await run("check", "--when", "task-end", "--changed")).exitCode).toBe(1)
   })
 
+  it("runs the other projects and says which check it skipped when a dir no longer exists", async () => {
+    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
+    writeProjects(gone, writeProject("orders", 1))
+
+    expect(await run("check")).toMatchObject({
+      exitCode: 1,
+      stderr: 'interlint: skipped gone/checkstyle: its dir "gone" does not exist\n',
+    })
+    expect(ran("orders")).toBe(true)
+  })
+
+  it("skips a check whose dir no longer exists quietly on the agent's paths, whose output the agent reads", async () => {
+    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
+    writeProjects(gone, writeProject("orders", 0))
+    await run("check", "--when", "edit", "--file", "orders/pom.xml")
+
+    expect(await run("check", "--when", "edit", "--file", "gone/A.java")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await run("check", "--when", "task-end", "--changed")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(ran("orders")).toBe(true)
+  })
+
   it("is only valid with --when task-end", async () => {
     expect(await run("check", "--when", "edit", "--file", "a.java", "--changed")).toEqual({
       exitCode: 2,

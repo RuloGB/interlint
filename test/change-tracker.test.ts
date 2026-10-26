@@ -95,6 +95,18 @@ describe("fileChangeTracker", () => {
     expect(tracker.lookup(projectDir).changed).toBe(true)
   })
 
+  it("keeps a project changed when a file changed while its checks ran, even without an edit", () => {
+    const tracker = fileChangeTracker(stateDir)
+    tracker.touch(projectDir)
+    const seen = tracker.lookup(projectDir)
+
+    // A shell command, an IDE or another session changes a file while the checks run.
+    write("domain/src/main/java/shop/Customer.java", "class Customer {}")
+    tracker.accept(projectDir, seen)
+
+    expect(tracker.lookup(projectDir).changed).toBe(true)
+  })
+
   it("keeps each project on its own", () => {
     const other = mkdtempSync(join(tmpdir(), "interlint-changes-other-"))
     try {

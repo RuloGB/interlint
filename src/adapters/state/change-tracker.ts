@@ -20,15 +20,17 @@ export function fileChangeTracker(stateDir?: string): ChangeTracker {
     join(stateDir ?? join(userStateDir(), "interlint", "projects"), projectKey(projectDir))
   return {
     lookup(projectDir) {
+      const current = fingerprint(projectDir)
       const record = read(recordOf(projectDir))
       if (record === undefined) {
-        const reference = fingerprint(projectDir)
-        return { changed: !save(recordOf(projectDir), reference), record: reference }
+        return { changed: !save(recordOf(projectDir), current), record: current, fingerprint: current }
       }
-      return { changed: record.startsWith(TOUCHED) || record !== fingerprint(projectDir), record }
+      return { changed: record.startsWith(TOUCHED) || record !== current, record, fingerprint: current }
     },
+    // The files as the checks saw them, not as they are after: a change made while the checks ran, by any
+    // means, keeps the project changed. A check that writes outside build output only makes the next run repeat.
     accept(projectDir, seen) {
-      if (read(recordOf(projectDir)) === seen.record) save(recordOf(projectDir), fingerprint(projectDir))
+      if (read(recordOf(projectDir)) === seen.record) save(recordOf(projectDir), seen.fingerprint)
     },
     // Each touch is unique, so `accept` can tell a touch made while the checks ran from the one before them.
     touch(projectDir) {

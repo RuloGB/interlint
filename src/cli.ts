@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, realpathSync, statSync } from "node:fs"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
@@ -15,6 +15,7 @@ import { findMavenProjects, scanProject, TEST_SOURCES } from "./adapters/maven/p
 import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { fileChangeTracker } from "./adapters/state/change-tracker.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
+import type { Config } from "./core/check.js"
 import { formatOutcomes } from "./core/format.js"
 import { mavenCommand, type ProjectFacts, projectChecks, type QualityPlugin, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
@@ -115,7 +116,7 @@ async function check(args: string[], io: Io): Promise<number> {
   const output =
     when === "edit"
       ? await runAndFormat(projectDir, "edit", projectFiles(io.cwd, projectDir, files))
-      : await runAndFormat(projectDir, "task-end", [], values.changed === true)
+      : await runAndFormat(projectDir, "task-end", [], values.changed === true, (text) => io.stderr(text))
   if (output === "") return EXIT.passed
   io.stdout(output)
   return EXIT.violations
@@ -130,13 +131,36 @@ async function runAndFormat(
   when: "edit" | "task-end",
   changedFiles: string[],
   changedOnly = false,
+  warn?: (text: string) => void,
 ): Promise<string> {
-  const config = loadConfig(projectDir)
+  const config = withExistingDirs(projectDir, loadConfig(projectDir), changedOnly ? undefined : warn)
   const outcomes =
     when === "edit"
       ? await runEditChecks(projectDir, config, changedFiles, DEPS)
       : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly })
   return formatOutcomes(outcomes)
+}
+
+/**
+ * The config without the checks whose `dir` no longer exists, such as a removed Git submodule: the other projects
+ * still run. Only a run by hand says so, on stderr; the agent integrations read the output, so they skip quietly.
+ */
+function withExistingDirs(projectDir: string, config: Config, warn?: (text: string) => void): Config {
+  const checks = config.checks.filter((check) => {
+    if (check.dir === undefined || isDirectory(join(projectDir, check.dir))) return true
+    warn?.(`interlint: skipped ${check.name}: its dir "${check.dir}" does not exist
+`)
+    return false
+  })
+  return { checks }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 const HOOK_EVENTS = ["post-edit", "stop"] as const

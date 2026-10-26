@@ -27,8 +27,8 @@ export interface ChangeTracker {
    */
   lookup(projectDir: string): ProjectChange
   /**
-   * Records that every check of the project passed with its files as they are now, unless an edit touched the
-   * project after `seen` was looked up: that edit came while the checks ran, so they did not see it.
+   * Records that every check of the project passed with its files as they were when `seen` was looked up, unless
+   * an edit touched the project since: a change made while the checks ran keeps the project changed.
    */
   accept(projectDir: string, seen: ProjectChange): void
   /** Records that the agent changed a file of the project. */
@@ -39,6 +39,8 @@ export interface ProjectChange {
   changed: boolean
   /** What the tracker held for the project when it was looked up, so `accept` can tell an edit came since. */
   record: string | undefined
+  /** The project's files when it was looked up, before its checks ran. */
+  fingerprint: string
 }
 
 export interface ReportResult {

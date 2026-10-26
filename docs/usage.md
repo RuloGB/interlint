@@ -124,7 +124,7 @@ With `--changed`, only the checks of the projects that changed since their check
 - an edit check call (`--when edit`, which the agent integrations run after every edit) named one of its files, whatever the file is; or
 - a file was added, changed or removed since its checks last passed, by any means, such as a shell command. Build output (`target/`), `node_modules/` and hidden directories such as `.git/` do not count. A commit does not count either: it leaves the files as they are.
 
-A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project an edit touched while its checks ran. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
+A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project changed while its checks ran, by an edit or any other means: a project is remembered with its files as the checks saw them. A check that writes files outside `target/` therefore makes its project run once more at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
 
 ## Multi-module projects and workspaces
 
@@ -156,7 +156,7 @@ checks:
     when: task-end
 ```
 
-- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory, or one that does not exist, is an error.
+- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` no longer exists, such as a removed Git submodule, is skipped and the other projects still run; `interlint check` by hand says so on stderr.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
