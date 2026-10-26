@@ -13,8 +13,38 @@ export type CommandRunner = (command: string, cwd: string) => Promise<CommandRes
 /** Whether an executable, such as the Maven Daemon, is on the PATH. */
 export type ExecutableLookup = (name: string) => boolean
 
+/** Whether a directory, such as the `dir` of a check, exists. */
+export type DirectoryLookup = (path: string) => boolean
+
 /** Runs `work` while no other Interlint process runs checks on the same project. */
 export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
+
+/**
+ * Remembers which projects changed since their checks last passed, so the agent's task end runs only those.
+ * A project is the directory a check runs in.
+ */
+export interface ChangeTracker {
+  /**
+   * Whether the project changed since its checks last passed, or an edit touched it since. A project seen for the
+   * first time counts as unchanged, and its files as they are become the reference.
+   */
+  lookup(projectDir: string): ProjectChange
+  /**
+   * Records that every check of the project passed with its files as they were when `seen` was looked up, unless
+   * an edit touched the project since: a change made while the checks ran keeps the project changed.
+   */
+  accept(projectDir: string, seen: ProjectChange): void
+  /** Records that the agent changed a file of the project. */
+  touch(projectDir: string): void
+}
+
+export interface ProjectChange {
+  changed: boolean
+  /** What the tracker held for the project when it was looked up, so `accept` can tell an edit came since. */
+  record: string | undefined
+  /** The project's files when it was looked up, before its checks ran. */
+  fingerprint: string
+}
 
 export interface ReportResult {
   /** Whether the run wrote any report at all. */

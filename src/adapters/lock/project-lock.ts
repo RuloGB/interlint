@@ -1,8 +1,9 @@
-import { createHash, randomUUID } from "node:crypto"
-import { linkSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir, userInfo } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import type { ProjectLock } from "../../core/ports.js"
+import { projectKey } from "../state/user-state.js"
 
 const POLL_MS = 100
 /** A lock this old is stale even if its PID is alive again: the OS may have reused the PID. */
@@ -16,15 +17,7 @@ const TAKEOVER_STALE_AFTER_MS = 10 * 1000
  * Every Interlint process of this user for the same project directory uses the same file.
  */
 export function lockFileFor(projectDir: string): string {
-  let dir = resolve(projectDir)
-  try {
-    dir = realpathSync.native(dir)
-  } catch {
-    // Keep the resolved path when the directory does not exist.
-  }
-  if (process.platform === "win32") dir = dir.toLowerCase()
-  const key = createHash("sha256").update(dir).digest("hex").slice(0, 16)
-  return join(tmpdir(), `interlint-locks-${currentUser()}`, `${key}.lock`)
+  return join(tmpdir(), `interlint-locks-${currentUser()}`, `${projectKey(projectDir)}.lock`)
 }
 
 /** Runs `work` while holding the project lock, waiting for any other Interlint process that holds it. */

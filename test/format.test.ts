@@ -77,6 +77,14 @@ describe("formatOutcomes", () => {
     expect(output).toContain("✗ architecture · the command exited 0 but wrote no ArchUnit report\n")
   })
 
+  it("says a check's dir does not exist and how to fix it", () => {
+    const check = { name: "gone/checkstyle", dir: "gone", run: "./mvnw -q checkstyle:check", report: "maven" as const, when: "task-end" as const }
+
+    expect(formatOutcomes([{ check, durationMs: 0, status: "missing-dir" }])).toBe(
+      '✗ gone/checkstyle · its dir "gone" does not exist\n\n  Fix dir in interlint.yaml, or remove the check if the project is gone.\n\nFix these problems before continuing.\n',
+    )
+  })
+
   it("prints a failed command with the tail of its output", () => {
     const output = formatOutcomes([
       {

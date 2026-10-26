@@ -21,6 +21,21 @@ export interface Check {
   run: string
   report: Report
   when: When
+  /**
+   * The project the check runs in: a `/`-separated directory relative to `interlint.yaml`, such as one Maven
+   * project of a workspace. Absent, the check runs where `interlint.yaml` is.
+   */
+  dir?: string
+}
+
+/** Whether `file`, relative to the directory of `interlint.yaml` and `/`-separated, is inside the check's project. */
+export function isInProjectOf(check: Check, file: string): boolean {
+  return check.dir === undefined || file.startsWith(`${check.dir}/`)
+}
+
+/** `path`, relative to the check's project, as a path relative to the directory of `interlint.yaml`. */
+export function fromRoot(check: Check, path: string): string {
+  return check.dir === undefined ? path : `${check.dir}/${path}`
 }
 
 export interface Config {

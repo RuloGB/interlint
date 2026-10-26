@@ -168,6 +168,26 @@ describe("readArchUnitReport", () => {
     expect(readArchUnitReport(projectDir, snapshotReports(projectDir))).toEqual({ found: false, failures: [] })
   })
 
+  it("reads the reports of every module, at any depth, and finds each source in the module that has it", () => {
+    rmSync(reportsDir, { recursive: true })
+    for (const module of ["launcher", "domain", "adapters/rest/api"]) {
+      mkdirSync(join(projectDir, module), { recursive: true })
+      writeFileSync(join(projectDir, module, "pom.xml"), "<project/>")
+    }
+    const sourceDir = join(projectDir, "domain", "src", "main", "java", "com", "myorg", "api", "application", "domain")
+    mkdirSync(sourceDir, { recursive: true })
+    writeFileSync(join(sourceDir, "Project.java"), "class Project {}")
+    const before = snapshotReports(projectDir)
+    const deepReports = join(projectDir, "adapters", "rest", "api", "target", "surefire-reports")
+    mkdirSync(deepReports, { recursive: true })
+    writeFileSync(join(deepReports, "TEST-ArchitectureRulesTest.xml"), fixture("two-rules-violated.xml"))
+
+    const { found, failures } = readArchUnitReport(projectDir, before)
+
+    expect(found).toBe(true)
+    expect(failures[0]?.violations[0]?.path).toBe("domain/src/main/java/com/myorg/api/application/domain/Project.java")
+  })
+
   it("resolves the source file of each violation when it exists", () => {
     const sourceDir = join(projectDir, "src", "main", "java", "com", "myorg", "api", "application", "domain")
     mkdirSync(sourceDir, { recursive: true })

@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, isAbsolute, join, relative, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../core/ports.js"
 import type { RuleFailure, Violation } from "../../core/violation.js"
+import { moduleDirs } from "./modules.js"
 
 const CHECKSTYLE_REPORT = join("target", "checkstyle-result.xml")
 const PMD_REPORT = join("target", "pmd.xml")
@@ -10,10 +11,6 @@ const REPORTS = [CHECKSTYLE_REPORT, PMD_REPORT]
 
 /** The line Maven prints when a Checkstyle or PMD `check` goal fails, with or without -q. */
 const FAILED_CHECK_GOAL = /Failed to execute goal [^:\s]+:maven-(checkstyle|pmd)-plugin:[^:\s]+:check\b/g
-
-/** How many levels of Maven modules below the project are searched for reports. */
-const MAX_MODULE_DEPTH = 3
-const NOT_MODULES = new Set(["src", "target", "node_modules"])
 
 /** Checkstyle severities, most severe first. `ignore` is never shown. */
 const CHECKSTYLE_SEVERITIES = ["error", "warning", "info"]
@@ -166,18 +163,7 @@ function mostSevere(findings: Finding[]): RuleFailure[] {
 }
 
 function reportFiles(projectDir: string): string[] {
-  return moduleDirs(projectDir, 0)
+  return moduleDirs(projectDir)
     .flatMap((dir) => REPORTS.map((report) => join(dir, report)))
     .filter((path) => existsSync(path))
-}
-
-/** The project and the Maven modules below it: the directories with their own `pom.xml`. */
-function moduleDirs(dir: string, depth: number): string[] {
-  if (depth >= MAX_MODULE_DEPTH) return [dir]
-  const modules = readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !NOT_MODULES.has(entry.name))
-    .map((entry) => join(dir, entry.name))
-    .filter((child) => existsSync(join(child, "pom.xml")))
-    .sort()
-  return [dir, ...modules.flatMap((module) => moduleDirs(module, depth + 1))]
 }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { dirname, join, posix, win32 } from "node:path"
+import { dirname, join } from "node:path"
+import { userStateDir } from "../state/user-state.js"
 
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
 export const HOOK_EXIT = { pass: 0, error: 1, block: 2 } as const
@@ -92,18 +92,6 @@ function blockCountFile(sessionId: string): string {
   // Hashed, because the session ID comes from the hook input and goes into a path.
   const name = createHash("sha256").update(sessionId).digest("hex").slice(0, 32)
   return join(userStateDir(), "interlint", "claude-code-stop", name)
-}
-
-/**
- * The user's own directory for state that outlives a process. Not the system temp directory:
- * on a shared machine another user could create Interlint's directory there first.
- * A relative value is ignored, as the XDG spec asks: it would put the count in the hook's working directory.
- */
-export function userStateDir(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
-  const windows = platform === "win32"
-  const configured = windows ? env.LOCALAPPDATA : env.XDG_STATE_HOME
-  if (configured && (windows ? win32 : posix).isAbsolute(configured)) return configured
-  return windows ? join(homedir(), "AppData", "Local") : join(homedir(), ".local", "state")
 }
 
 function readBlockCount(file: string): number {

@@ -20,7 +20,7 @@ The agent waits for these checks, so they give up after 2 minutes. If they canno
 
 ## When a turn ends
 
-The plugin runs `interlint check --when task-end`. If a check fails, it sends the failures back to the session and the agent goes on to fix them.
+The plugin runs `interlint check --when task-end --changed`: the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If a check fails, it sends the failures back to the session and the agent goes on to fix them.
 
 - After 3 failed attempts in a row it reports the failures and lets the task end.
 - If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.

@@ -4,7 +4,8 @@
  * After a tool changes files (`edit`, `write`, `patch`), it runs `interlint check --when edit` for them
  * and appends any failures to that tool's result, so the agent sees them before it repeats the mistake.
  *
- * When an agent turn ends (`session.execution.succeeded`), it runs `interlint check --when task-end`.
+ * When an agent turn ends (`session.execution.succeeded`), it runs `interlint check --when task-end --changed`,
+ * which runs the checks of the projects that changed since their checks last passed.
  * If a check fails, it resumes the session with the formatted failures so the agent fixes them,
  * up to MAX_CONSECUTIVE_BLOCKS times in a row.
  *
@@ -26,7 +27,8 @@ export const DEFAULT_EDIT_TIMEOUT_MS = 2 * 60 * 1000
 const TURN_END = "session.execution.succeeded"
 /** Every report the Interlint CLI prints starts with this mark. */
 const REPORT_MARK = "✗ "
-const TASK_END_ARGS = ["check", "--when", "task-end"]
+/** Only the projects that changed since their checks last passed: a workspace may hold many. */
+const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** The built-in tools that change files. */
 const FILE_TOOLS = new Set(["edit", "write", "patch"])
 const PATCH_FILE_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm

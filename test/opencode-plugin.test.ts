@@ -163,17 +163,17 @@ describe("OpenCode plugin", () => {
     expect(plugin.id).toBe("interlint")
   })
 
-  it("runs the task-end checks in the project directory when an agent turn ends", async () => {
-    const runs: string[] = []
+  it("runs the task-end checks of the projects that changed, in the project directory, when an agent turn ends", async () => {
+    const runs: { directory: string; args?: string[] }[] = []
     const { ctx, done } = fakeContext([{ type: "session.execution.succeeded", data: { sessionID: "s1" } }])
 
-    await createInterlintPlugin(async (directory) => {
-      runs.push(directory)
+    await createInterlintPlugin(async (directory, _command, _timeoutMs, args) => {
+      runs.push({ directory, args })
       return PASSED
     }).setup(ctx)
     await done
 
-    expect(runs).toEqual(["/repo"])
+    expect(runs).toEqual([{ directory: "/repo", args: ["check", "--when", "task-end", "--changed"] }])
   })
 
   it("resumes the session with the failures", async () => {

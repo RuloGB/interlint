@@ -16,6 +16,8 @@ function fakeDeps(options: { mvnd: boolean }) {
     readers: { archunit: PASSING_READER, maven: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
+    changes: { lookup: () => ({ changed: true, record: undefined, fingerprint: "" }), accept: () => {}, touch: () => {} },
+    hasDirectory: () => true,
   }
   return { deps, launched }
 }
@@ -108,6 +110,161 @@ describe("runTaskEndChecks", () => {
     const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
 
     expect(outcome).toMatchObject({ status: "failed", command: "mvnd -q test -Dtest=ArchitectureRulesTest" })
+  })
+})
+
+describe("checks of several projects", () => {
+  const orders: Check = { name: "orders/architecture", dir: "orders", run: "./mvnw -q test", report: "archunit", when: "edit" }
+  const billing: Check = { name: "billing/architecture", dir: "apps/billing", run: "./mvnw -q test", report: "archunit", when: "edit" }
+  const violation = { text: "Order calls OrderEntity", file: "Order.java", line: 3, path: "domain/src/main/java/shop/Order.java" }
+
+  function recordingDeps() {
+    const { deps } = fakeDeps({ mvnd: false })
+    const ran: string[] = []
+    const read: string[] = []
+    deps.run = async (_command, cwd) => (ran.push(cwd), { exitCode: 1, output: "" })
+    deps.readers = {
+      ...deps.readers,
+      archunit: {
+        snapshot: () => new Map(),
+        read: (dir) => (read.push(dir), { found: true, failures: [{ title: "ARCH-01", violations: [{ ...violation }] }] }),
+      },
+    }
+    return { deps, ran, read }
+  }
+
+  it("runs each check in its own directory and reads its reports there", async () => {
+    const { deps, ran, read } = recordingDeps()
+
+    await runTaskEndChecks("/ws", config(orders, billing), deps)
+
+    expect(ran).toEqual(["/ws/orders", "/ws/apps/billing"])
+    expect(read).toEqual(ran)
+  })
+
+  it("gives each violation its path from the directory Interlint started in", async () => {
+    const { deps } = recordingDeps()
+
+    const [outcome] = await runTaskEndChecks("/ws", config(orders), deps)
+
+    expect(outcome).toMatchObject({
+      status: "violations",
+      failures: [{ violations: [{ ...violation, path: "orders/domain/src/main/java/shop/Order.java" }] }],
+    })
+  })
+
+  it("runs at edit only the checks of the project the file belongs to", async () => {
+    const { deps, ran } = recordingDeps()
+    deps.hasExecutable = () => true
+
+    await runEditChecks("/ws", config(orders, billing), ["apps/billing/core/src/main/java/shop/Invoice.java"], deps)
+
+    expect(ran).toEqual(["/ws/apps/billing"])
+  })
+
+  it("runs nothing at edit for a file outside every check's project", async () => {
+    const { deps, ran } = recordingDeps()
+    deps.hasExecutable = () => true
+
+    expect(await runEditChecks("/ws", config(orders, billing), ["web/src/App.java", "ordersx/A.java"], deps)).toEqual([])
+    expect(ran).toEqual([])
+  })
+})
+
+describe("only the projects that changed", () => {
+  const orders: Check = { name: "orders/architecture", dir: "orders", run: "orders arch", report: "archunit", when: "edit" }
+  const ordersStyle: Check = { name: "orders/checkstyle", dir: "orders", run: "orders style", report: "maven", when: "task-end" }
+  const billing: Check = { name: "billing/architecture", dir: "billing", run: "billing arch", report: "archunit", when: "edit" }
+
+  function trackingDeps(changed: string[], failing: string[] = []) {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    const accepted: string[] = []
+    const touched: string[] = []
+    deps.run = async (command) => (launched.push(command), { exitCode: failing.includes(command) ? 1 : 0, output: "" })
+    deps.changes = {
+      lookup: (dir) => ({ changed: changed.includes(dir), record: `record of ${dir}`, fingerprint: "" }),
+      accept: (dir, seen) => void accepted.push(seen.record === `record of ${dir}` ? dir : `${dir} (wrong record)`),
+      touch: (dir) => void touched.push(dir),
+    }
+    return { deps, launched, accepted, touched }
+  }
+
+  it("runs at task end only the checks of the projects that changed", async () => {
+    const { deps, launched } = trackingDeps(["/ws/billing"])
+
+    await runTaskEndChecks("/ws", config(orders, ordersStyle, billing), deps, { changedOnly: true })
+
+    expect(launched).toEqual(["billing arch"])
+  })
+
+  it("runs nothing at task end when no project changed", async () => {
+    const { deps, launched } = trackingDeps([])
+
+    expect(await runTaskEndChecks("/ws", config(orders, billing), deps, { changedOnly: true })).toEqual([])
+    expect(launched).toEqual([])
+  })
+
+  it("remembers a project as passing only when every one of its checks passed", async () => {
+    const { deps, launched, accepted } = trackingDeps(["/ws/orders", "/ws/billing"], ["orders style"])
+
+    await runTaskEndChecks("/ws", config(orders, ordersStyle, billing), deps, { changedOnly: true })
+
+    expect(launched).toEqual(["orders arch", "orders style", "billing arch"])
+    expect(accepted).toEqual(["/ws/billing"])
+  })
+
+  it("runs every check without changedOnly, and remembers the projects that passed", async () => {
+    const { deps, launched, accepted } = trackingDeps([])
+
+    await runTaskEndChecks("/ws", config(orders, ordersStyle, billing), deps)
+
+    expect(launched).toEqual(["orders arch", "orders style", "billing arch"])
+    expect(accepted).toEqual(["/ws/orders", "/ws/billing"])
+  })
+
+  it("treats a project without dir as the directory of interlint.yaml", async () => {
+    const { deps, launched, accepted } = trackingDeps(["/repo"])
+
+    await runTaskEndChecks("/repo", config(scriptTaskEnd), deps, { changedOnly: true })
+
+    expect(launched).toEqual(["node slow.mjs"])
+    expect(accepted).toEqual(["/repo"])
+  })
+
+  it("fails at task end a check whose dir does not exist, without running or tracking it, and runs the rest", async () => {
+    const { deps, launched, accepted } = trackingDeps(["/ws/billing"])
+    const looked: string[] = []
+    const lookup = deps.changes.lookup
+    deps.changes.lookup = (dir) => (looked.push(dir), lookup(dir))
+    deps.hasDirectory = (dir) => dir !== "/ws/orders"
+
+    const outcomes = await runTaskEndChecks("/ws", config(orders, billing), deps, { changedOnly: true })
+
+    expect(outcomes.map((outcome) => [outcome.check.name, outcome.status])).toEqual([
+      ["orders/architecture", "missing-dir"],
+      ["billing/architecture", "passed"],
+    ])
+    expect(launched).toEqual(["billing arch"])
+    expect(looked).toEqual(["/ws/billing"])
+    expect(accepted).toEqual(["/ws/billing"])
+  })
+
+  it("runs nothing at edit for a check whose dir does not exist", async () => {
+    const { deps, launched, touched } = trackingDeps([])
+    deps.hasDirectory = () => false
+    deps.hasExecutable = () => true
+
+    expect(await runEditChecks("/ws", config(orders), ["orders/src/A.java"], deps)).toEqual([])
+    expect([launched, touched]).toEqual([[], []])
+  })
+
+  it("marks at edit the project of every changed file, even one no edit check runs for", async () => {
+    const { deps, launched, touched } = trackingDeps([])
+
+    await runEditChecks("/ws", config(orders, billing), ["billing/README.md", "orders/pom.xml", "web/App.java"], deps)
+
+    expect(touched).toEqual(["/ws/orders", "/ws/billing"])
+    expect(launched).toEqual([])
   })
 })
 

@@ -738,3 +738,153 @@ describe("interlint init with Checkstyle and PMD", () => {
     )
   })
 })
+
+describe("interlint init in a multi-module project", () => {
+  const managed = (artifactId: string, executionId: string) =>
+    `        <plugin>\n          <artifactId>${artifactId}</artifactId>\n          <executions>\n            <execution>\n              <id>${executionId}</id>\n              <goals>\n                <goal>check</goal>\n              </goals>\n            </execution>\n          </executions>\n        </plugin>\n`
+  const activated = (artifactId: string) => `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
+
+  /** A parent POM that manages plugins for its modules, and a POM per module that turns some of them on. */
+  function reactor(dir: string, options: { managed: string[]; modules: Record<string, string[]>; wrapper?: boolean }) {
+    const at = (path: string) => (dir === "" ? path : `${dir}/${path}`)
+    const modules = Object.keys(options.modules)
+    writeFile(
+      at("pom.xml"),
+      `<project>\n  <packaging>pom</packaging>\n  <modules>\n${modules.map((module) => `    <module>${module}</module>\n`).join("")}  </modules>\n  <build>\n    <pluginManagement>\n      <plugins>\n${options.managed.join("")}      </plugins>\n    </pluginManagement>\n  </build>\n</project>\n`,
+    )
+    for (const [module, plugins] of Object.entries(options.modules)) {
+      writeFile(at(`${module}/pom.xml`), `<project>\n  <build>\n    <plugins>\n${plugins.map(activated).join("")}    </plugins>\n  </build>\n</project>\n`)
+    }
+    if (options.wrapper !== false) writeFile(at("mvnw"), "")
+  }
+
+  const BOTH = ["maven-checkstyle-plugin", "maven-pmd-plugin"]
+  const MANAGED_BOTH = [managed("maven-checkstyle-plugin", "style"), managed("maven-pmd-plugin", "pmd")]
+
+  it("finds the @ArchTest classes of a module and runs only that module and the ones it depends on", async () => {
+    reactor("", { managed: MANAGED_BOTH, modules: { domain: BOTH, "adapters/rest": BOTH, launcher: BOTH } })
+    archTest("launcher/src/test/java/com/acme/ArchitectureRulesTest.java")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).checks).toEqual([
+      {
+        name: "architecture",
+        run: "./mvnw -q test -pl launcher -am -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
+        report: "archunit",
+        when: "edit",
+      },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "task-end" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "task-end" },
+    ])
+  })
+
+  it("names every module that has @ArchTest classes", async () => {
+    reactor("", { managed: [], modules: { domain: [], "adapters/rest": [], launcher: [] } })
+    archTest("launcher/src/test/java/com/acme/LauncherRulesTest.java")
+    archTest("adapters/rest/src/test/java/com/acme/RestRulesTest.java")
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks[0]?.run).toBe(
+      "./mvnw -q test -pl adapters/rest,launcher -am -Dtest=LauncherRulesTest,RestRulesTest -Dsurefire.failIfNoSpecifiedTests=false",
+    )
+  })
+
+  it("leaves out a plugin that only pluginManagement declares and no module turns on", async () => {
+    reactor("", { managed: MANAGED_BOTH, modules: { domain: ["maven-checkstyle-plugin"], launcher: [] } })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["checkstyle"])
+  })
+
+  it("counts a plugin a module turns on without the parent managing it", async () => {
+    reactor("", { managed: [], modules: { domain: ["maven-pmd-plugin"] } })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual(["./mvnw -q compile pmd:check -Dcheckstyle.skip"])
+  })
+
+  describe("from the root of a workspace without pom.xml", () => {
+    beforeEach(() => {
+      reactor("orders", { managed: MANAGED_BOTH, modules: { domain: BOTH, launcher: BOTH } })
+      archTest("orders/launcher/src/test/java/com/acme/OrdersRulesTest.java")
+      reactor("apps/billing", { managed: MANAGED_BOTH, modules: { core: ["maven-checkstyle-plugin"] }, wrapper: false })
+      writeFile("web/package.json", "{}")
+      writeFile("web/src/App.java", "class App {}")
+      writeFile("docs/README.md", "# Docs")
+    })
+
+    it("writes the checks of every Maven project, run in its directory and named after it", async () => {
+      expect((await run("init")).exitCode).toBe(0)
+
+      expect(loadConfig(projectDir).checks).toEqual([
+        { name: "apps/billing/checkstyle", dir: "apps/billing", run: "mvn -q checkstyle:check@style", report: "maven", when: "task-end" },
+        {
+          name: "orders/architecture",
+          dir: "orders",
+          run: "./mvnw -q test -pl launcher -am -Dtest=OrdersRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
+          report: "archunit",
+          when: "edit",
+        },
+        { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "task-end" },
+        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "task-end" },
+      ])
+      expect(readConfig()).toContain("  - name: orders/architecture\n    dir: orders\n    run: ")
+    })
+
+    it("lists each project with what it detected", async () => {
+      writeFile("legacy/pom.xml", "<project/>")
+      installMavenDaemon()
+
+      const { stdout } = await run("init")
+
+      expect(stdout).toBe(
+        [
+          "Detected 3 Maven projects:",
+          "  apps/billing",
+          "    ArchUnit tests: none",
+          "    Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+          "    Maven: mvn (no Maven Wrapper)",
+          "  legacy",
+          "    nothing to check",
+          "  orders",
+          "    ArchUnit tests: OrdersRulesTest (in launcher)",
+          "    Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+          "    PMD: maven-pmd-plugin in pom.xml, checked at task end",
+          "    Maven: ./mvnw (Maven Wrapper)",
+          "  mvnd: on the PATH, so the architecture checks run after each edit",
+          "",
+          "Wrote:",
+          "  interlint.yaml",
+          "",
+        ].join("\n"),
+      )
+    })
+  })
+
+  it("treats the root as the project, as before, when the workspace holds no Maven project", async () => {
+    writeFile("web/package.json", "{}")
+
+    expect(await run("init")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
+    })
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+  })
+
+  it("says so and writes nothing when no Maven project of the workspace has anything to check", async () => {
+    writeFile("orders/pom.xml", "<project/>")
+
+    expect(await run("init")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin or maven-pmd-plugin in its build (found: orders). Nothing was written.\n",
+    })
+  })
+})

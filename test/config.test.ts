@@ -62,6 +62,44 @@ checks:
     expect(loadConfig(projectDir).checks[0]?.report).toBe("maven")
   })
 
+  it("reads the directory a check runs in, relative to interlint.yaml, whether it exists or not", () => {
+    writeConfig(`
+checks:
+  - name: orders/architecture
+    dir: orders
+    run: ./mvnw -q test
+    report: archunit
+    when: edit
+  - name: billing/checkstyle
+    dir: ./apps\\billing/
+    run: ./mvnw -q checkstyle:check
+    report: maven
+    when: task-end
+  - name: root
+    dir: .
+    run: ./mvnw -q test
+    report: archunit
+    when: task-end
+`)
+
+    expect(loadConfig(projectDir).checks.map((check) => check.dir)).toEqual(["orders", "apps/billing", undefined])
+  })
+
+  it.each(["../orders", "orders/../../x", "/orders", "C:/orders", ""])("rejects the directory %j", (dir) => {
+    writeConfig(`
+checks:
+  - name: architecture
+    dir: "${dir}"
+    run: ./mvnw test
+    report: archunit
+    when: edit
+`)
+
+    expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
+      `interlint.yaml: checks[0].dir must be a directory inside the project, relative to interlint.yaml (got "${dir}")`,
+    )
+  })
+
   it("fails when interlint.yaml does not exist", () => {
     expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
       `interlint.yaml not found in ${projectDir}`,
