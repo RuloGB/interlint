@@ -33,6 +33,11 @@ export const MAX_OUTPUT_CHARS = 64 * 1024
 export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
 /** The agent waits for an edit check before it gets the tool result, so a stuck one gives up sooner. */
 export const DEFAULT_EDIT_TIMEOUT_MS = 2 * 60 * 1000
+/**
+ * How long Interlint waits for a subagent: for the turn it resumed to end, and before the main agent's checks run
+ * while that subagent has unchecked changes. Past it, the subagent's failures are the main agent's.
+ */
+export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000
 
 const TURN_START = "session.execution.started"
 type TurnEnd = "succeeded" | "failed" | "interrupted"
@@ -43,6 +48,7 @@ const TURN_ENDS = new Map<string, TurnEnd>([
 ])
 /** The built-in tool that runs a subagent. Its result says whether the subagent finished or runs in the background. */
 const SUBAGENT_TOOL = "subagent"
+const SESSION_DELETED = "session.deleted"
 /** Every report the Interlint CLI prints starts with this mark. */
 const REPORT_MARK = "✗ "
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
@@ -195,7 +201,7 @@ function withNote(result: ToolResult | undefined, text: string): ToolResult {
 /** The part of the OpenCode V2 plugin context this adapter uses. */
 interface PluginContext {
   location: { directory: string }
-  options?: { command?: unknown; timeoutMs?: unknown; editTimeoutMs?: unknown }
+  options?: { command?: unknown; timeoutMs?: unknown; editTimeoutMs?: unknown; subagentTimeoutMs?: unknown }
   session: {
     /** A forked session has no `parentID`: only the sessions a subagent runs in have one. */
     get(input: { sessionID: string }): Promise<{ parentID?: string }>
@@ -228,6 +234,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const timeoutMs = typeof ctx.options?.timeoutMs === "number" ? ctx.options.timeoutMs : DEFAULT_TIMEOUT_MS
       const editTimeoutMs =
         typeof ctx.options?.editTimeoutMs === "number" ? ctx.options.editTimeoutMs : DEFAULT_EDIT_TIMEOUT_MS
+      const subagentTimeoutMs =
+        typeof ctx.options?.subagentTimeoutMs === "number" ? ctx.options.subagentTimeoutMs : DEFAULT_SUBAGENT_TIMEOUT_MS
       const directory = ctx.location.directory
       const gate = new TaskEndGate()
       const running = new Set<string>()
@@ -240,6 +248,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const resumed = new Map<string, { started: boolean; resolve: (end: TurnEnd) => void }>()
       /** Main sessions whose turn end waited for a subagent with unchecked changes. */
       const deferred = new Set<string>()
+      /** Ends the wait of a deferred main session after subagentTimeoutMs, per main session. */
+      const deferTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
       const parentOf = async (sessionID: string) => {
         if (parents.has(sessionID)) return parents.get(sessionID)
@@ -292,6 +302,43 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         }
       }
 
+      /**
+       * Bounds how long a main session waits for its subagents. A subagent that edited files and then never ended
+       * its turn would otherwise keep the main agent's checks from running at all: its changes become the main
+       * agent's. A subagent still in its fix loop is left alone, since that loop has its own limit.
+       */
+      const armDeferTimer = (root: string) => {
+        if (deferTimers.has(root)) return
+        const timer = setTimeout(() => {
+          deferTimers.delete(root)
+          void (async () => {
+            if (!deferred.has(root)) return
+            for (const sessionID of [...written.keys()]) {
+              if (sessionID !== root && !settling.has(sessionID) && (await rootOf(sessionID)) === root) {
+                written.delete(sessionID)
+              }
+            }
+            await flushDeferred()
+          })().catch((error) => console.error("[interlint]", error))
+        }, subagentTimeoutMs)
+        timer.unref?.()
+        deferTimers.set(root, timer)
+      }
+
+      /** The end of the turn Interlint resumed, or "interrupted" when it does not come within subagentTimeoutMs. */
+      const resumedTurnEnd = (sessionID: string, turnEnd: Promise<TurnEnd>) => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<TurnEnd>((resolve) => {
+          timer = setTimeout(() => {
+            resumed.delete(sessionID)
+            console.error("[interlint] subagent session", sessionID, "did not end its turn in time")
+            resolve("interrupted")
+          }, subagentTimeoutMs)
+          timer.unref?.()
+        })
+        return Promise.race([turnEnd, timeout]).finally(() => clearTimeout(timer))
+      }
+
       /** Runs the checks of a subagent's changes and resumes it with the failures until they pass. */
       const fixLoop = async (sessionID: string): Promise<Settled> => {
         for (let attempt = 1; ; attempt++) {
@@ -313,7 +360,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
             resumed.delete(sessionID)
             throw error
           }
-          if ((await turnEnd) !== "succeeded") return { kind: "stopped", output: run.output }
+          if ((await resumedTurnEnd(sessionID, turnEnd)) !== "succeeded") return { kind: "stopped", output: run.output }
         }
       }
 
@@ -359,7 +406,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         // The failures of a subagent's changes are that subagent's to fix first. Marked before looking, so a subagent
         // that settles meanwhile finds it; if that flush took it, the flush runs the checks instead.
         deferred.add(sessionID)
-        if ((await hasUncheckedSubagent(sessionID)) || !deferred.delete(sessionID)) return
+        if (await hasUncheckedSubagent(sessionID)) return armDeferTimer(sessionID)
+        if (!deferred.delete(sessionID)) return
         running.add(sessionID)
         try {
           const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS))
@@ -379,6 +427,22 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const onTurnStopped = async (sessionID: string) => {
         if (!(await parentOf(sessionID)) || settling.has(sessionID)) return
         await handOver(sessionID)
+        await flushDeferred()
+      }
+
+      /**
+       * A deleted session never ends another turn. Its parent answers for its unchecked changes; when the parent
+       * cannot be found any more, the main agent's checks, which cover every changed project, do.
+       */
+      const onDeleted = async (sessionID: string) => {
+        const waiting = resumed.get(sessionID)
+        if (waiting) {
+          resumed.delete(sessionID)
+          return waiting.resolve("interrupted")
+        }
+        if (settling.has(sessionID)) return
+        if (parents.get(sessionID) !== undefined) await handOver(sessionID)
+        else written.delete(sessionID)
         await flushDeferred()
       }
 
@@ -417,6 +481,10 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           const sessionID = event.data?.sessionID
           if (!sessionID) continue
+          if (event.type === SESSION_DELETED) {
+            onDeleted(sessionID).catch((error) => console.error("[interlint]", error))
+            continue
+          }
           const waiting = resumed.get(sessionID)
           if (event.type === TURN_START) {
             if (waiting) waiting.started = true
@@ -441,6 +509,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
 
       return () => {
         controller.abort()
+        for (const timer of deferTimers.values()) clearTimeout(timer)
         void afterTool.dispose()
       }
     },

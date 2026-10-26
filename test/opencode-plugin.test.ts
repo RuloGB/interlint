@@ -491,6 +491,52 @@ describe("OpenCode plugin with subagents", () => {
     expect(runs.at(-1)).toEqual(TASK_END)
   })
 
+  it("stops waiting for a resumed subagent whose turn never ends, and hands its failures to the main agent", async () => {
+    const { run } = checksGiving(VIOLATIONS)
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    ctx.options = { subagentTimeoutMs: 20 }
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+
+    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+
+    expect(answer.result?.content).toBe(
+      `${ANSWER}\n\nInterlint: the subagent stopped before the checks passed, so they are yours to fix.\n\n${VIOLATIONS.output}`,
+    )
+  })
+
+  it("runs the main agent's checks at once when a subagent with unchecked changes is deleted", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "main")
+
+    emit("session.deleted", "writer")
+    await settled()
+
+    expect(runs).toEqual([TASK_END])
+  })
+
+  it("runs the main agent's checks after waiting too long for a subagent that never ends its turn", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    ctx.options = { subagentTimeoutMs: 20 }
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "main")
+    await settled()
+    expect(runs).toEqual([])
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(runs).toEqual([TASK_END])
+  })
+
   it("leaves the answer of a background subagent alone", async () => {
     const { runs, run } = checksGiving()
     const { ctx, done, afterTool } = fakeContext([], SESSIONS)

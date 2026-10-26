@@ -34,5 +34,6 @@ The failures go to the agent that wrote the code. The agent that delegated the w
 - The main agent waits for a foreground subagent's answer until its checks pass, and the answer says whether the subagent had to fix them. If the subagent still fails after 3 attempts, or stops before they pass, the answer carries the failures to the main agent, which answers for those files from then on.
 - A subagent in the background has already answered when its turn ends, so the plugin sends its parent a message with the failures it could not fix.
 - The main agent's turn end still runs the checks of every changed project, for the files it changed itself, by any means. While one of its subagents has changes whose checks have not passed, it waits for that subagent first.
+- Neither wait lasts more than 30 minutes. A subagent whose fix turn has not ended by then counts as stopped, and the main agent's checks run without waiting for it any longer. A subagent whose session is deleted stops at once.
 
 Two agents that change the same project share its failures: Interlint checks projects, not lines.
