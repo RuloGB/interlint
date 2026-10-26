@@ -13,6 +13,15 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
         [`✗ ${outcome.check.name} · ${failure.title}`, "", ...violationLines(failure.violations)].join("\n"),
       )
     }
+    if (outcome.status === "missing-dir") {
+      return [
+        [
+          `✗ ${outcome.check.name} · its dir "${outcome.check.dir}" does not exist`,
+          "",
+          "  Fix dir in interlint.yaml, or remove the check if the project is gone.",
+        ].join("\n"),
+      ]
+    }
     if (outcome.status === "failed") {
       const tool = REPORT_TOOLS[outcome.check.report]
       return [

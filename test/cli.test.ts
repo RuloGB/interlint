@@ -289,25 +289,42 @@ describe("interlint check --when task-end --changed", () => {
     expect((await run("check", "--when", "task-end", "--changed")).exitCode).toBe(1)
   })
 
-  it("runs the other projects and says which check it skipped when a dir no longer exists", async () => {
-    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
-    writeProjects(gone, writeProject("orders", 1))
+  const MISSING = [
+    '✗ gone/checkstyle · its dir "gone" does not exist',
+    "",
+    "  Fix dir in interlint.yaml, or remove the check if the project is gone.",
+  ].join("\n")
+  const MISSING_REPORT = `${MISSING}\n\nFix these problems before continuing.\n`
 
-    expect(await run("check")).toMatchObject({
+  it("runs the other projects and fails the check whose dir does not exist", async () => {
+    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
+    writeProjects(gone, writeProject("orders", 0))
+
+    expect(await run("check")).toEqual({
       exitCode: 1,
-      stderr: 'interlint: skipped gone/checkstyle: its dir "gone" does not exist\n',
+      stdout: MISSING_REPORT,
+      stderr: "",
     })
     expect(ran("orders")).toBe(true)
   })
 
-  it("skips a check whose dir no longer exists quietly on the agent's paths, whose output the agent reads", async () => {
+  it("fails the agent's task end with the missing dir even when no project changed, so a typo is never silent", async () => {
     const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
     writeProjects(gone, writeProject("orders", 0))
-    await run("check", "--when", "edit", "--file", "orders/pom.xml")
+
+    expect(await run("check", "--when", "task-end", "--changed")).toEqual({
+      exitCode: 1,
+      stdout: MISSING_REPORT,
+      stderr: "",
+    })
+    expect(ran("orders")).toBe(false)
+  })
+
+  it("leaves the missing dir to task end after an edit, so it does not block every edit", async () => {
+    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
+    writeProjects(gone, writeProject("orders", 0))
 
     expect(await run("check", "--when", "edit", "--file", "gone/A.java")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    expect(await run("check", "--when", "task-end", "--changed")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    expect(ran("orders")).toBe(true)
   })
 
   it("is only valid with --when task-end", async () => {

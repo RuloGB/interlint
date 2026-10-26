@@ -17,6 +17,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
     changes: { lookup: () => ({ changed: true, record: undefined, fingerprint: "" }), accept: () => {}, touch: () => {} },
+    hasDirectory: () => true,
   }
   return { deps, launched }
 }
@@ -228,6 +229,33 @@ describe("only the projects that changed", () => {
 
     expect(launched).toEqual(["node slow.mjs"])
     expect(accepted).toEqual(["/repo"])
+  })
+
+  it("fails at task end a check whose dir does not exist, without running or tracking it, and runs the rest", async () => {
+    const { deps, launched, accepted } = trackingDeps(["/ws/billing"])
+    const looked: string[] = []
+    const lookup = deps.changes.lookup
+    deps.changes.lookup = (dir) => (looked.push(dir), lookup(dir))
+    deps.hasDirectory = (dir) => dir !== "/ws/orders"
+
+    const outcomes = await runTaskEndChecks("/ws", config(orders, billing), deps, { changedOnly: true })
+
+    expect(outcomes.map((outcome) => [outcome.check.name, outcome.status])).toEqual([
+      ["orders/architecture", "missing-dir"],
+      ["billing/architecture", "passed"],
+    ])
+    expect(launched).toEqual(["billing arch"])
+    expect(looked).toEqual(["/ws/billing"])
+    expect(accepted).toEqual(["/ws/billing"])
+  })
+
+  it("runs nothing at edit for a check whose dir does not exist", async () => {
+    const { deps, launched, touched } = trackingDeps([])
+    deps.hasDirectory = () => false
+    deps.hasExecutable = () => true
+
+    expect(await runEditChecks("/ws", config(orders), ["orders/src/A.java"], deps)).toEqual([])
+    expect([launched, touched]).toEqual([[], []])
   })
 
   it("marks at edit the project of every changed file, even one no edit check runs for", async () => {

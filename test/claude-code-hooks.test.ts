@@ -162,6 +162,18 @@ describe("interlint hook claude-code stop", () => {
     expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
   })
 
+  it("blocks with a check whose dir does not exist, so a typo in dir is never silent", async () => {
+    writeFileSync(
+      join(projectDir, "interlint.yaml"),
+      "checks:\n  - name: odrers/architecture\n    dir: odrers\n    run: node check.mjs\n    report: archunit\n    when: edit\n",
+    )
+
+    const { exitCode, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\n✗ odrers\/architecture · its dir "odrers" does not exist/)
+  })
+
   it("runs the checks again once a file changed after they passed, whoever changed it", async () => {
     writeCheck("task-end", PASSING_XML)
     await agentEdits()

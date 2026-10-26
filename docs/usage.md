@@ -156,7 +156,7 @@ checks:
     when: task-end
 ```
 
-- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` no longer exists, such as a removed Git submodule, is skipped and the other projects still run; `interlint check` by hand says so on stderr.
+- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` does not exist, a typo or a removed Git submodule, fails at every task end with `✗ <check> · its dir "<dir>" does not exist`, changed or not, so the agent and you always see it; the other projects still run. After an edit it is left to task end, so it does not block every edit.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
