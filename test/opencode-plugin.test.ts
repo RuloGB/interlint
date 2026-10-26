@@ -114,24 +114,40 @@ describe("runInterlint", () => {
   })
 })
 
-/** A fake OpenCode V2 plugin context that records what the plugin sends to the session. */
-function fakeContext(events: { type: string; data?: { sessionID?: string } }[] = []) {
+type PluginEvent = { type: string; data?: { sessionID?: string } }
+
+/**
+ * A fake OpenCode V2 plugin context that records what the plugin sends to the session.
+ * `events` are delivered when the plugin subscribes; `emit` delivers more later, the way turns go on.
+ * `sessions` maps a session ID to its parent, for the sessions a subagent runs in.
+ */
+function fakeContext(events: PluginEvent[] = [], sessions: Record<string, { parentID?: string }> = {}) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
   const hooks = new Map<string, (event: ToolEvent) => Promise<void> | void>()
+  const queue = [...events]
+  let wake: (() => void) | undefined
   let finished!: () => void
+  /** Resolves once the plugin got every event delivered so far. */
   const done = new Promise<void>((resolve) => (finished = resolve))
   const ctx = {
     location: { directory: "/repo" },
     options: {} as Record<string, unknown>,
     session: {
+      get: async (input: { sessionID: string }) => {
+        if (input.sessionID === "missing") throw new Error("Session not found")
+        return { id: input.sessionID, ...sessions[input.sessionID] }
+      },
       synthetic: async (input: { sessionID: string; text: string; resume?: boolean }) => {
         sent.push({ sessionID: input.sessionID, text: input.text, resume: input.resume })
       },
     },
     event: {
       subscribe: async function* () {
-        for (const event of events) yield event
-        finished()
+        for (;;) {
+          while (queue.length > 0) yield queue.shift()!
+          finished()
+          await new Promise<void>((resolve) => (wake = resolve))
+        }
       },
     },
     tool: {
@@ -141,22 +157,70 @@ function fakeContext(events: { type: string; data?: { sessionID?: string } }[] =
       },
     },
   }
+  const emit = (type: string, sessionID: string) => {
+    queue.push({ type, data: { sessionID } })
+    wake?.()
+  }
   /** Calls the plugin's `execute.after` hook the way OpenCode does after a tool call, and returns the event. */
-  const afterTool = async (tool: string, input: unknown, status: "completed" | "error" = "completed") => {
+  const afterTool = async (
+    tool: string,
+    input: unknown,
+    status: "completed" | "error" = "completed",
+    { sessionID = "s1", result = { content: [{ type: "text", text: "Edited the file" }] } }: Partial<ToolCall> = {},
+  ) => {
     const event: ToolEvent =
-      status === "completed"
-        ? { tool, input, status, result: { content: [{ type: "text", text: "Edited the file" }] } }
-        : { tool, input, status, error: new Error("failed") }
+      status === "completed" ? { tool, sessionID, input, status, result } : { tool, sessionID, input, status, error: new Error("failed") }
     await hooks.get("execute.after")?.(event)
     return event
   }
-  return { ctx, sent, done, afterTool }
+  return { ctx, sent, done, emit, afterTool }
 }
 
-type ToolEvent = { tool: string; input: unknown } & (
-  | { status: "completed"; result: { content?: { type: string; text?: string }[] } }
-  | { status: "error"; error: unknown }
-)
+interface ToolCall {
+  sessionID: string
+  result: { content?: string | { type: string; text?: string }[]; metadata?: Record<string, unknown> }
+}
+
+/** A tool call as `execute.after` gets it: `result` when it completed, `error` when it failed. */
+interface ToolEvent {
+  tool: string
+  sessionID: string
+  input: unknown
+  status: "completed" | "error"
+  result?: ToolCall["result"]
+  error?: unknown
+}
+
+/** Lets the plugin finish everything it can do without a new event. */
+const settled = () => new Promise((resolve) => setImmediate(resolve))
+
+const SUCCEEDED = "session.execution.succeeded"
+const ANSWER = '<subagent sessionID="writer" state="completed">\nDone\n</subagent>'
+/** What the `subagent` tool returns to the main agent when a foreground subagent finished. */
+const subagentAnswer = { content: ANSWER, metadata: { sessionID: "writer", status: "completed" } }
+
+/** Fake checks: edit checks pass, task-end ones give `taskEnd` in turn, then pass. Records the task-end arguments. */
+function checksGiving(...taskEnd: CheckRun[]) {
+  const runs: string[][] = []
+  const run = async (_directory: string, _command: string, _timeoutMs: number, args: string[] = []) => {
+    if (args[2] === "edit") return PASSED
+    runs.push(args)
+    return taskEnd.shift() ?? PASSED
+  }
+  return { runs, run }
+}
+
+const TASK_END = ["check", "--when", "task-end", "--changed"]
+const WRITER_FILE = "orders/src/main/java/shop/Order.java"
+const WRITER_RUN = [...TASK_END, "--file", WRITER_FILE]
+const SESSIONS = { writer: { parentID: "main" }, reviewer: { parentID: "main" } }
+
+/** Makes the plugin see the subagent `writer` resume after a synthetic message and end its turn again. */
+async function writerTurn(emit: (type: string, sessionID: string) => void) {
+  emit("session.execution.started", "writer")
+  emit(SUCCEEDED, "writer")
+  await settled()
+}
 
 describe("OpenCode plugin", () => {
   it("has a stable id", () => {
@@ -165,27 +229,36 @@ describe("OpenCode plugin", () => {
 
   it("runs the task-end checks of the projects that changed, in the project directory, when an agent turn ends", async () => {
     const runs: { directory: string; args?: string[] }[] = []
-    const { ctx, done } = fakeContext([{ type: "session.execution.succeeded", data: { sessionID: "s1" } }])
+    const { ctx, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
 
     await createInterlintPlugin(async (directory, _command, _timeoutMs, args) => {
       runs.push({ directory, args })
       return PASSED
     }).setup(ctx)
     await done
+    await settled()
 
-    expect(runs).toEqual([{ directory: "/repo", args: ["check", "--when", "task-end", "--changed"] }])
+    expect(runs).toEqual([{ directory: "/repo", args: TASK_END }])
   })
 
   it("resumes the session with the failures", async () => {
-    const { ctx, sent, done } = fakeContext([{ type: "session.execution.succeeded", data: { sessionID: "s1" } }])
+    const { ctx, sent, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
 
     await createInterlintPlugin(async () => VIOLATIONS).setup(ctx)
     await done
-    await new Promise((resolve) => setImmediate(resolve))
+    await settled()
 
-    expect(sent).toEqual([
-      { sessionID: "s1", text: expect.stringContaining("ARCH-01: rule"), resume: true },
-    ])
+    expect(sent).toEqual([{ sessionID: "s1", text: expect.stringContaining("ARCH-01: rule"), resume: true }])
+  })
+
+  it("still runs the task-end checks when it cannot tell whether the session is a subagent", async () => {
+    const { ctx, sent, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "missing" } }])
+
+    await createInterlintPlugin(async () => VIOLATIONS).setup(ctx)
+    await done
+    await settled()
+
+    expect(sent).toEqual([{ sessionID: "missing", text: expect.stringContaining("ARCH-01: rule"), resume: true }])
   })
 
   it("ignores other events", async () => {
@@ -198,6 +271,195 @@ describe("OpenCode plugin", () => {
     }).setup(ctx)
     await done
 
+    expect(runs).toEqual([])
+  })
+})
+
+describe("OpenCode plugin with subagents", () => {
+  it("does not run the task-end checks when a subagent that changed no file ends its turn", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done, emit } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+
+    emit(SUCCEEDED, "reviewer")
+    await settled()
+
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it("runs the checks of the projects a subagent changed when its turn ends, and resumes it with the failures", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    expect(runs).toEqual([WRITER_RUN])
+    expect(sent).toEqual([
+      {
+        sessionID: "writer",
+        text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${VIOLATIONS.output}`,
+        resume: true,
+      },
+    ])
+  })
+
+  it("holds a foreground subagent's answer until its checks pass, and tells the main agent it fixed them", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+
+    let answered = false
+    const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+    void answer.then(() => (answered = true))
+    await settled()
+    expect(answered).toBe(false)
+
+    await writerTurn(emit)
+
+    expect((await answer).result).toEqual({
+      ...subagentAnswer,
+      content: `${ANSWER}\n\nInterlint: the checks failed after this answer, so the subagent went on to fix them. They pass now.`,
+    })
+    expect(runs).toEqual([WRITER_RUN, WRITER_RUN])
+    expect(sent.map((message) => message.sessionID)).toEqual(["writer"])
+  })
+
+  it("checks a foreground subagent once even when its answer comes before its turn-end event", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+    await settled()
+    emit(SUCCEEDED, "writer")
+    await settled()
+    await writerTurn(emit)
+
+    expect((await answer).result?.content).toContain("They pass now.")
+    expect(runs).toEqual([WRITER_RUN, WRITER_RUN])
+  })
+
+  it("leaves a foreground subagent's answer as it is when its checks pass", async () => {
+    const { run } = checksGiving()
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+
+    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+
+    expect(answer.result).toEqual(subagentAnswer)
+  })
+
+  it("hands the failures to the main agent in the answer when the subagent cannot fix them", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS, VIOLATIONS, VIOLATIONS, VIOLATIONS)
+    const { ctx, sent, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+
+    const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+    for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) await writerTurn(emit)
+
+    expect((await answer).result?.content).toBe(
+      `${ANSWER}\n\nInterlint: the subagent could not make the checks pass after ${MAX_CONSECUTIVE_BLOCKS} attempts, so they are yours to fix.\n\n${VIOLATIONS.output}`,
+    )
+    expect(runs).toHaveLength(MAX_CONSECUTIVE_BLOCKS + 1)
+    expect(sent.map((message) => message.sessionID)).toEqual(["writer", "writer", "writer"])
+  })
+
+  it("sends a background subagent's failures to its parent when the subagent cannot fix them", async () => {
+    const { run } = checksGiving(VIOLATIONS, VIOLATIONS, VIOLATIONS, VIOLATIONS)
+    const { ctx, sent, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) await writerTurn(emit)
+
+    expect(sent.at(-1)).toEqual({
+      sessionID: "main",
+      text: `Interlint: subagent session writer could not make the checks pass after ${MAX_CONSECUTIVE_BLOCKS} attempts, so they are yours to fix.\n\n${VIOLATIONS.output}`,
+      resume: true,
+    })
+  })
+
+  it("tells the parent without resuming it when a subagent's checks cannot run", async () => {
+    const broken = { exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" }
+    const { run } = checksGiving(broken)
+    const { ctx, sent, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    expect(sent).toEqual([
+      {
+        sessionID: "main",
+        text: `Interlint could not run the checks of subagent session writer (exit code 2).\n\n${broken.output}`,
+        resume: false,
+      },
+    ])
+  })
+
+  it("waits for a subagent that has unchecked changes before running the main agent's checks", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    emit(SUCCEEDED, "main")
+    await settled()
+    expect(runs).toEqual([])
+
+    emit(SUCCEEDED, "writer")
+    await settled()
+    expect(runs).toEqual([WRITER_RUN, TASK_END])
+  })
+
+  it("runs the main agent's checks when a subagent with unchecked changes is interrupted", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "main")
+
+    emit("session.execution.interrupted", "writer")
+    await settled()
+
+    expect(runs).toEqual([TASK_END])
+  })
+
+  it("leaves the answer of a background subagent alone", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done, afterTool } = fakeContext([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    const started = { content: "started", metadata: { sessionID: "writer", status: "running" } }
+
+    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: started })
+
+    expect(answer.result).toEqual(started)
     expect(runs).toEqual([])
   })
 })
