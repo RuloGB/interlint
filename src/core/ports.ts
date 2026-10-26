@@ -50,6 +50,11 @@ export interface ReportResult {
   /** Whether the run wrote any report at all. */
   found: boolean
   failures: RuleFailure[]
+  /**
+   * Types the failures name without a package, present only when there are some. javac never compiles a class like
+   * that, so the classes the report was made from are broken and its failures cannot be trusted.
+   */
+  typesWithoutPackage?: string[]
 }
 
 /** Report files present before a run, with a fingerprint of each (modification time and size). */

@@ -3,6 +3,7 @@ import type { CheckOutcome } from "./run-checks.js"
 import type { Violation } from "./violation.js"
 
 const MAX_VIOLATIONS_PER_RULE = 10
+const MAX_TYPES_SHOWN = 3
 const FOOTER = "Fix these problems before continuing."
 
 /** Formats the outcomes for the agent. Returns an empty string when every check passed. */
@@ -19,6 +20,19 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
           `✗ ${outcome.check.name} · its dir "${outcome.check.dir}" does not exist`,
           "",
           "  Fix dir in interlint.yaml, or remove the check if the project is gone.",
+        ].join("\n"),
+      ]
+    }
+    if (outcome.status === "broken-build") {
+      const tool = REPORT_TOOLS[outcome.check.report]
+      return [
+        [
+          `✗ ${outcome.check.name} · the compiled classes are broken, so its ${tool} violations are not shown`,
+          "",
+          `  The report names types without a package: ${typeList(outcome.typesWithoutPackage)}.`,
+          "  javac never compiles a class like that. Another compiler, usually an IDE building automatically,",
+          "  wrote to target/ while the check ran. Do not change the code for these violations.",
+          "  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.",
         ].join("\n"),
       ]
     }
@@ -40,6 +54,12 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
   })
 
   return blocks.length === 0 ? "" : `${[...blocks, FOOTER].join("\n\n")}\n`
+}
+
+function typeList(types: string[]): string {
+  const shown = types.slice(0, MAX_TYPES_SHOWN).map((type) => `<${type}>`).join(", ")
+  const hidden = types.length - MAX_TYPES_SHOWN
+  return hidden > 0 ? `${shown} and ${hidden} more` : shown
 }
 
 function violationLines(violations: Violation[]): string[] {

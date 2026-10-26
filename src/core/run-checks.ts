@@ -15,6 +15,7 @@ export type CheckOutcome =
   | { check: Check; durationMs: number; status: "violations"; failures: RuleFailure[] }
   | { check: Check; durationMs: number; status: "failed"; command: string; exitCode: number; outputTail: string }
   | { check: Check; durationMs: number; status: "missing-dir" }
+  | { check: Check; durationMs: number; status: "broken-build"; typesWithoutPackage: string[] }
 
 const OUTPUT_TAIL_LINES = 30
 
@@ -139,7 +140,10 @@ async function runCheck(
   const startedAt = performance.now()
   const { exitCode, output } = await run(command, checkDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { found, failures } = reader.read(checkDir, before, output)
+  const { found, failures, typesWithoutPackage } = reader.read(checkDir, before, output)
+
+  // Violations read from broken classes are not the agent's: showing them would send it to fix code that is fine.
+  if (typesWithoutPackage !== undefined) return { check, durationMs, status: "broken-build", typesWithoutPackage }
 
   // A report that also lists what the build accepted leaves the decision to the exit code: its failures count only
   // when the command failed, and a zero exit passes even without a report, since the build may skip the plugin.

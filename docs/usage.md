@@ -74,8 +74,23 @@ Fix these problems before continuing.
 | Exit code | Meaning |
 |---|---|
 | 0 | Every check passed |
-| 1 | A check failed: violations, a command that failed without leaving any, or an ArchUnit command that wrote no report |
+| 1 | A check failed: violations, a command that failed without leaving any, an ArchUnit command that wrote no report, or broken compiled classes |
 | 2 | Configuration or usage error, or an unexpected Interlint error |
+
+### Broken compiled classes
+
+An IDE that builds automatically, such as VS Code with the Java extension or Eclipse, compiles into the same `target/classes` as Maven. If it writes there while a check runs, ArchUnit reads classes compiled with unresolved types and reports violations the code does not have: a domain class that depends on `<ProjectName>`, a service that implements no port. The types are named without a package, which `javac` never compiles. When a violation names one, Interlint shows no violation of that check and says the build is broken instead:
+
+```text
+✗ architecture · the compiled classes are broken, so its ArchUnit violations are not shown
+
+  The report names types without a package: <ProjectName>, <ProjectStatus>.
+  javac never compiles a class like that. Another compiler, usually an IDE building automatically,
+  wrote to target/ while the check ran. Do not change the code for these violations.
+  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.
+```
+
+Maven does not recompile those classes by itself, since they are newer than their sources, so the check stays broken until a build with `clean`. In VS Code, `"java.autobuild.enabled": false` in the project's settings stops the IDE from writing there. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 

@@ -77,6 +77,31 @@ describe("formatOutcomes", () => {
     expect(output).toContain("✗ architecture · the command exited 0 but wrote no ArchUnit report\n")
   })
 
+  it("says the compiled classes are broken, with the types that show it, instead of the violations", () => {
+    const output = formatOutcomes([
+      {
+        check: architecture,
+        status: "broken-build",
+        durationMs: 10,
+        typesWithoutPackage: ["ProjectName", "ProjectStatus", "ProjectPort", "Clock"],
+      },
+    ])
+
+    expect(output).toBe(
+      [
+        "✗ architecture · the compiled classes are broken, so its ArchUnit violations are not shown",
+        "",
+        "  The report names types without a package: <ProjectName>, <ProjectStatus>, <ProjectPort> and 1 more.",
+        "  javac never compiles a class like that. Another compiler, usually an IDE building automatically,",
+        "  wrote to target/ while the check ran. Do not change the code for these violations.",
+        "  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.",
+        "",
+        "Fix these problems before continuing.",
+        "",
+      ].join("\n"),
+    )
+  })
+
   it("says a check's dir does not exist and how to fix it", () => {
     const check = { name: "gone/checkstyle", dir: "gone", run: "./mvnw -q checkstyle:check", report: "maven" as const, when: "task-end" as const }
 

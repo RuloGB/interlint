@@ -203,4 +203,37 @@ describe("readArchUnitReport", () => {
       "src/main/java/com/myorg/api/application/domain/Project.java",
     ])
   })
+
+  it("lists the types a violation names without a package: classes javac could not have compiled", () => {
+    const before = snapshotReports(projectDir)
+    writeFileSync(
+      join(reportsDir, "TEST-ArchitectureRulesTest.xml"),
+      suite(
+        archUnitFailure("DOMAIN_IS_PURE", "classes should only depend on domain, because ARCH-01: domain is pure", [
+          "Constructor <com.myorg.api.application.domain.Project.<init>(java.lang.String, ProjectName, ProjectStatus)> has parameter of type <ProjectName> in (Project.java:0)",
+          "Field <com.myorg.api.application.domain.Project.status> has type <ProjectStatus> in (Project.java:0)",
+          "Method <com.myorg.api.application.domain.Project.name()> has return type <ProjectName> in (Project.java:0)",
+        ]),
+      ),
+    )
+
+    expect(readArchUnitReport(projectDir, before).typesWithoutPackage).toEqual(["ProjectName", "ProjectStatus"])
+  })
+
+  it("lists no type for primitives, arrays, constructors and full names", () => {
+    const before = snapshotReports(projectDir)
+    writeFileSync(
+      join(reportsDir, "TEST-ArchitectureRulesTest.xml"),
+      suite(
+        archUnitFailure("NO_STANDARD_STREAMS", "no classes should access System.out, because LOG-04: no System.out", [
+          "Method <com.acme.domain.Order.debug(int, byte[], java.lang.String[])> gets field <java.lang.System.out> in (Order.java:68)",
+          "Constructor <com.acme.domain.Order.<init>(long)> calls constructor <com.acme.infra.OrderEntity.<init>()> in (Order.java:12)",
+          "Field <com.acme.domain.Order.total> has type <double> in (Order.java:0)",
+          "Method <com.acme.domain.Order.lines()> has generic return type <java.util.List<T>> in (Order.java:0)",
+        ]),
+      ),
+    )
+
+    expect(readArchUnitReport(projectDir, before)).not.toHaveProperty("typesWithoutPackage")
+  })
 })

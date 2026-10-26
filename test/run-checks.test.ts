@@ -311,6 +311,27 @@ describe("a report that also lists what the build accepted", () => {
   })
 })
 
+describe("a report from broken compiled classes", () => {
+  const failure = { title: "ARCH-01", violations: [{ text: "Field <com.acme.Order.status> has type <OrderStatus>" }] }
+
+  it("reports the broken build instead of its violations, and leaves the project changed", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const accepted: string[] = []
+    deps.changes = { ...deps.changes, accept: (dir) => accepted.push(dir) }
+    deps.run = async () => ({ exitCode: 1, output: "" })
+    deps.readers = {
+      ...deps.readers,
+      archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure], typesWithoutPackage: ["OrderStatus"] }) },
+    }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "broken-build", typesWithoutPackage: ["OrderStatus"] })
+    expect(outcome).not.toHaveProperty("failures")
+    expect(accepted).toEqual([])
+  })
+})
+
 describe("the command output", () => {
   it("reaches the report reader, for reports that cannot say why the command failed", async () => {
     const { deps } = fakeDeps({ mvnd: false })
