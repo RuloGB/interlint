@@ -84,8 +84,8 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 ## Documentation
 
 - [Using Interlint](docs/usage.md): `init`, `interlint.yaml`, `check` and exit codes.
-- [OpenCode](docs/opencode.md): the plugin and what it does after edits and at turn end.
-- [Claude Code](docs/claude-code.md): the hooks, their exit codes and the retry limit.
+- [OpenCode](docs/opencode.md): the plugin, what it does after edits and at turn end, and subagents.
+- [Claude Code](docs/claude-code.md): the hooks, their exit codes, the retry limit and subagents.
 - [Development](docs/development.md): building, testing and packing Interlint.
 
 ## License
