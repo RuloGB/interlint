@@ -329,7 +329,9 @@ describe("interlint hook claude-code subagent-stop", () => {
 
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
-    expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+    expect(stderr).toMatch(
+      /^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\nFix these failures yourself before you answer: asking how to proceed does not end the task\. After 3 attempts they go to the agent that delegated this work\.\n\n✗ architecture · ARCH-01/,
+    )
   })
 
   it("gives a subagent only the failures of the projects it changed", async () => {
