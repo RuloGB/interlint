@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import plugin, {
   type CheckRun,
   changedFiles,
@@ -11,6 +11,7 @@ import plugin, {
   editNote,
   MAX_CONSECUTIVE_BLOCKS,
   MAX_OUTPUT_CHARS,
+  type RunChecks,
   runInterlint,
   TaskEndGate,
 } from "../integrations/opencode/interlint/index.js"
@@ -491,20 +492,85 @@ describe("OpenCode plugin with subagents", () => {
     expect(runs.at(-1)).toEqual(TASK_END)
   })
 
-  it("stops waiting for a resumed subagent whose turn never ends, and hands its failures to the main agent", async () => {
-    const { run } = checksGiving(VIOLATIONS)
-    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
-    ctx.options = { subagentTimeoutMs: 20 }
-    await createInterlintPlugin(run).setup(ctx)
-    await done
-    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
-    emit(SUCCEEDED, "writer")
+  describe("with a time limit", () => {
+    const LIMIT = 1_000
+    // Only setTimeout is faked: the tests still let the plugin run with setImmediate.
+    beforeEach(() => void vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }))
+    afterEach(() => void vi.useRealTimers())
 
-    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+    /** Lets the plugin act on what came before, moves the fake clock on, and lets it act on the timers that fired. */
+    async function waitFor(ms: number) {
+      await settled()
+      vi.advanceTimersByTime(ms)
+      await settled()
+    }
 
-    expect(answer.result?.content).toBe(
-      `${ANSWER}\n\nInterlint: the subagent stopped before the checks passed, so they are yours to fix.\n\n${VIOLATIONS.output}`,
-    )
+    async function setUp(run: RunChecks) {
+      const context = fakeContext([], SESSIONS)
+      context.ctx.options = { subagentTimeoutMs: LIMIT }
+      await createInterlintPlugin(run).setup(context.ctx)
+      await context.done
+      await context.afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+      return context
+    }
+
+    const STOPPED = `${ANSWER}\n\nInterlint: the subagent stopped before the checks passed, so they are yours to fix.\n\n${VIOLATIONS.output}`
+
+    it("stops waiting for a resumed subagent whose turn never ends, and hands its failures to the main agent", async () => {
+      const { emit, afterTool } = await setUp(checksGiving(VIOLATIONS).run)
+      emit(SUCCEEDED, "writer")
+      const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+      await waitFor(LIMIT - 1)
+      let answered = false
+      void answer.then(() => (answered = true))
+      await settled()
+      expect(answered).toBe(false)
+
+      await waitFor(1)
+
+      expect((await answer).result?.content).toBe(STOPPED)
+    })
+
+    it("stops waiting for a resumed subagent whose session is deleted", async () => {
+      const { emit, afterTool } = await setUp(checksGiving(VIOLATIONS).run)
+      emit(SUCCEEDED, "writer")
+      const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+      await settled()
+
+      emit("session.deleted", "writer")
+
+      expect((await answer).result?.content).toBe(STOPPED)
+    })
+
+    it("runs the main agent's checks after waiting too long for a subagent that never ends its turn", async () => {
+      const { runs, run } = checksGiving()
+      const { emit } = await setUp(run)
+      emit(SUCCEEDED, "main")
+      await waitFor(LIMIT - 1)
+      expect(runs).toEqual([])
+
+      await waitFor(1)
+
+      expect(runs).toEqual([TASK_END])
+    })
+
+    it("gives every wait of the main agent the whole time limit, however an earlier wait ended", async () => {
+      const { runs, run } = checksGiving()
+      const { emit, afterTool } = await setUp(run)
+      emit(SUCCEEDED, "main")
+      await waitFor(LIMIT / 2)
+      emit(SUCCEEDED, "writer")
+      await settled()
+      expect(runs).toEqual([WRITER_RUN, TASK_END])
+
+      await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+      emit(SUCCEEDED, "main")
+      await waitFor(LIMIT - 1)
+      expect(runs).toEqual([WRITER_RUN, TASK_END])
+
+      await waitFor(1)
+      expect(runs).toEqual([WRITER_RUN, TASK_END, TASK_END])
+    })
   })
 
   it("runs the main agent's checks at once when a subagent with unchecked changes is deleted", async () => {
@@ -517,22 +583,6 @@ describe("OpenCode plugin with subagents", () => {
 
     emit("session.deleted", "writer")
     await settled()
-
-    expect(runs).toEqual([TASK_END])
-  })
-
-  it("runs the main agent's checks after waiting too long for a subagent that never ends its turn", async () => {
-    const { runs, run } = checksGiving()
-    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS)
-    ctx.options = { subagentTimeoutMs: 20 }
-    await createInterlintPlugin(run).setup(ctx)
-    await done
-    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
-    emit(SUCCEEDED, "main")
-    await settled()
-    expect(runs).toEqual([])
-
-    await new Promise((resolve) => setTimeout(resolve, 60))
 
     expect(runs).toEqual([TASK_END])
   })

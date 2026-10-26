@@ -294,10 +294,17 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         return false
       }
 
+      /** Ends the wait of a main session, with its timer, so a later wait gets the whole time limit. */
+      const undefer = (root: string) => {
+        clearTimeout(deferTimers.get(root))
+        deferTimers.delete(root)
+        return deferred.delete(root)
+      }
+
       const flushDeferred = async () => {
         for (const root of [...deferred]) {
           if (await hasUncheckedSubagent(root)) continue
-          deferred.delete(root)
+          undefer(root)
           onTurnEnd(root).catch((error) => console.error("[interlint]", error))
         }
       }
@@ -370,7 +377,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (!note || parent === undefined) return
         await ctx.session.synthetic({ sessionID: parent, text: note.text, description: "Interlint", resume: note.resume })
         // The parent resumes, and its own turn end runs its checks. If the message failed, the flush runs them.
-        if (note.resume) deferred.delete(parent)
+        if (note.resume) undefer(parent)
       }
 
       /** Starts the fix loop of a subagent, or returns the one already running. */
@@ -407,7 +414,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         // that settles meanwhile finds it; if that flush took it, the flush runs the checks instead.
         deferred.add(sessionID)
         if (await hasUncheckedSubagent(sessionID)) return armDeferTimer(sessionID)
-        if (!deferred.delete(sessionID)) return
+        if (!undefer(sessionID)) return
         running.add(sessionID)
         try {
           const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS))
