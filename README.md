@@ -4,7 +4,7 @@
 
 Interlint runs the checks your project **already has**, such as ArchUnit, inside the agent's session. When the agent breaks a rule, it hears about it right away and fixes it in the same session, not in CI and not by hand.
 
-> **Status:** 1.3.0. It works today with ArchUnit, Checkstyle, PMD, Maven (including multi-module projects and workspaces), OpenCode V2 and Claude Code.
+> **Status:** 1.3.1. It works today with ArchUnit, Checkstyle, PMD, Maven (including multi-module projects and workspaces), OpenCode V2 and Claude Code.
 
 ## The problem
 
