@@ -37,12 +37,29 @@ export function loadConfig(projectDir: string): Config {
 
 function parseCheck(entry: unknown, at: string): Check {
   if (!isRecord(entry)) throw invalid(`${at} must be a mapping with name, run, report and when`)
+  const dir = optionalDir(entry, at)
   return {
     name: requireString(entry, "name", at),
     run: requireString(entry, "run", at),
     report: requireOneOf(entry, "report", REPORTS, at),
     when: requireOneOf(entry, "when", WHENS, at),
+    ...(dir === undefined ? {} : { dir }),
   }
+}
+
+/**
+ * The check's directory, `/`-separated and without `./` or a trailing `/`. `.` is the directory of
+ * `interlint.yaml`, the same as no `dir`. A directory outside the project is rejected: the check would run there.
+ */
+function optionalDir(entry: Record<string, unknown>, at: string): string | undefined {
+  if (entry.dir === undefined) return undefined
+  const value = entry.dir
+  const segments = typeof value === "string" ? value.split(/[\\/]/).filter((segment) => segment !== "" && segment !== ".") : []
+  const absolute = typeof value === "string" && (/^[\\/]/.test(value) || /^[A-Za-z]:/.test(value))
+  if (typeof value !== "string" || value.trim() === "" || absolute || segments.includes("..")) {
+    throw invalid(`${at}.dir must be a directory inside the project, relative to ${CONFIG_FILE} (got "${String(value)}")`)
+  }
+  return segments.length === 0 ? undefined : segments.join("/")
 }
 
 function requireString(entry: Record<string, unknown>, field: string, at: string): string {

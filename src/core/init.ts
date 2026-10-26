@@ -7,6 +7,10 @@ export type QualityPlugin = (typeof QUALITY_PLUGINS)[number]
 export interface ProjectFacts {
   /** Simple names of the test classes with `@ArchTest`. */
   archTestClasses: string[]
+  /** The modules that hold them, as `/`-separated paths relative to the project: `""` is the project itself. */
+  archTestModules: string[]
+  /** Whether the project is a reactor: its `pom.xml` declares modules. */
+  hasModules: boolean
   hasMavenWrapper: boolean
   /** The Checkstyle and PMD plugins the project's own build declares. */
   qualityPlugins: QualityPlugin[]
@@ -56,6 +60,21 @@ export function mavenCommand(facts: ProjectFacts): string {
   return facts.hasMavenWrapper ? "./mvnw" : "mvn"
 }
 
+/** A module path made of letters, digits, `_`, `.`, `-` and `/` only. Anything else could mean something to the shell. */
+const PLAIN_MODULE_PATH = /^[\w.\-/]+$/
+
+/**
+ * In a reactor, `-Dtest` reaches every module, and Surefire fails in a module without those classes unless told
+ * not to. When the classes live in modules other than the root, `-pl <modules> -am` builds only those modules and
+ * the ones they depend on, instead of the whole reactor.
+ */
+function reactorArgs(facts: ProjectFacts): string {
+  if (!facts.hasModules) return ""
+  const modules = facts.archTestModules
+  const onlyModules = modules.length > 0 && modules.every((module) => module !== "" && PLAIN_MODULE_PATH.test(module))
+  return onlyModules ? ` -pl ${[...modules].sort().join(",")} -am` : ""
+}
+
 /**
  * The check that runs only the ArchUnit test classes, or nothing when there are none.
  * Always `when: edit`: without mvnd it waits for task end anyway, so the file is the same on every machine.
@@ -65,10 +84,11 @@ export function mavenCommand(facts: ProjectFacts): string {
 export function architectureCheck(facts: ProjectFacts): Check | undefined {
   const classes = runnableClasses(facts).join(",")
   if (classes === "") return undefined
+  const reactor = facts.hasModules ? " -Dsurefire.failIfNoSpecifiedTests=false" : ""
   const skips = QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ` -D${plugin}.skip`)
   return {
     name: "architecture",
-    run: `${mavenCommand(facts)} -q test -Dtest=${classes}${skips.join("")}`,
+    run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${skips.join("")}`,
     report: "archunit",
     when: "edit",
   }
@@ -85,4 +105,15 @@ export function qualityChecks(facts: ProjectFacts): Check[] {
     report: "maven",
     when: "task-end",
   }))
+}
+
+/**
+ * Every check of one project. A project in a directory of the workspace (`dir`) runs there, and its checks are
+ * named after it, as in `orders/architecture`, so the checks of several projects never share a name.
+ */
+export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
+  const architecture = architectureCheck(facts)
+  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
+  if (dir === undefined) return checks
+  return checks.map(({ name, run, report, when }) => ({ name: `${dir}/${name}`, dir, run, report, when }))
 }

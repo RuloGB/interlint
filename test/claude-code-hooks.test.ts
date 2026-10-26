@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { userStateDir } from "../src/adapters/claude-code/hooks.js"
+import { userStateDir } from "../src/adapters/state/user-state.js"
 import { main } from "../src/cli.js"
 
 const VIOLATIONS_XML = readFileSync(
@@ -150,8 +150,36 @@ describe("interlint hook claude-code post-edit", () => {
 })
 
 describe("interlint hook claude-code stop", () => {
+  /** The agent changes a file of the project: Claude Code runs the post-edit hook for it. */
+  async function agentEdits() {
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+  }
+
+  it("runs nothing when the agent changed nothing since the checks last passed", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+
+    expect(await hook("stop", stopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(existsSync(join(projectDir, "ran"))).toBe(false)
+  })
+
+  it("runs the checks again once a file changed after they passed, whoever changed it", async () => {
+    writeCheck("task-end", PASSING_XML)
+    await agentEdits()
+    expect((await hook("stop", stopInput(false))).exitCode).toBe(0)
+    // The check rewrites its report on every run, and build output never counts as a change.
+    const report = join(projectDir, "target", "surefire-reports", "TEST-ArchitectureRulesTest.xml")
+    const ranAt = statSync(report).mtimeMs
+    expect((await hook("stop", stopInput(false))).exitCode).toBe(0)
+    expect(statSync(report).mtimeMs).toBe(ranAt)
+
+    writeFileSync(join(projectDir, "report.xml"), VIOLATIONS_XML)
+
+    expect((await hook("stop", stopInput(false))).exitCode).toBe(2)
+  })
+
   it("blocks with the failures on stderr when a check fails", async () => {
     writeCheck("edit", VIOLATIONS_XML)
+    await agentEdits()
 
     const { exitCode, stdout, stderr } = await hook("stop", stopInput(false))
 
@@ -162,6 +190,7 @@ describe("interlint hook claude-code stop", () => {
 
   it("runs every check, edit ones included, and exits 0 silently when they pass", async () => {
     writeCheck("edit", PASSING_XML)
+    await agentEdits()
 
     expect(await hook("stop", stopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
     expect(readFileSync(join(projectDir, "ran"), "utf8")).toBe("")
@@ -169,6 +198,7 @@ describe("interlint hook claude-code stop", () => {
 
   it("lets the task end after 3 blocks in a row and shows the failures to the user", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
 
     const attempts = [await hook("stop", stopInput(false))]
     for (let index = 0; index < 3; index++) attempts.push(await hook("stop", stopInput(true)))
@@ -185,6 +215,7 @@ describe("interlint hook claude-code stop", () => {
 
   it("does not block again after letting the task end while Claude Code keeps continuing", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
     await hook("stop", stopInput(false))
     for (let index = 0; index < 3; index++) await hook("stop", stopInput(true))
 
@@ -195,6 +226,7 @@ describe("interlint hook claude-code stop", () => {
 
   it("keeps the block count in the user's own state directory, not in the shared temp directory", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
 
     await hook("stop", stopInput(false))
 
@@ -204,6 +236,7 @@ describe("interlint hook claude-code stop", () => {
 
   it("starts counting again when Claude Code is not continuing because of a stop hook", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
     await hook("stop", stopInput(false))
     await hook("stop", stopInput(true))
 
@@ -212,17 +245,20 @@ describe("interlint hook claude-code stop", () => {
 
   it("starts counting again after the checks pass", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
     await hook("stop", stopInput(false))
     await hook("stop", stopInput(true))
     writeCheck("task-end", PASSING_XML)
     expect((await hook("stop", stopInput(true))).exitCode).toBe(0)
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
 
     expect((await hook("stop", stopInput(true))).stderr).toMatch(/\(attempt 1 of 3\)/)
   })
 
   it("counts each session on its own", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
+    await agentEdits()
     await hook("stop", stopInput(false, "session-a"))
     await hook("stop", stopInput(true, "session-a"))
 

@@ -1,6 +1,6 @@
-import { type Check, type Config, isSourceOf } from "./check.js"
+import { type Check, type Config, fromRoot, isInProjectOf, isSourceOf } from "./check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "./maven.js"
-import type { CommandRunner, ExecutableLookup, ProjectLock, ReportReaders } from "./ports.js"
+import type { ChangeTracker, CommandRunner, ExecutableLookup, ProjectLock, ReportReaders } from "./ports.js"
 import type { RuleFailure } from "./violation.js"
 
 export type CheckOutcome =
@@ -16,19 +16,41 @@ export interface CheckDeps {
   readers: ReportReaders
   hasExecutable: ExecutableLookup
   lock: ProjectLock
+  changes: ChangeTracker
 }
 
-/** Runs the checks that apply at task end: all of them, `edit` ones included. */
+export interface TaskEndOptions {
+  /** Runs only the checks of the projects that changed since their checks last passed, as the agent's task end does. */
+  changedOnly?: boolean
+}
+
+/**
+ * Runs the checks that apply at task end: all of them, `edit` ones included, or with `changedOnly` those of the
+ * projects that changed. A project whose checks all pass is remembered as passing, as it is now.
+ */
 export async function runTaskEndChecks(
   projectDir: string,
   config: Config,
   deps: CheckDeps,
+  { changedOnly = false }: TaskEndOptions = {},
 ): Promise<CheckOutcome[]> {
-  return runChecks(projectDir, config.checks, deps)
+  return deps.lock(projectDir, async () => {
+    const projects = [...new Set(config.checks.map((check) => checkDirOf(projectDir, check)))]
+    const selected = changedOnly ? projects.filter((dir) => deps.changes.changed(dir)) : projects
+    const checks = config.checks.filter((check) => selected.includes(checkDirOf(projectDir, check)))
+    const outcomes = await runInOrder(projectDir, checks, deps)
+    for (const dir of selected) {
+      const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)
+      if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir)
+    }
+    return outcomes
+  })
 }
 
 /**
- * Runs the `edit` checks that verify one of the changed files, given relative to the project.
+ * Runs the `edit` checks that verify one of the changed files, given relative to the project: a check
+ * runs when a changed file is inside its `dir` and is one of its sources. Every project with a changed file,
+ * a source or not, is marked as changed, so its checks run at task end.
  * Without the Maven Daemon a Maven check is too slow for every edit, so it waits for task end (decision 12).
  */
 export async function runEditChecks(
@@ -37,33 +59,40 @@ export async function runEditChecks(
   changedFiles: string[],
   deps: CheckDeps,
 ): Promise<CheckOutcome[]> {
+  const touched = config.checks.filter((check) => changedFiles.some((file) => isInProjectOf(check, file)))
+  for (const dir of new Set(touched.map((check) => checkDirOf(projectDir, check)))) deps.changes.touch(dir)
+
   const daemon = deps.hasExecutable(MAVEN_DAEMON)
-  const checks = config.checks.filter(
+  const checks = touched.filter(
     (check) =>
       check.when === "edit" &&
-      changedFiles.some((file) => isSourceOf(check.report, file)) &&
+      changedFiles.some((file) => isInProjectOf(check, file) && isSourceOf(check.report, file)) &&
       (daemon || !usesMaven(check.run)),
   )
-  return runChecks(projectDir, checks, deps)
+  if (checks.length === 0) return []
+  return deps.lock(projectDir, () => runInOrder(projectDir, checks, deps))
+}
+
+/** The directory a check runs in: its `dir` inside the project, or the project itself. */
+function checkDirOf(projectDir: string, check: Check): string {
+  return check.dir === undefined ? projectDir : `${projectDir}/${check.dir}`
 }
 
 /**
  * Checks run one after another, under the project lock, because two builds must not share `target/` at the same time.
  * That holds across processes too: two edits in a row start two Interlint processes.
  */
-async function runChecks(projectDir: string, checks: Check[], deps: CheckDeps): Promise<CheckOutcome[]> {
-  if (checks.length === 0) return []
+async function runInOrder(projectDir: string, checks: Check[], deps: CheckDeps): Promise<CheckOutcome[]> {
   const daemon = checks.some((check) => usesMaven(check.run)) && deps.hasExecutable(MAVEN_DAEMON)
-  return deps.lock(projectDir, async () => {
-    const outcomes: CheckOutcome[] = []
-    for (const check of checks) {
-      const command = daemon && usesMaven(check.run) ? withMavenDaemon(check.run) : check.run
-      outcomes.push(await runCheck(projectDir, check, command, deps))
-    }
-    return outcomes
-  })
+  const outcomes: CheckOutcome[] = []
+  for (const check of checks) {
+    const command = daemon && usesMaven(check.run) ? withMavenDaemon(check.run) : check.run
+    outcomes.push(await runCheck(projectDir, check, command, deps))
+  }
+  return outcomes
 }
 
+/** Runs one check in its own directory. Its reports are read there, and their paths given from `projectDir`. */
 async function runCheck(
   projectDir: string,
   check: Check,
@@ -71,23 +100,33 @@ async function runCheck(
   { run, readers }: CheckDeps,
 ): Promise<CheckOutcome> {
   const reader = readers[check.report]
-  const before = reader.snapshot(projectDir)
+  const checkDir = checkDirOf(projectDir, check)
+  const before = reader.snapshot(checkDir)
   const startedAt = performance.now()
-  const { exitCode, output } = await run(command, projectDir)
+  const { exitCode, output } = await run(command, checkDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { found, failures } = reader.read(projectDir, before, output)
+  const { found, failures } = reader.read(checkDir, before, output)
 
   // A report that also lists what the build accepted leaves the decision to the exit code: its failures count only
   // when the command failed, and a zero exit passes even without a report, since the build may skip the plugin.
   const exitCodeDecides = reader.alsoListsAccepted === true
   if (failures.length > 0 && (exitCode !== 0 || !exitCodeDecides)) {
-    return { check, durationMs, status: "violations", failures }
+    return { check, durationMs, status: "violations", failures: failures.map((failure) => withPathsFromRoot(check, failure)) }
   }
   // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
   if (exitCode !== 0 || (!found && !exitCodeDecides)) {
     return { check, durationMs, status: "failed", command, exitCode, outputTail: tail(output) }
   }
   return { check, durationMs, status: "passed" }
+}
+
+function withPathsFromRoot(check: Check, failure: RuleFailure): RuleFailure {
+  return {
+    ...failure,
+    violations: failure.violations.map((violation) =>
+      violation.path === undefined ? violation : { ...violation, path: fromRoot(check, violation.path) },
+    ),
+  }
 }
 
 function tail(output: string): string {

@@ -259,6 +259,26 @@ describe("readQualityReports", () => {
     ])
   })
 
+  it("reads the reports of modules at any depth, and of modules below a directory without pom.xml", () => {
+    write("a/pom.xml", "<project/>")
+    write("a/b/pom.xml", "<project/>")
+    write("a/b/c/pom.xml", "<project/>")
+    write("a/b/c/d/pom.xml", "<project/>")
+    write("group/e/pom.xml", "<project/>")
+    const before = snapshotQualityReports(projectDir)
+    for (const module of ["a/b/c/d", "group/e"]) {
+      write(
+        `${module}/target/checkstyle-result.xml`,
+        checkstyleXml({ [source(`${module}/src/main/java/shop/Order.java`)]: [checkstyleError(8, "error", "sizes.LineLengthCheck", "Too long.")] }),
+      )
+    }
+
+    expect(readQualityReports(projectDir, before, BOTH_FAILED).failures[0]?.violations.map((violation) => violation.path)).toEqual([
+      "a/b/c/d/src/main/java/shop/Order.java",
+      "group/e/src/main/java/shop/Order.java",
+    ])
+  })
+
   it("says so when the run wrote no report", () => {
     expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), BOTH_FAILED)).toEqual({ found: false, failures: [] })
   })

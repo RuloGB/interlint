@@ -18,7 +18,7 @@ By then the agent's session is over, and someone has to fix the code by hand.
 ## What Interlint does
 
 - **After each edit,** fast checks run and any violation goes straight back to the agent.
-- **At task end,** the full checks run. If a rule is broken, the agent cannot finish until everything is green.
+- **At task end,** the full checks run, for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
 
@@ -51,7 +51,7 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
    npm install -g interlint
    ```
 
-2. In the root of your project, set up your agent:
+2. In the root of your project, or of a workspace that holds several Maven projects, set up your agent:
 
    ```bash
    interlint init --agent opencode
@@ -74,6 +74,7 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 | Agents | OpenCode V2, Claude Code |
 | Checks | ArchUnit, Checkstyle, PMD |
 | Build | Maven, with or without the Maven Wrapper or `mvnd` |
+| Layout | One project, a multi-module reactor, or a workspace of several Maven projects (other projects in it are ignored) |
 
 ## Known limits
 

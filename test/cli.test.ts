@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { lockFileFor } from "../src/adapters/lock/project-lock.js"
 import { main } from "../src/cli.js"
 
@@ -13,13 +13,19 @@ const PASSING_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="ArchitectureRulesTest" tests="1"><testcase name="DOMAIN_IS_PURE" classname="ArchitectureRulesTest"/></testsuite>`
 
 let projectDir: string
+let stateDir: string
 
 beforeEach(() => {
   projectDir = mkdtempSync(join(tmpdir(), "interlint-cli-"))
+  // Interlint remembers which projects changed in the user's state directory.
+  stateDir = mkdtempSync(join(tmpdir(), "interlint-cli-state-"))
+  vi.stubEnv("LOCALAPPDATA", stateDir)
+  vi.stubEnv("XDG_STATE_HOME", stateDir)
 })
 
 afterEach(() => {
-  rmSync(projectDir, { recursive: true, force: true })
+  vi.unstubAllEnvs()
+  for (const dir of [projectDir, stateDir]) rmSync(dir, { recursive: true, force: true })
 })
 
 /** A stand-in for Maven: writes a Surefire report (or not), prints some output and exits. */
@@ -225,6 +231,73 @@ process.exit(${options.exitCode})
   })
 })
 
+describe("interlint check --when task-end --changed", () => {
+  function writeProject(name: string, exitCode: number) {
+    mkdirSync(join(projectDir, name), { recursive: true })
+    writeFileSync(
+      join(projectDir, name, "check.mjs"),
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("../${name}.ran", "")\nprocess.exit(${exitCode})\n`,
+    )
+    return { name: `${name}/checkstyle`, dir: name, run: "node check.mjs", report: "maven" }
+  }
+
+  function writeProjects(...checks: { name: string; dir: string; run: string; report: string }[]) {
+    const entries = checks.map(
+      (check) =>
+        `  - name: ${check.name}\n    dir: ${check.dir}\n    run: ${check.run}\n    report: ${check.report}\n    when: task-end\n`,
+    )
+    writeFileSync(join(projectDir, "interlint.yaml"), `checks:\n${entries.join("")}`)
+  }
+
+  const ran = (name: string) => existsSync(join(projectDir, `${name}.ran`))
+
+  it("runs nothing for projects it has not seen change, so the first task end does not run every project", async () => {
+    writeProjects(writeProject("orders", 0), writeProject("billing", 0))
+
+    expect(await run("check", "--when", "task-end", "--changed")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect([ran("orders"), ran("billing")]).toEqual([false, false])
+  })
+
+  it("runs only the projects an edit touched, and not again once their checks passed", async () => {
+    writeProjects(writeProject("orders", 0), writeProject("billing", 0))
+    await run("check", "--when", "task-end", "--changed")
+
+    await run("check", "--when", "edit", "--file", "billing/src/main/resources/application.yml")
+    expect((await run("check", "--when", "task-end", "--changed")).exitCode).toBe(0)
+    expect([ran("orders"), ran("billing")]).toEqual([false, true])
+
+    rmSync(join(projectDir, "billing.ran"))
+    await run("check", "--when", "task-end", "--changed")
+    expect(ran("billing")).toBe(false)
+  })
+
+  it("runs a project whose files changed since its checks last passed, however they changed", async () => {
+    writeProjects(writeProject("orders", 0), writeProject("billing", 0))
+    await run("check", "--when", "task-end", "--changed")
+
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}")
+    await run("check", "--when", "task-end", "--changed")
+
+    expect([ran("orders"), ran("billing")]).toEqual([true, false])
+  })
+
+  it("keeps running a failing project until its checks pass", async () => {
+    writeProjects(writeProject("orders", 1))
+    await run("check", "--when", "edit", "--file", "orders/pom.xml")
+
+    expect((await run("check", "--when", "task-end", "--changed")).exitCode).toBe(1)
+    expect((await run("check", "--when", "task-end", "--changed")).exitCode).toBe(1)
+  })
+
+  it("is only valid with --when task-end", async () => {
+    expect(await run("check", "--when", "edit", "--file", "a.java", "--changed")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "interlint: --changed is only valid with --when task-end\n",
+    })
+  })
+})
+
 describe("interlint check --when edit", () => {
   const ORDER = join("src", "main", "java", "shop", "Order.java")
 
@@ -316,7 +389,7 @@ describe("interlint usage", () => {
     const { exitCode, stdout } = await run("--help")
 
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("interlint check [--when task-end] [--cwd <dir>]")
+    expect(stdout).toContain("interlint check [--when task-end] [--changed] [--cwd <dir>]")
     expect(stdout).toContain("interlint check --when edit --file <path>... [--cwd <dir>]")
   })
 

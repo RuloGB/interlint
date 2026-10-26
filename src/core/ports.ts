@@ -16,6 +16,22 @@ export type ExecutableLookup = (name: string) => boolean
 /** Runs `work` while no other Interlint process runs checks on the same project. */
 export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
 
+/**
+ * Remembers which projects changed since their checks last passed, so the agent's task end runs only those.
+ * A project is the directory a check runs in.
+ */
+export interface ChangeTracker {
+  /**
+   * Whether the project changed since its checks last passed, or an edit touched it since. A project seen for the
+   * first time counts as unchanged, and its files as they are become the reference.
+   */
+  changed(projectDir: string): boolean
+  /** Records that every check of the project passed with its files as they are now. */
+  accept(projectDir: string): void
+  /** Records that the agent changed a file of the project. */
+  touch(projectDir: string): void
+}
+
 export interface ReportResult {
   /** Whether the run wrote any report at all. */
   found: boolean

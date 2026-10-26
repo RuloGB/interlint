@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, realpathSync } from "node:fs"
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { archUnitReader } from "./adapters/archunit/archunit.js"
@@ -11,11 +11,12 @@ import { withProjectLock } from "./adapters/lock/project-lock.js"
 import { mavenQualityReader } from "./adapters/maven/quality-reports.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
-import { scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
+import { findMavenProjects, scanProject, TEST_SOURCES } from "./adapters/maven/project-scan.js"
 import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
+import { fileChangeTracker } from "./adapters/state/change-tracker.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
-import { architectureCheck, mavenCommand, type QualityPlugin, qualityChecks, runnableClasses } from "./core/init.js"
+import { mavenCommand, type ProjectFacts, projectChecks, type QualityPlugin, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-checks.js"
 
@@ -25,17 +26,23 @@ export const EXIT = { passed: 0, violations: 1, error: 2 } as const
 const USAGE = `Usage:
   interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
                                                                Detect the project's checks and write interlint.yaml
-  interlint check [--when task-end] [--cwd <dir>]              Run every check in interlint.yaml
+  interlint check [--when task-end] [--changed] [--cwd <dir>]  Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
   interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
 
-An edit check runs only when a changed file inside the project is one of its sources
-(*.java for report: archunit and maven). With mvnd on the PATH, a check whose run starts with mvn,
-mvnw or ./mvnw runs with mvnd instead; without mvnd, Maven edit checks wait for task-end.
+A check with dir runs in that directory (one Maven project of a workspace). An edit check runs
+only when a changed file inside its project is one of its sources (*.java for report: archunit
+and maven). With mvnd on the PATH, a check whose run starts with mvn, mvnw or ./mvnw runs with
+mvnd instead; without mvnd, Maven edit checks wait for task-end.
+
+--changed runs only the checks of the projects that changed since their checks last passed:
+a file changed, or an edit check named one of its files. The agent integrations use it.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
 Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
-for the plugins in the build of pom.xml. It never replaces a different interlint.yaml without --force.
+for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
+the checks of each Maven project below it, with their dir. It never replaces a different
+interlint.yaml without --force.
 
 A report: maven check fails only when Maven fails, and shows the most severe level in the
 Checkstyle and PMD reports, so nothing the project's build accepts is shown.
@@ -65,6 +72,7 @@ const DEPS: CheckDeps = {
   readers: { archunit: archUnitReader, maven: mavenQualityReader },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
+  changes: fileChangeTracker(),
 }
 
 export async function main(args: string[], io: Io): Promise<number> {
@@ -101,21 +109,33 @@ async function check(args: string[], io: Io): Promise<number> {
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
   if (when === "task-end" && files.length > 0) throw new UsageError("--file is only valid with --when edit")
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
+  if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
-  const output = await runAndFormat(projectDir, when, projectFiles(io.cwd, projectDir, files))
+  const output =
+    when === "edit"
+      ? await runAndFormat(projectDir, "edit", projectFiles(io.cwd, projectDir, files))
+      : await runAndFormat(projectDir, "task-end", [], values.changed === true)
   if (output === "") return EXIT.passed
   io.stdout(output)
   return EXIT.violations
 }
 
-/** Runs the checks for `when` and formats their failures for the agent: empty when every check passed. */
-async function runAndFormat(projectDir: string, when: "edit" | "task-end", changedFiles: string[]): Promise<string> {
+/**
+ * Runs the checks for `when` and formats their failures for the agent: empty when every check passed.
+ * `changedOnly` runs at task end only the projects that changed since their checks last passed.
+ */
+async function runAndFormat(
+  projectDir: string,
+  when: "edit" | "task-end",
+  changedFiles: string[],
+  changedOnly = false,
+): Promise<string> {
   const config = loadConfig(projectDir)
   const outcomes =
     when === "edit"
       ? await runEditChecks(projectDir, config, changedFiles, DEPS)
-      : await runTaskEndChecks(projectDir, config, DEPS)
+      : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly })
   return formatOutcomes(outcomes)
 }
 
@@ -144,7 +164,8 @@ async function hook(args: string[], io: Io): Promise<number> {
       return HOOK_EXIT.block
     }
 
-    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", []))
+    // Only the projects the agent changed since their checks last passed, as the OpenCode plugin does.
+    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", [], true))
     if (decision.action === "block") {
       io.stderr(decision.text)
       return HOOK_EXIT.block
@@ -178,12 +199,20 @@ function init(args: string[], io: Io): number {
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
   if (!existsSync(projectDir)) throw new UsageError(`${projectDir} does not exist`)
-  const facts = scanProject(projectDir)
-  const architecture = architectureCheck(facts)
-  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
-  if (checks.length === 0) {
+  // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
+  const projects = findMavenProjects(projectDir).map((dir) => ({
+    dir: dir === "" ? undefined : dir,
+    facts: scanProject(dir === "" ? projectDir : join(projectDir, dir)),
+  }))
+  const checks = projects.flatMap(({ dir, facts }) => projectChecks(facts, dir))
+  if (checks.length === 0 && projects[0]?.dir === undefined) {
     throw new UsageError(
       `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.`,
+    )
+  }
+  if (checks.length === 0) {
+    throw new UsageError(
+      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin or maven-pmd-plugin in its build (found: ${projects.map(({ dir }) => dir).join(", ")}). Nothing was written.`,
     )
   }
 
@@ -205,25 +234,40 @@ function init(args: string[], io: Io): number {
     if (states[index] !== "unchanged") writeProjectFile(projectDir, file)
   })
 
-  const maven = mavenCommand(facts)
+  const single = projects.length === 1 && projects[0]?.dir === undefined
+  const [check, runs] = single ? ["check", "runs"] : ["checks", "run"]
   const daemon = DEPS.hasExecutable(MAVEN_DAEMON)
-    ? "on the PATH, so the architecture check runs after each edit"
-    : "not on the PATH, so the architecture check runs at task end; install mvnd to run it after each edit"
+    ? `on the PATH, so the architecture ${check} ${runs} after each edit`
+    : `not on the PATH, so the architecture ${check} ${runs} at task end; install mvnd to run ${single ? "it" : "them"} after each edit`
+  const detected = single
+    ? ["Detected:", ...detectedLines(projects[0]!.facts, "  ")]
+    : [
+        `Detected ${projects.length} Maven projects:`,
+        ...projects.flatMap(({ dir, facts }) => [`  ${dir}`, ...detectedLines(facts, "    ")]),
+      ]
   const written = files.filter((_, index) => states[index] !== "unchanged").map((file) => file.path)
   const unchanged = files.filter((_, index) => states[index] === "unchanged").map((file) => file.path)
   io.stdout(
     [
-      "Detected:",
-      `  ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}`,
-      ...facts.qualityPlugins.map((plugin) => `  ${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml, checked at task end`),
-      `  Maven: ${maven} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
-      ...(architecture ? [`  mvnd: ${daemon}`] : []),
+      ...detected,
+      ...(checks.some((check) => check.report === "archunit") ? [`  mvnd: ${daemon}`] : []),
       "",
       ...section("Wrote:", written),
       ...section("Unchanged:", unchanged),
     ].join("\n"),
   )
   return EXIT.passed
+}
+
+/** What `init` found in one project. In a workspace, a project with nothing to check says so. */
+function detectedLines(facts: ProjectFacts, indent: string): string[] {
+  if (projectChecks(facts).length === 0 && facts.archTestModules.length === 0) return [`${indent}nothing to check`]
+  const modules = facts.archTestModules.filter((module) => module !== "")
+  return [
+    `${indent}ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}${modules.length > 0 ? ` (in ${modules.join(", ")})` : ""}`,
+    ...facts.qualityPlugins.map((plugin) => `${indent}${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml, checked at task end`),
+    `${indent}Maven: ${mavenCommand(facts)} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
+  ]
 }
 
 function claudeCodeSettings(projectDir: string): PlannedFile {
@@ -243,7 +287,12 @@ function parseCheckArgs(args: string[]) {
   try {
     return parseArgs({
       args,
-      options: { when: { type: "string" }, cwd: { type: "string" }, file: { type: "string", multiple: true } },
+      options: {
+        when: { type: "string" },
+        cwd: { type: "string" },
+        file: { type: "string", multiple: true },
+        changed: { type: "boolean" },
+      },
       strict: true,
       allowPositionals: false,
     })

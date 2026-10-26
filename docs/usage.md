@@ -14,7 +14,7 @@ npm install -g interlint
 
 ## `interlint init`
 
-Run it in the root of your Maven project, with the agent you use (`opencode` or `claude-code`):
+Run it in the root of your Maven project, or of a workspace that holds several (see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces)), with the agent you use (`opencode` or `claude-code`):
 
 ```bash
 interlint init --agent opencode
@@ -44,7 +44,7 @@ checks:
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
 - When the build runs a plugin's `check` goal in an `<execution>`, the check names that execution, as in `checkstyle:check@style`, so the configuration inside it applies: called plainly, Maven runs the goal with the plugin's defaults. An execution without `<id>` is `default`; one turned off with `<phase>none</phase>` is left out.
-- A plugin counts when it is in `<build>`, in `<plugins>` or `<pluginManagement>`. Plugins only in a comment, a `<profile>`, `<reporting>`, `<dependencies>` or `<dependencyManagement>` are left out, and so are plugins declared only in a module's `pom.xml` or in an external parent.
+- A plugin counts when it is in `<build>`, in `<plugins>` or `<pluginManagement>`. Plugins only in a comment, a `<profile>`, `<reporting>`, `<dependencies>` or `<dependencyManagement>` are left out, and so are plugins declared only in an external parent. In a project with modules, see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces).
 - With no `@ArchTest` classes and neither plugin it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
@@ -81,7 +81,7 @@ On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` w
 
 ## Checkstyle and PMD
 
-A check with `report: maven` reads the reports Checkstyle and PMD write in `target/`: `checkstyle-result.xml` and `pmd.xml`, in the project and in its modules up to three levels down. Each violated rule shows its message and source file and line, like an ArchUnit rule:
+A check with `report: maven` reads the reports Checkstyle and PMD write in `target/`: `checkstyle-result.xml` and `pmd.xml`, in the project and in its modules, at any depth. Each violated rule shows its message and source file and line, like an ArchUnit rule:
 
 ```text
 ✗ checkstyle · LineLength
@@ -113,4 +113,50 @@ interlint check --when edit --file src/main/java/shop/Order.java
 
 ## At task end
 
-Every check runs, `edit` ones included.
+Every check runs, `edit` ones included. A project whose checks all pass is remembered as passing, with its files as they are.
+
+```bash
+interlint check --when task-end --changed
+```
+
+With `--changed`, only the checks of the projects that changed since their checks last passed run. The OpenCode plugin and the Claude Code `stop` hook use it, so the end of a task never runs the checks of a project the agent did not touch. A project is a check's `dir`, or the directory of `interlint.yaml` for a check without one. It counts as changed when:
+
+- an edit check call (`--when edit`, which the agent integrations run after every edit) named one of its files, whatever the file is; or
+- a file was added, changed or removed since its checks last passed, by any means, such as a shell command. Build output (`target/`), `node_modules/` and hidden directories such as `.git/` do not count. A commit does not count either: it leaves the files as they are.
+
+A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
+
+## Multi-module projects and workspaces
+
+Start Interlint, and your agent, in the root of either layout:
+
+- **A Maven reactor**: a `pom.xml` with `<modules>`. `init` looks for `@ArchTest` classes in `src/test/java` of every module, and for Checkstyle and PMD in the build of every module.
+  - A plugin the parent only declares in `<pluginManagement>` counts when a module turns it on in `<build><plugins>`; one no module turns on is left out. The checks name the executions the parent manages, as in `checkstyle:check@style`.
+  - The `architecture` check builds only the modules with the `@ArchTest` classes and the modules they depend on (`-pl launcher -am`), and tells Surefire not to fail in the modules without them (`-Dsurefire.failIfNoSpecifiedTests=false`).
+  - `report: archunit` and `report: maven` read the reports of every module and show each source path from the root, such as `infrastructure/src/main/java/com/acme/Order.java:12`.
+- **A workspace**: a directory without `pom.xml` that holds several Maven projects, each a single project or a reactor with its own Maven Wrapper, for example as Git submodules. Other projects, such as a Node front end, are ignored. `init` writes the checks of every Maven project it finds up to three levels down, each with its `dir`, and names them after it:
+
+```yaml
+# Generated by interlint init.
+checks:
+  - name: orders/architecture
+    dir: orders
+    run: ./mvnw -q test -pl launcher -am -Dtest=OrdersArchitectureTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip
+    report: archunit
+    when: edit
+  - name: orders/checkstyle
+    dir: orders
+    run: ./mvnw -q checkstyle:check@style
+    report: maven
+    when: task-end
+  - name: billing/checkstyle
+    dir: billing
+    run: ./mvnw -q checkstyle:check@style
+    report: maven
+    when: task-end
+```
+
+- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error.
+- Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
+- After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
+- At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
