@@ -124,6 +124,12 @@ With `--changed`, only the checks of the projects that changed since their check
 - an edit check call (`--when edit`, which the agent integrations run after every edit) named one of its files, whatever the file is; or
 - a file was added, changed or removed since its checks last passed, by any means, such as a shell command. Build output (`target/`), `node_modules/` and hidden directories such as `.git/` do not count. A commit does not count either: it leaves the files as they are.
 
+With `--file <path>`, which can be repeated, only the projects that hold one of those files run. The agent integrations pass the files a subagent changed, so it gets the failures of its own projects only:
+
+```bash
+interlint check --when task-end --changed --file orders/src/main/java/shop/Order.java
+```
+
 A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project changed while its checks ran, by an edit or any other means: a project is remembered with its files as the checks saw them. A check that writes files outside `target/` therefore makes its project run once more at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
 
 ## Multi-module projects and workspaces

@@ -173,15 +173,6 @@ describe("interlint check --when task-end", () => {
     expect(stderr).toBe('interlint: --when must be edit or task-end (got "commit")\n')
   })
 
-  it("exits 2 when --file is given at task end", async () => {
-    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
-
-    expect(await run("check", "--when", "task-end", "--file", "src/main/java/shop/Order.java")).toEqual({
-      exitCode: 2,
-      stdout: "",
-      stderr: "interlint: --file is only valid with --when edit\n",
-    })
-  })
 })
 
 describe("interlint check with report: maven", () => {
@@ -327,6 +318,35 @@ describe("interlint check --when task-end --changed", () => {
     expect(await run("check", "--when", "edit", "--file", "gone/A.java")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
 
+  it("with --file runs only the changed projects that hold those files, and leaves the others changed", async () => {
+    writeProjects(writeProject("orders", 0), writeProject("billing", 0))
+    await run("check", "--when", "edit", "--file", "orders/pom.xml", "--file", "billing/pom.xml")
+
+    expect(await run("check", "--when", "task-end", "--changed", "--file", "orders/src/main/java/Order.java")).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    })
+    expect([ran("orders"), ran("billing")]).toEqual([true, false])
+
+    rmSync(join(projectDir, "orders.ran"))
+    await run("check", "--when", "task-end", "--changed")
+    expect([ran("orders"), ran("billing")]).toEqual([false, true])
+  })
+
+  it("with --file reports a missing dir only when one of the files is in it", async () => {
+    const gone = { name: "gone/checkstyle", dir: "gone", run: "node check.mjs", report: "maven" }
+    writeProjects(gone, writeProject("orders", 0))
+    await run("check", "--when", "edit", "--file", "orders/pom.xml")
+
+    expect((await run("check", "--when", "task-end", "--changed", "--file", "orders/pom.xml")).exitCode).toBe(0)
+    expect(await run("check", "--when", "task-end", "--changed", "--file", "gone/pom.xml")).toEqual({
+      exitCode: 1,
+      stdout: MISSING_REPORT,
+      stderr: "",
+    })
+  })
+
   it("is only valid with --when task-end", async () => {
     expect(await run("check", "--when", "edit", "--file", "a.java", "--changed")).toEqual({
       exitCode: 2,
@@ -427,7 +447,7 @@ describe("interlint usage", () => {
     const { exitCode, stdout } = await run("--help")
 
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("interlint check [--when task-end] [--changed] [--cwd <dir>]")
+    expect(stdout).toContain("interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]")
     expect(stdout).toContain("interlint check --when edit --file <path>... [--cwd <dir>]")
   })
 

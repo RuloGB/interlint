@@ -213,6 +213,18 @@ describe("only the projects that changed", () => {
     expect(accepted).toEqual(["/ws/billing"])
   })
 
+  it("runs at task end only the changed projects that hold one of the given files", async () => {
+    const { deps, launched, accepted } = trackingDeps(["/ws/orders", "/ws/billing"])
+
+    await runTaskEndChecks("/ws", config(orders, ordersStyle, billing), deps, {
+      changedOnly: true,
+      files: ["orders/src/main/java/shop/Order.java"],
+    })
+
+    expect(launched).toEqual(["orders arch", "orders style"])
+    expect(accepted).toEqual(["/ws/orders"])
+  })
+
   it("runs every check without changedOnly, and remembers the projects that passed", async () => {
     const { deps, launched, accepted } = trackingDeps([])
 

@@ -4,7 +4,16 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { archUnitReader } from "./adapters/archunit/archunit.js"
-import { decideStop, editNote, HOOK_EXIT, HookInputError, parseHookInput } from "./adapters/claude-code/hooks.js"
+import {
+  decideStop,
+  editNote,
+  forgetSubagentFiles,
+  HOOK_EXIT,
+  HookInputError,
+  parseHookInput,
+  recordSubagentFiles,
+  subagentFiles,
+} from "./adapters/claude-code/hooks.js"
 import { claudeCodeSettingsFile, SettingsError } from "./adapters/claude-code/settings.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
@@ -26,9 +35,10 @@ export const EXIT = { passed: 0, violations: 1, error: 2 } as const
 const USAGE = `Usage:
   interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
                                                                Detect the project's checks and write interlint.yaml
-  interlint check [--when task-end] [--changed] [--cwd <dir>]  Run every check in interlint.yaml
+  interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
+                                                               Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
-  interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
+  interlint hook claude-code post-edit|stop|subagent-stop      Claude Code hook: reads the hook's JSON on stdin
 
 A check with dir runs in that directory (one Maven project of a workspace). An edit check runs
 only when a changed file inside its project is one of its sources (*.java for report: archunit
@@ -37,6 +47,8 @@ mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 --changed runs only the checks of the projects that changed since their checks last passed:
 a file changed, or an edit check named one of its files. The agent integrations use it.
+At task end, --file runs only the checks of the projects that hold one of those files: the agent
+integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
 Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
@@ -47,13 +59,15 @@ interlint.yaml without --force.
 A report: maven check fails only when Maven fails, and shows the most severe level in the
 Checkstyle and PMD reports, so nothing the project's build accepts is shown.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
-the post-edit and stop hooks to .claude/settings.json and keeps the rest of the file.
+the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
 
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
 
 A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 a check failed
 (the failures go to the agent on stderr), 1 Interlint could not run (shown to the user, never a
 block). stop blocks at most 3 times in a row, then lets the task end and shows the failures.
+subagent-stop checks only the projects of the files that subagent changed, and runs nothing for
+a subagent that changed none; after 3 blocks it lets the subagent stop, and stop gets the rest.
 `
 
 export interface Io {
@@ -108,7 +122,6 @@ async function check(args: string[], io: Io): Promise<number> {
   const when = values.when ?? "task-end"
   const files = values.file ?? []
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
-  if (when === "task-end" && files.length > 0) throw new UsageError("--file is only valid with --when edit")
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
 
@@ -116,7 +129,13 @@ async function check(args: string[], io: Io): Promise<number> {
   const output =
     when === "edit"
       ? await runAndFormat(projectDir, "edit", projectFiles(io.cwd, projectDir, files))
-      : await runAndFormat(projectDir, "task-end", [], values.changed === true)
+      : await runAndFormat(
+          projectDir,
+          "task-end",
+          // Files given but all outside the project hold no project, so nothing runs for them.
+          files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined,
+          values.changed === true,
+        )
   if (output === "") return EXIT.passed
   io.stdout(output)
   return EXIT.violations
@@ -124,19 +143,20 @@ async function check(args: string[], io: Io): Promise<number> {
 
 /**
  * Runs the checks for `when` and formats their failures for the agent: empty when every check passed.
- * `changedOnly` runs at task end only the projects that changed since their checks last passed.
+ * `changedOnly` runs at task end only the projects that changed since their checks last passed, and `changedFiles`,
+ * when given, only the projects that hold one of them.
  */
 async function runAndFormat(
   projectDir: string,
   when: "edit" | "task-end",
-  changedFiles: string[],
+  changedFiles: string[] | undefined,
   changedOnly = false,
 ): Promise<string> {
   const config = loadConfig(projectDir)
   const outcomes =
     when === "edit"
-      ? await runEditChecks(projectDir, config, changedFiles, DEPS)
-      : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly })
+      ? await runEditChecks(projectDir, config, changedFiles ?? [], DEPS)
+      : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly, files: changedFiles })
   return formatOutcomes(outcomes)
 }
 
@@ -148,7 +168,7 @@ function isDirectory(path: string): boolean {
   }
 }
 
-const HOOK_EVENTS = ["post-edit", "stop"] as const
+const HOOK_EVENTS = ["post-edit", "stop", "subagent-stop"] as const
 
 /**
  * A Claude Code hook. Any error exits 1, never 2: Claude Code would read 2 as a block
@@ -159,7 +179,8 @@ async function hook(args: string[], io: Io): Promise<number> {
     const [agent, event, ...extra] = args
     if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code (got "${agent ?? ""}")`)
     if (!(HOOK_EVENTS as readonly (string | undefined)[]).includes(event) || extra.length > 0) {
-      throw new UsageError(`claude-code hooks are ${HOOK_EVENTS.join(" and ")} (got "${args.slice(1).join(" ")}")`)
+      const names = `${HOOK_EVENTS.slice(0, -1).join(", ")} and ${HOOK_EVENTS.at(-1)}`
+      throw new UsageError(`claude-code hooks are ${names} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseHookInput(io.stdin ? await io.stdin() : "")
     const projectDir = resolve(io.cwd, process.env.CLAUDE_PROJECT_DIR || input.cwd || ".")
@@ -167,14 +188,31 @@ async function hook(args: string[], io: Io): Promise<number> {
     if (event === "post-edit") {
       if (input.filePath === undefined) return HOOK_EXIT.pass
       const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
+      // A subagent's changes are checked when it stops, and their failures go to it.
+      recordSubagentFiles(input, changed)
       const output = await runAndFormat(projectDir, "edit", changed)
       if (output === "") return HOOK_EXIT.pass
       io.stderr(editNote(output))
       return HOOK_EXIT.block
     }
 
+    if (event === "subagent-stop") {
+      const files = subagentFiles(input)
+      // A subagent that changed no file, such as a read-only reviewer, has nothing of its own to fix.
+      if (files.length === 0) return HOOK_EXIT.pass
+      const decision = decideStop(input, await runAndFormat(projectDir, "task-end", files, true))
+      if (decision.action === "block") {
+        io.stderr(decision.text)
+        return HOOK_EXIT.block
+      }
+      // Passed, or still failing after the last attempt: then the main agent's stop, which checks every changed
+      // project, gets the failures.
+      forgetSubagentFiles(input)
+      return HOOK_EXIT.pass
+    }
+
     // Only the projects the agent changed since their checks last passed, as the OpenCode plugin does.
-    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", [], true))
+    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", undefined, true))
     if (decision.action === "block") {
       io.stderr(decision.text)
       return HOOK_EXIT.block

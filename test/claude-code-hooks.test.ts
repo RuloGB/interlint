@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -282,6 +282,116 @@ describe("interlint hook claude-code stop", () => {
 
     expect(exitCode).toBe(1)
     expect(stderr).toContain("interlint.yaml")
+  })
+})
+
+describe("interlint hook claude-code subagent-stop", () => {
+  function subagentStopInput(stopHookActive: boolean, agentId = "writer-1") {
+    return JSON.stringify({
+      session_id: "session-1",
+      cwd: projectDir,
+      hook_event_name: "SubagentStop",
+      stop_hook_active: stopHookActive,
+      agent_id: agentId,
+      agent_type: "writer",
+      last_assistant_message: "Done.",
+    })
+  }
+
+  /** A subagent edits a file: Claude Code runs the post-edit hook with the subagent's agent_id. */
+  async function subagentEdits(file: string, agentId = "writer-1") {
+    await hook("post-edit", postToolUse(file, { agent_id: agentId, agent_type: "writer" }))
+  }
+
+  /** Two projects of a workspace, each with a check whose failure the test picks. */
+  function writeWorkspace(failing: { orders: boolean; billing: boolean }) {
+    const entries = (["orders", "billing"] as const).map((name) => {
+      mkdirSync(join(projectDir, name), { recursive: true })
+      writeFileSync(join(projectDir, name, "check.mjs"), `process.exit(${failing[name] ? 1 : 0})\n`)
+      return `  - name: ${name}/checkstyle\n    dir: ${name}\n    run: node check.mjs\n    report: maven\n    when: task-end\n`
+    })
+    writeFileSync(join(projectDir, "interlint.yaml"), `checks:\n${entries.join("")}`)
+  }
+
+  it("runs nothing when a subagent that changed no file stops, such as a read-only reviewer", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    expect(await hook("subagent-stop", subagentStopInput(false, "reviewer-1"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
+  })
+
+  it("keeps a subagent that changed files working with the failures of its checks", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await subagentEdits(JAVA_FILE())
+
+    const { exitCode, stdout, stderr } = await hook("subagent-stop", subagentStopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stdout).toBe("")
+    expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+  })
+
+  it("gives a subagent only the failures of the projects it changed", async () => {
+    writeWorkspace({ orders: false, billing: true })
+    await hook("post-edit", postToolUse(join(projectDir, "billing", "pom.xml")))
+    await subagentEdits(join(projectDir, "orders", "pom.xml"))
+
+    expect(await hook("subagent-stop", subagentStopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const { exitCode, stderr } = await hook("stop", stopInput(false))
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain("billing/checkstyle")
+    expect(stderr).not.toContain("orders/checkstyle")
+  })
+
+  it("lets the subagent stop after 3 blocks, and the main agent's stop gets the failures", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await subagentEdits(JAVA_FILE())
+
+    const attempts = [await hook("subagent-stop", subagentStopInput(false))]
+    for (let index = 0; index < 3; index++) attempts.push(await hook("subagent-stop", subagentStopInput(true)))
+
+    expect(attempts.map((attempt) => attempt.exitCode)).toEqual([2, 2, 2, 0])
+    expect(attempts[3]).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const { exitCode, stderr } = await hook("stop", stopInput(false))
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+  })
+
+  it("runs nothing at the next stop of a subagent whose checks passed, until it changes a file again", async () => {
+    writeCheck("task-end", PASSING_XML)
+    await subagentEdits(JAVA_FILE())
+    expect((await hook("subagent-stop", subagentStopInput(false))).exitCode).toBe(0)
+    writeFileSync(join(projectDir, "report.xml"), VIOLATIONS_XML)
+
+    expect((await hook("subagent-stop", subagentStopInput(false))).exitCode).toBe(0)
+    await subagentEdits(JAVA_FILE())
+    expect((await hook("subagent-stop", subagentStopInput(false))).exitCode).toBe(2)
+  })
+
+  it("forgets, after a week, the files of a subagent that never stopped", async () => {
+    writeCheck("task-end", PASSING_XML)
+    const records = join(userStateDir(), "interlint", "claude-code-subagents")
+    mkdirSync(records, { recursive: true })
+    const stale = join(records, "interrupted-subagent")
+    writeFileSync(stale, "orders/pom.xml\n")
+    const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000
+    utimesSync(stale, eightDaysAgo, eightDaysAgo)
+
+    await subagentEdits(JAVA_FILE())
+
+    expect(existsSync(stale)).toBe(false)
+    expect(readdirSync(records)).toHaveLength(1)
+  })
+
+  it("counts the blocks of each subagent on its own", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await subagentEdits(JAVA_FILE(), "writer-1")
+    await subagentEdits(JAVA_FILE(), "writer-2")
+    await hook("subagent-stop", subagentStopInput(false, "writer-1"))
+    await hook("subagent-stop", subagentStopInput(true, "writer-1"))
+
+    expect((await hook("subagent-stop", subagentStopInput(false, "writer-2"))).stderr).toMatch(/\(attempt 1 of 3\)/)
   })
 })
 

@@ -6,17 +6,21 @@ import type { PlannedFile } from "../files/project-files.js"
 export const SETTINGS_FILE = ".claude/settings.json"
 
 interface InterlintHook {
-  event: "PostToolUse" | "Stop"
+  event: "PostToolUse" | "Stop" | "SubagentStop"
   matcher?: string
   command: string
-  /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop one, Claude Code's default. */
+  /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones, Claude Code's default. */
   timeout: number
 }
 
-/** `Edit` and `Write` are the tools that change source files; `NotebookEdit` only changes notebooks. */
+/**
+ * `Edit` and `Write` are the tools that change source files; `NotebookEdit` only changes notebooks.
+ * `Stop` fires for the main agent only; a subagent fires `SubagentStop`, so it gets the failures of its own changes.
+ */
 const HOOKS: InterlintHook[] = [
   { event: "PostToolUse", matcher: "Edit|Write", command: "interlint hook claude-code post-edit", timeout: 120 },
   { event: "Stop", command: "interlint hook claude-code stop", timeout: 600 },
+  { event: "SubagentStop", command: "interlint hook claude-code subagent-stop", timeout: 600 },
 ]
 
 export class SettingsError extends Error {}

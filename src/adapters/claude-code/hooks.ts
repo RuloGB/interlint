@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { userStateDir } from "../state/user-state.js"
 
@@ -17,6 +17,8 @@ export interface HookInput {
   filePath?: string
   /** Whether Claude Code is already continuing because a stop hook blocked. */
   stopHookActive: boolean
+  /** The subagent the hook fires in. Claude Code leaves it out for the main agent. */
+  agentId?: string
 }
 
 export class HookInputError extends Error {}
@@ -31,7 +33,7 @@ export function parseHookInput(text: string): HookInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new HookInputError("the hook input on stdin is not a JSON object")
   }
-  const { session_id, cwd, tool_input, stop_hook_active } = value as Record<string, unknown>
+  const { session_id, cwd, tool_input, stop_hook_active, agent_id } = value as Record<string, unknown>
   const filePath =
     typeof tool_input === "object" && tool_input !== null ? (tool_input as { file_path?: unknown }).file_path : undefined
   return {
@@ -39,7 +41,56 @@ export function parseHookInput(text: string): HookInput {
     cwd: typeof cwd === "string" && cwd !== "" ? cwd : undefined,
     filePath: typeof filePath === "string" && filePath !== "" ? filePath : undefined,
     stopHookActive: stop_hook_active === true,
+    agentId: typeof agent_id === "string" && agent_id !== "" ? agent_id : undefined,
   }
+}
+
+/** A subagent that never stopped, interrupted or in a session that ended, leaves its files this long at most. */
+const SUBAGENT_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Remembers the files a subagent changed, relative to the project, so its stop checks the projects that hold them.
+ * Each hook run is its own process, so they are kept in a file per session and subagent, one per line. The lines are
+ * appended, so the hooks of parallel edits never drop each other's files.
+ */
+export function recordSubagentFiles(input: HookInput, files: string[]) {
+  if (input.agentId === undefined || files.length === 0) return
+  const file = stateFile("claude-code-subagents", input)
+  try {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    forgetStaleRecords(dirname(file))
+    appendFileSync(file, files.map((path) => `${path}\n`).join(""))
+  } catch {
+    // The main agent's stop still checks every changed project.
+  }
+}
+
+function forgetStaleRecords(dir: string) {
+  const now = Date.now()
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    try {
+      if (now - statSync(path).mtimeMs > SUBAGENT_RECORD_TTL_MS) rmSync(path, { force: true })
+    } catch {
+      // Removed by another hook meanwhile.
+    }
+  }
+}
+
+/** The files the subagent changed since its checks last passed: none for the main agent or a read-only subagent. */
+export function subagentFiles(input: HookInput): string[] {
+  if (input.agentId === undefined) return []
+  try {
+    const lines = readFileSync(stateFile("claude-code-subagents", input), "utf8").split("\n")
+    return [...new Set(lines.filter((line) => line !== ""))]
+  } catch {
+    return []
+  }
+}
+
+/** Forgets the subagent's files: its checks passed, or the main agent answers for them now. */
+export function forgetSubagentFiles(input: HookInput) {
+  if (input.agentId !== undefined) rmSync(stateFile("claude-code-subagents", input), { force: true })
 }
 
 /** What the post-edit hook sends to Claude when the checks fail. */
@@ -51,13 +102,14 @@ export type StopDecision = { action: "end" } | { action: "block"; text: string }
 
 /**
  * Decides what the stop hook does with the task-end report, empty when every check passed.
- * Each hook run is its own process, so the blocks in a row are counted in a file per session.
+ * Each hook run is its own process, so the blocks in a row are counted in a file per session, and per subagent
+ * for a subagent's stop.
  * A stop that Claude Code did not reach by continuing after a stop hook starts a new count.
  * Past the limit the count stays, so stops in the same row (another stop hook may keep
  * Claude going) end quietly instead of blocking again.
  */
 export function decideStop(input: HookInput, report: string): StopDecision {
-  const file = blockCountFile(input.sessionId)
+  const file = stateFile("claude-code-stop", input)
   if (report === "") {
     rmSync(file, { force: true })
     return { action: "end" }
@@ -88,10 +140,12 @@ function saveBlockCount(file: string, count: number) {
   }
 }
 
-function blockCountFile(sessionId: string): string {
-  // Hashed, because the session ID comes from the hook input and goes into a path.
-  const name = createHash("sha256").update(sessionId).digest("hex").slice(0, 32)
-  return join(userStateDir(), "interlint", "claude-code-stop", name)
+/** A state file of the session, or of one of its subagents. */
+function stateFile(kind: "claude-code-stop" | "claude-code-subagents", { sessionId, agentId }: HookInput): string {
+  // Hashed, because the IDs come from the hook input and go into a path. The main agent keeps its old name.
+  const key = agentId === undefined ? sessionId : `${sessionId}\0${agentId}`
+  const name = createHash("sha256").update(key).digest("hex").slice(0, 32)
+  return join(userStateDir(), "interlint", kind, name)
 }
 
 function readBlockCount(file: string): number {
