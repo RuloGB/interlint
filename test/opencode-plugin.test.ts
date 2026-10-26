@@ -119,9 +119,14 @@ type PluginEvent = { type: string; data?: { sessionID?: string } }
 /**
  * A fake OpenCode V2 plugin context that records what the plugin sends to the session.
  * `events` are delivered when the plugin subscribes; `emit` delivers more later, the way turns go on.
- * `sessions` maps a session ID to its parent, for the sessions a subagent runs in.
+ * `sessions` maps a session ID to its parent, for the sessions a subagent runs in, and to how many lookups fail first.
+ * Sending a message to a session in `failingSynthetic` throws.
  */
-function fakeContext(events: PluginEvent[] = [], sessions: Record<string, { parentID?: string }> = {}) {
+function fakeContext(
+  events: PluginEvent[] = [],
+  sessions: Record<string, { parentID?: string; failedLookups?: number }> = {},
+  failingSynthetic: string[] = [],
+) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
   const hooks = new Map<string, (event: ToolEvent) => Promise<void> | void>()
   const queue = [...events]
@@ -134,10 +139,16 @@ function fakeContext(events: PluginEvent[] = [], sessions: Record<string, { pare
     options: {} as Record<string, unknown>,
     session: {
       get: async (input: { sessionID: string }) => {
+        const session = sessions[input.sessionID]
         if (input.sessionID === "missing") throw new Error("Session not found")
-        return { id: input.sessionID, ...sessions[input.sessionID] }
+        if (session?.failedLookups) {
+          session.failedLookups--
+          throw new Error("Session lookup failed")
+        }
+        return { id: input.sessionID, parentID: session?.parentID }
       },
       synthetic: async (input: { sessionID: string; text: string; resume?: boolean }) => {
+        if (failingSynthetic.includes(input.sessionID)) throw new Error("synthetic failed")
         sent.push({ sessionID: input.sessionID, text: input.text, resume: input.resume })
       },
     },
@@ -447,6 +458,37 @@ describe("OpenCode plugin with subagents", () => {
     await settled()
 
     expect(runs).toEqual([TASK_END])
+  })
+
+  it("does not keep the main agent waiting for a subagent whose turn end it once took for the main agent's", async () => {
+    const broken = { exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" }
+    const { runs, run } = checksGiving(broken)
+    const { ctx, done, emit, afterTool } = fakeContext([], { writer: { parentID: "main", failedLookups: 1 } })
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    emit(SUCCEEDED, "main")
+    await settled()
+
+    expect(runs).toEqual([TASK_END, TASK_END])
+  })
+
+  it("still runs the main agent's checks when the message about a subagent's failures cannot be sent", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS, VIOLATIONS, VIOLATIONS, VIOLATIONS)
+    const { ctx, done, emit, afterTool } = fakeContext([], SESSIONS, ["main"])
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "main")
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) await writerTurn(emit)
+
+    expect(runs.at(-1)).toEqual(TASK_END)
   })
 
   it("leaves the answer of a background subagent alone", async () => {

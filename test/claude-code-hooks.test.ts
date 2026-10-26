@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -367,6 +367,21 @@ describe("interlint hook claude-code subagent-stop", () => {
     expect((await hook("subagent-stop", subagentStopInput(false))).exitCode).toBe(0)
     await subagentEdits(JAVA_FILE())
     expect((await hook("subagent-stop", subagentStopInput(false))).exitCode).toBe(2)
+  })
+
+  it("forgets, after a week, the files of a subagent that never stopped", async () => {
+    writeCheck("task-end", PASSING_XML)
+    const records = join(userStateDir(), "interlint", "claude-code-subagents")
+    mkdirSync(records, { recursive: true })
+    const stale = join(records, "interrupted-subagent")
+    writeFileSync(stale, "orders/pom.xml\n")
+    const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000
+    utimesSync(stale, eightDaysAgo, eightDaysAgo)
+
+    await subagentEdits(JAVA_FILE())
+
+    expect(existsSync(stale)).toBe(false)
+    expect(readdirSync(records)).toHaveLength(1)
   })
 
   it("counts the blocks of each subagent on its own", async () => {

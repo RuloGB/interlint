@@ -47,7 +47,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 
 A subagent running in the background may still be fixing its failures when the main agent finishes; then the main agent's `stop` sees them too. Two agents that change the same project share its failures: Interlint checks projects, not lines.
 
-The count of blocks, per session and per subagent, and the files each subagent changed are kept in your user's state directory: `%LOCALAPPDATA%\interlint` on Windows, `$XDG_STATE_HOME/interlint` or `~/.local/state/interlint` elsewhere. A relative `LOCALAPPDATA` or `XDG_STATE_HOME` is ignored.
+The count of blocks, per session and per subagent, and the files each subagent changed are kept in your user's state directory; the files of a subagent that never stopped are forgotten after a week: `%LOCALAPPDATA%\interlint` on Windows, `$XDG_STATE_HOME/interlint` or `~/.local/state/interlint` elsewhere. A relative `LOCALAPPDATA` or `XDG_STATE_HOME` is ignored.
 
 ## `interlint hook claude-code`
 

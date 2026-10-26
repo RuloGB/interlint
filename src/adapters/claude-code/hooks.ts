@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { userStateDir } from "../state/user-state.js"
 
@@ -45,19 +45,35 @@ export function parseHookInput(text: string): HookInput {
   }
 }
 
+/** A subagent that never stopped, interrupted or in a session that ended, leaves its files this long at most. */
+const SUBAGENT_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
 /**
  * Remembers the files a subagent changed, relative to the project, so its stop checks the projects that hold them.
- * Each hook run is its own process, so they are kept in a file per session and subagent.
+ * Each hook run is its own process, so they are kept in a file per session and subagent, one per line. The lines are
+ * appended, so the hooks of parallel edits never drop each other's files.
  */
 export function recordSubagentFiles(input: HookInput, files: string[]) {
   if (input.agentId === undefined || files.length === 0) return
   const file = stateFile("claude-code-subagents", input)
-  const known = subagentFiles(input)
   try {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-    writeFileSync(file, JSON.stringify([...new Set([...known, ...files])]))
+    forgetStaleRecords(dirname(file))
+    appendFileSync(file, files.map((path) => `${path}\n`).join(""))
   } catch {
     // The main agent's stop still checks every changed project.
+  }
+}
+
+function forgetStaleRecords(dir: string) {
+  const now = Date.now()
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    try {
+      if (now - statSync(path).mtimeMs > SUBAGENT_RECORD_TTL_MS) rmSync(path, { force: true })
+    } catch {
+      // Removed by another hook meanwhile.
+    }
   }
 }
 
@@ -65,8 +81,8 @@ export function recordSubagentFiles(input: HookInput, files: string[]) {
 export function subagentFiles(input: HookInput): string[] {
   if (input.agentId === undefined) return []
   try {
-    const files: unknown = JSON.parse(readFileSync(stateFile("claude-code-subagents", input), "utf8"))
-    return Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : []
+    const lines = readFileSync(stateFile("claude-code-subagents", input), "utf8").split("\n")
+    return [...new Set(lines.filter((line) => line !== ""))]
   } catch {
     return []
   }

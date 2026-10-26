@@ -321,9 +321,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const note = parentNote(sessionID, settled)
         const parent = await parentOf(sessionID)
         if (!note || parent === undefined) return
-        // The parent resumes, and its own turn end runs its checks.
-        if (note.resume) deferred.delete(parent)
         await ctx.session.synthetic({ sessionID: parent, text: note.text, description: "Interlint", resume: note.resume })
+        // The parent resumes, and its own turn end runs its checks. If the message failed, the flush runs them.
+        if (note.resume) deferred.delete(parent)
       }
 
       /** Starts the fix loop of a subagent, or returns the one already running. */
@@ -353,6 +353,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           return
         }
         if (running.has(sessionID)) return
+        // The main agent's checks cover every changed project, its own files included, so none is left waiting.
+        // A subagent taken for the main agent once, when its lookup failed, would otherwise defer the real one forever.
+        written.delete(sessionID)
         // The failures of a subagent's changes are that subagent's to fix first. Marked before looking, so a subagent
         // that settles meanwhile finds it; if that flush took it, the flush runs the checks instead.
         deferred.add(sessionID)
@@ -360,10 +363,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         running.add(sessionID)
         try {
           const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS))
-          if (decision.action === "none") {
-            written.delete(sessionID)
-            return
-          }
+          if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,
             text: decision.text,
