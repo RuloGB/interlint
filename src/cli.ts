@@ -26,7 +26,8 @@ export const EXIT = { passed: 0, violations: 1, error: 2 } as const
 const USAGE = `Usage:
   interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
                                                                Detect the project's checks and write interlint.yaml
-  interlint check [--when task-end] [--changed] [--cwd <dir>]  Run every check in interlint.yaml
+  interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
+                                                               Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
   interlint hook claude-code post-edit|stop                    Claude Code hook: reads the hook's JSON on stdin
 
@@ -37,6 +38,8 @@ mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 --changed runs only the checks of the projects that changed since their checks last passed:
 a file changed, or an edit check named one of its files. The agent integrations use it.
+At task end, --file runs only the checks of the projects that hold one of those files: the agent
+integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
 Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
@@ -108,7 +111,6 @@ async function check(args: string[], io: Io): Promise<number> {
   const when = values.when ?? "task-end"
   const files = values.file ?? []
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
-  if (when === "task-end" && files.length > 0) throw new UsageError("--file is only valid with --when edit")
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
 
@@ -116,7 +118,13 @@ async function check(args: string[], io: Io): Promise<number> {
   const output =
     when === "edit"
       ? await runAndFormat(projectDir, "edit", projectFiles(io.cwd, projectDir, files))
-      : await runAndFormat(projectDir, "task-end", [], values.changed === true)
+      : await runAndFormat(
+          projectDir,
+          "task-end",
+          // Files given but all outside the project hold no project, so nothing runs for them.
+          files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined,
+          values.changed === true,
+        )
   if (output === "") return EXIT.passed
   io.stdout(output)
   return EXIT.violations
@@ -124,19 +132,20 @@ async function check(args: string[], io: Io): Promise<number> {
 
 /**
  * Runs the checks for `when` and formats their failures for the agent: empty when every check passed.
- * `changedOnly` runs at task end only the projects that changed since their checks last passed.
+ * `changedOnly` runs at task end only the projects that changed since their checks last passed, and `changedFiles`,
+ * when given, only the projects that hold one of them.
  */
 async function runAndFormat(
   projectDir: string,
   when: "edit" | "task-end",
-  changedFiles: string[],
+  changedFiles: string[] | undefined,
   changedOnly = false,
 ): Promise<string> {
   const config = loadConfig(projectDir)
   const outcomes =
     when === "edit"
-      ? await runEditChecks(projectDir, config, changedFiles, DEPS)
-      : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly })
+      ? await runEditChecks(projectDir, config, changedFiles ?? [], DEPS)
+      : await runTaskEndChecks(projectDir, config, DEPS, { changedOnly, files: changedFiles })
   return formatOutcomes(outcomes)
 }
 
@@ -174,7 +183,7 @@ async function hook(args: string[], io: Io): Promise<number> {
     }
 
     // Only the projects the agent changed since their checks last passed, as the OpenCode plugin does.
-    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", [], true))
+    const decision = decideStop(input, await runAndFormat(projectDir, "task-end", undefined, true))
     if (decision.action === "block") {
       io.stderr(decision.text)
       return HOOK_EXIT.block

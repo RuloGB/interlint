@@ -31,11 +31,17 @@ export interface CheckDeps {
 export interface TaskEndOptions {
   /** Runs only the checks of the projects that changed since their checks last passed, as the agent's task end does. */
   changedOnly?: boolean
+  /**
+   * Runs only the projects that hold one of these files, relative to the project: those an agent changed,
+   * so it gets the failures of its own projects only.
+   */
+  files?: string[]
 }
 
 /**
  * Runs the checks that apply at task end: all of them, `edit` ones included, or with `changedOnly` those of the
- * projects that changed. A project whose checks all pass is remembered as passing, as it is now.
+ * projects that changed, and with `files` only those of the projects that hold one of them.
+ * A project whose checks all pass is remembered as passing, as it is now.
  * A check whose `dir` does not exist fails every time, changed or not, so a typo in `dir` never goes unnoticed;
  * the other projects still run.
  */
@@ -43,10 +49,11 @@ export async function runTaskEndChecks(
   projectDir: string,
   config: Config,
   deps: CheckDeps,
-  { changedOnly = false }: TaskEndOptions = {},
+  { changedOnly = false, files }: TaskEndOptions = {},
 ): Promise<CheckOutcome[]> {
   return deps.lock(projectDir, async () => {
-    const present = config.checks.filter((check) => deps.hasDirectory(checkDirOf(projectDir, check)))
+    const holds = (check: Check) => files === undefined || files.some((file) => isInProjectOf(check, file))
+    const present = config.checks.filter((check) => holds(check) && deps.hasDirectory(checkDirOf(projectDir, check)))
     // Looked up before the checks run, so an edit made while they run keeps its project changed.
     const projects = [...new Set(present.map((check) => checkDirOf(projectDir, check)))].map((dir) => ({
       dir,
@@ -55,7 +62,7 @@ export async function runTaskEndChecks(
     const selected = changedOnly ? projects.filter(({ seen }) => seen.changed) : projects
     const dirs = selected.map(({ dir }) => dir)
     const checks = config.checks.filter(
-      (check) => !present.includes(check) || dirs.includes(checkDirOf(projectDir, check)),
+      (check) => holds(check) && (!present.includes(check) || dirs.includes(checkDirOf(projectDir, check))),
     )
     const outcomes = await runInOrder(projectDir, checks, deps)
     for (const { dir, seen } of selected) {
