@@ -119,12 +119,12 @@ Every check runs, `edit` ones included. A project whose checks all pass is remem
 interlint check --when task-end --changed
 ```
 
-With `--changed`, only the checks of the projects that changed since their checks last passed run. The OpenCode plugin and the Claude Code `stop` hook use it, so the end of a task never runs the checks of a project the agent did not touch. A project is a check's `dir`, or the directory of `interlint.yaml` for a check without one. It counts as changed when:
+With `--changed`, only the checks of the projects that changed since their checks last passed run. The OpenCode plugin and the Claude Code `stop` hook use it, so the end of a task does not run the checks of a project nobody changed. A project is a check's `dir`, or the directory of `interlint.yaml` for a check without one. It counts as changed when:
 
 - an edit check call (`--when edit`, which the agent integrations run after every edit) named one of its files, whatever the file is; or
 - a file was added, changed or removed since its checks last passed, by any means, such as a shell command. Build output (`target/`), `node_modules/` and hidden directories such as `.git/` do not count. A commit does not count either: it leaves the files as they are.
 
-A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
+A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project an edit touched while its checks ran. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
 
 ## Multi-module projects and workspaces
 
@@ -156,7 +156,7 @@ checks:
     when: task-end
 ```
 
-- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error.
+- `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory, or one that does not exist, is an error.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).

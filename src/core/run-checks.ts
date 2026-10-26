@@ -35,13 +35,18 @@ export async function runTaskEndChecks(
   { changedOnly = false }: TaskEndOptions = {},
 ): Promise<CheckOutcome[]> {
   return deps.lock(projectDir, async () => {
-    const projects = [...new Set(config.checks.map((check) => checkDirOf(projectDir, check)))]
-    const selected = changedOnly ? projects.filter((dir) => deps.changes.changed(dir)) : projects
-    const checks = config.checks.filter((check) => selected.includes(checkDirOf(projectDir, check)))
+    // Looked up before the checks run, so an edit made while they run keeps its project changed.
+    const projects = [...new Set(config.checks.map((check) => checkDirOf(projectDir, check)))].map((dir) => ({
+      dir,
+      seen: deps.changes.lookup(dir),
+    }))
+    const selected = changedOnly ? projects.filter(({ seen }) => seen.changed) : projects
+    const dirs = selected.map(({ dir }) => dir)
+    const checks = config.checks.filter((check) => dirs.includes(checkDirOf(projectDir, check)))
     const outcomes = await runInOrder(projectDir, checks, deps)
-    for (const dir of selected) {
+    for (const { dir, seen } of selected) {
       const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)
-      if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir)
+      if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir, seen)
     }
     return outcomes
   })

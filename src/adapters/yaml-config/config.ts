@@ -31,6 +31,11 @@ export function loadConfig(projectDir: string): Config {
   }
 
   const parsed = checks.map((entry, index) => parseCheck(entry, `checks[${index}]`))
+  parsed.forEach((check, index) => {
+    if (check.dir !== undefined && !existsSync(join(projectDir, check.dir))) {
+      throw invalid(`checks[${index}].dir "${check.dir}" does not exist`)
+    }
+  })
   assertUniqueNames(parsed)
   return { checks: parsed }
 }

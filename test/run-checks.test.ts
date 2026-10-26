@@ -16,7 +16,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     readers: { archunit: PASSING_READER, maven: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
-    changes: { changed: () => true, accept: () => {}, touch: () => {} },
+    changes: { lookup: () => ({ changed: true, record: undefined }), accept: () => {}, touch: () => {} },
   }
   return { deps, launched }
 }
@@ -181,8 +181,8 @@ describe("only the projects that changed", () => {
     const touched: string[] = []
     deps.run = async (command) => (launched.push(command), { exitCode: failing.includes(command) ? 1 : 0, output: "" })
     deps.changes = {
-      changed: (dir) => changed.includes(dir),
-      accept: (dir) => void accepted.push(dir),
+      lookup: (dir) => ({ changed: changed.includes(dir), record: `record of ${dir}` }),
+      accept: (dir, seen) => void accepted.push(seen.record === `record of ${dir}` ? dir : `${dir} (wrong record)`),
       touch: (dir) => void touched.push(dir),
     }
     return { deps, launched, accepted, touched }

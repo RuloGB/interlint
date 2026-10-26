@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -62,7 +62,24 @@ checks:
     expect(loadConfig(projectDir).checks[0]?.report).toBe("maven")
   })
 
+  it("rejects a directory that does not exist", () => {
+    writeConfig(`
+checks:
+  - name: orders/architecture
+    dir: orders
+    run: ./mvnw -q test
+    report: archunit
+    when: edit
+`)
+
+    expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
+      'interlint.yaml: checks[0].dir "orders" does not exist',
+    )
+  })
+
   it("reads the directory a check runs in, relative to interlint.yaml", () => {
+    mkdirSync(join(projectDir, "orders"))
+    mkdirSync(join(projectDir, "apps", "billing"), { recursive: true })
     writeConfig(`
 checks:
   - name: orders/architecture

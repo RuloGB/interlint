@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, sep } from "node:path"
 import type { ChangeTracker } from "../../core/ports.js"
@@ -19,16 +19,20 @@ export function fileChangeTracker(stateDir?: string): ChangeTracker {
   const recordOf = (projectDir: string) =>
     join(stateDir ?? join(userStateDir(), "interlint", "projects"), projectKey(projectDir))
   return {
-    changed(projectDir) {
+    lookup(projectDir) {
       const record = read(recordOf(projectDir))
-      if (record === undefined) return !save(recordOf(projectDir), fingerprint(projectDir))
-      return record === TOUCHED || record !== fingerprint(projectDir)
+      if (record === undefined) {
+        const reference = fingerprint(projectDir)
+        return { changed: !save(recordOf(projectDir), reference), record: reference }
+      }
+      return { changed: record.startsWith(TOUCHED) || record !== fingerprint(projectDir), record }
     },
-    accept(projectDir) {
-      save(recordOf(projectDir), fingerprint(projectDir))
+    accept(projectDir, seen) {
+      if (read(recordOf(projectDir)) === seen.record) save(recordOf(projectDir), fingerprint(projectDir))
     },
+    // Each touch is unique, so `accept` can tell a touch made while the checks ran from the one before them.
     touch(projectDir) {
-      save(recordOf(projectDir), TOUCHED)
+      save(recordOf(projectDir), `${TOUCHED} ${randomUUID()}`)
     },
   }
 }

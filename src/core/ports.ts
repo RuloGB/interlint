@@ -25,11 +25,20 @@ export interface ChangeTracker {
    * Whether the project changed since its checks last passed, or an edit touched it since. A project seen for the
    * first time counts as unchanged, and its files as they are become the reference.
    */
-  changed(projectDir: string): boolean
-  /** Records that every check of the project passed with its files as they are now. */
-  accept(projectDir: string): void
+  lookup(projectDir: string): ProjectChange
+  /**
+   * Records that every check of the project passed with its files as they are now, unless an edit touched the
+   * project after `seen` was looked up: that edit came while the checks ran, so they did not see it.
+   */
+  accept(projectDir: string, seen: ProjectChange): void
   /** Records that the agent changed a file of the project. */
   touch(projectDir: string): void
+}
+
+export interface ProjectChange {
+  changed: boolean
+  /** What the tracker held for the project when it was looked up, so `accept` can tell an edit came since. */
+  record: string | undefined
 }
 
 export interface ReportResult {
