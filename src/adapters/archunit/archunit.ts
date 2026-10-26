@@ -13,6 +13,12 @@ const BECAUSE = ", because "
 const RULE_ID = /^\[?[A-Z][A-Z0-9]*-\d+\]?/
 const LOCATION = /\(([\w$]+\.java):(\d+)\)\s*$/
 const FIRST_CODE_UNIT = /<([\w$.]+)/
+/** The parameter types of a method or constructor, as in `<com.acme.Order.<init>(java.lang.String, int)>`. */
+const SIGNATURE = /<[\w$.]+?(?:\.<(?:init|clinit)>)?\(([^()]*)\)>/g
+/** The type of a field, parameter or return value. A generic type can name a type variable, such as `<T>`, so it is left out. */
+const TYPE = /(?<!generic )(?:of type|return type|has type) <([^<>]+)>/g
+const SIMPLE_NAME = /^[A-Za-z_$][\w$]*$/
+const PRIMITIVES = new Set(["boolean", "byte", "char", "short", "int", "long", "float", "double", "void"])
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -53,7 +59,25 @@ export function readArchUnitReport(projectDir: string, before: ReportSnapshot): 
   for (const failure of failures) {
     for (const violation of failure.violations) resolvePath(projectDir, modules, violation)
   }
-  return { found: reports.length > 0, failures }
+  const typesWithoutPackage = typesWithoutPackageIn(failures)
+  return { found: reports.length > 0, failures, ...(typesWithoutPackage.length > 0 ? { typesWithoutPackage } : {}) }
+}
+
+/**
+ * The types the violations name without a package, in order of appearance. ArchUnit names every type in full, so
+ * a bare name comes from a class file that names it that way: one that Eclipse's compiler, as IDEs run it, writes
+ * when it cannot resolve a type. A class in the default package would show the same, but rules rarely analyze it.
+ */
+function typesWithoutPackageIn(failures: RuleFailure[]): string[] {
+  const types = failures.flatMap(({ violations }) =>
+    violations.flatMap(({ text }) => [
+      ...[...text.matchAll(SIGNATURE)].flatMap((match) => match[1]!.split(",")),
+      ...[...text.matchAll(TYPE)].map((match) => match[1]!),
+    ]),
+  )
+  return [...new Set(types.map((type) => type.trim().replace(/(?:\[\])+$/, "")))].filter(
+    (type) => SIMPLE_NAME.test(type) && !PRIMITIVES.has(type),
+  )
 }
 
 export const archUnitReader: ReportReader = { snapshot: snapshotReports, read: readArchUnitReport }
