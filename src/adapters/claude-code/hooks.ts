@@ -124,11 +124,16 @@ export function decideStop(input: HookInput, report: string): StopDecision {
     }
   }
   if (attempt > MAX_CONSECUTIVE_BLOCKS) return { action: "end" }
+  // A subagent that answers with a question instead of a fix only spends an attempt: nobody answers it.
+  const forSubagent = input.agentId === undefined ? "" : SUBAGENT_BLOCK_NOTE
   return {
     action: "block",
-    text: `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${report}`,
+    text: `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${forSubagent}${report}`,
   }
 }
+
+/** The same words as the OpenCode plugin's. */
+const SUBAGENT_BLOCK_NOTE = `Fix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n`
 
 function saveBlockCount(file: string, count: number) {
   try {

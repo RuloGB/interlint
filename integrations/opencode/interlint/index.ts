@@ -79,6 +79,17 @@ function blockText(attempt: number, output: string): string {
   return `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${output}`
 }
 
+/**
+ * The message that resumes a subagent whose task-end checks failed. A subagent that answers with a question instead
+ * of a fix only spends an attempt: nobody answers it, and its parent waits.
+ */
+function subagentBlockText(attempt: number, output: string): string {
+  return blockText(
+    attempt,
+    `Fix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n${output}`,
+  )
+}
+
 /** Decides what to do with a task-end check result. Keeps one block counter per session. */
 export class TaskEndGate {
   private readonly blocks = new Map<string, number>()
@@ -362,7 +373,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           // Registered before the resume, so the turn it starts cannot end unseen.
           const turnEnd = new Promise<TurnEnd>((resolve) => resumed.set(sessionID, { started: false, resolve }))
           try {
-            await ctx.session.synthetic({ sessionID, text: blockText(attempt, run.output), description: "Interlint", resume: true })
+            await ctx.session.synthetic({
+              sessionID,
+              text: subagentBlockText(attempt, run.output),
+              description: "Interlint",
+              resume: true,
+            })
           } catch (error) {
             resumed.delete(sessionID)
             throw error

@@ -315,7 +315,7 @@ describe("OpenCode plugin with subagents", () => {
     expect(sent).toEqual([
       {
         sessionID: "writer",
-        text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${VIOLATIONS.output}`,
+        text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\nFix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n${VIOLATIONS.output}`,
         resume: true,
       },
     ])
