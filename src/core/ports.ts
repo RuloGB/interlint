@@ -77,7 +77,7 @@ export interface ReportReader {
 export type ReportReaders = Record<Report, ReportReader>
 
 /**
- * At edit, the command limited to the changed files, given relative to the directory the check runs in, when its
- * tool can be told to check only some files. Otherwise the command as it is.
+ * At edit, the command limited to the changed files, given relative to `dir`, the directory the check runs in, when
+ * its tool can be told to check only some files. Otherwise the command as it is.
  */
-export type EditScope = (command: string, files: string[]) => string
+export type EditScope = (command: string, files: string[], dir: string) => string

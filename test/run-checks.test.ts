@@ -326,8 +326,8 @@ describe("a report that also lists what the build accepted", () => {
 describe("an edit check whose tool can check only some files", () => {
   it("is limited to the changed sources of its project, given relative to its dir", async () => {
     const { deps, launched } = fakeDeps({ mvnd: true })
-    const scoped: string[][] = []
-    deps.editScopes = { maven: (command, files) => (scoped.push(files), `${command} --only`) }
+    const scoped: { files: string[]; dir: string }[] = []
+    deps.editScopes = { maven: (command, files, dir) => (scoped.push({ files, dir }), `${command} --only`) }
     const quality: Check = { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" }
 
     await runEditChecks(
@@ -337,7 +337,7 @@ describe("an edit check whose tool can check only some files", () => {
       deps,
     )
 
-    expect(scoped).toEqual([["app/src/main/java/shop/Order.java"]])
+    expect(scoped).toEqual([{ files: ["app/src/main/java/shop/Order.java"], dir: "/ws/orders" }])
     expect(launched).toEqual(["mvnd -q checkstyle:check --only"])
   })
 

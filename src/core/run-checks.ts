@@ -139,7 +139,8 @@ async function runInOrder(
       continue
     }
     const scope = deps.editScopes[check.report]
-    const scoped = scope ? scope(command, edited.map((file) => inProject(check, file))) : command
+    const files = edited.map((file) => inProject(check, file))
+    const scoped = scope ? scope(command, files, checkDirOf(projectDir, check)) : command
     const onlyFiles = EDIT_SHOWS_CHANGED_FILES_ONLY[check.report] ? edited : undefined
     outcomes.push(await runCheck(projectDir, check, scoped, deps, onlyFiles))
   }

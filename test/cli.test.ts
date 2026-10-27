@@ -257,7 +257,9 @@ process.exit(${files.length > 0 ? 1 : 0})
 
     await run("check", "--when", "edit", "--file", ORDER)
 
-    expect(argsOfRuns()).toBe("checkstyle:check@style -Dcheckstyle.includes=shop/Order.java\n")
+    expect(argsOfRuns()).toBe(
+      "checkstyle:check@style -Dcheckstyle.includes=shop/Order.java -Dcheckstyle.includeResources=false -Dcheckstyle.includeTestResources=false\n",
+    )
   })
 
   it("shows only the failures of the changed file, with its rule and file:line", async () => {
