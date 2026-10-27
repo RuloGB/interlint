@@ -1,10 +1,12 @@
-# Interlint
-
-**Your AI coding agent breaks your architecture rules. Interlint makes it fix them before it moves on.**
+<h1 align="center">
+  <img src="assets/logo/interlint-banner.svg" alt="Interlint: your AI agent breaks your project rules. Make it fix them before it moves on." width="100%">
+</h1>
 
 Interlint runs the checks your project **already has**, such as ArchUnit, inside the agent's session. When the agent breaks a rule, it hears about it right away and fixes it in the same session, not in CI and not by hand.
 
-> **Status:** 1.4.0. It works today with ArchUnit, Checkstyle, PMD, Maven (including multi-module projects and workspaces), OpenCode V2 and Claude Code.
+**Works with [Claude Code](docs/claude-code.md) and [OpenCode](docs/opencode.md)**, on Maven projects that use ArchUnit, Checkstyle or PMD.
+
+> **Status:** 1.4.0. Stable for Maven projects, including multi-module projects and workspaces of several projects.
 
 ## The problem
 
@@ -17,7 +19,7 @@ By then the agent's session is over, and someone has to fix the code by hand.
 
 ## What Interlint does
 
-- **After each edit,** fast checks run and any violation goes straight back to the agent.
+- **After each edit,** fast checks run and any violation goes straight back to the agent. This needs [`mvnd`](#install-mvnd-strongly-recommended).
 - **At task end,** the full checks run, for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
@@ -51,29 +53,36 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
    npm install -g interlint
    ```
 
-2. In the root of your project, or of a workspace that holds several Maven projects, set up your agent:
+2. In the root of your project, or of a workspace that holds several Maven projects, set up your agent.
 
-   ```bash
-   interlint init --agent opencode
-   ```
-
-   or, for Claude Code:
+   For **Claude Code**:
 
    ```bash
    interlint init --agent claude-code
    ```
 
-3. Commit the generated `interlint.yaml` (and `.opencode/` or `.claude/settings.json`), then start your agent as usual.
+   For **OpenCode**:
 
-For the fastest feedback after each edit, install [`mvnd`](https://github.com/apache/maven-mvnd). Without it, Maven checks run only at task end.
+   ```bash
+   interlint init --agent opencode
+   ```
+
+3. Commit the generated `interlint.yaml` (and `.claude/settings.json` or `.opencode/`), then start your agent as usual.
+
+### Install mvnd (strongly recommended)
+
+> [!IMPORTANT]
+> Without [`mvnd`](https://github.com/apache/maven-mvnd) on your `PATH`, Interlint cannot check after each edit. Every check waits for task end, so the agent only hears about a broken rule when it tries to finish, after it may have built more code on top of it.
+
+`mvnd` keeps Maven running between checks, which makes a check after each edit fast enough. Install it following the instructions in [its repository](https://github.com/apache/maven-mvnd). Interlint finds it on its own: there is nothing to change in `interlint.yaml`.
 
 ## Supported today
 
 | | |
 |---|---|
-| Agents | OpenCode V2, Claude Code |
+| Agents | Claude Code, OpenCode V2 |
 | Checks | ArchUnit, Checkstyle, PMD |
-| Build | Maven, with or without the Maven Wrapper or `mvnd` |
+| Build | Maven, with or without the Maven Wrapper; `mvnd` for checks after each edit |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven projects (other projects in it are ignored) |
 
 ## Known limits
@@ -91,7 +100,3 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 ## License
 
 [MIT](LICENSE)
-
-## Planned
-
-- `interlint audit`, to find mismatches between `AGENTS.md` and your ArchUnit rules.

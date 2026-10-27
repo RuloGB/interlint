@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" role="img" aria-label="Interlint: your AI agent breaks your project rules. Make it fix them before it moves on.">
+  <defs>
+    <clipPath id="frame"><rect width="1280" height="400" rx="24"/></clipPath>
+    <g id="mark" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M57 10.6 A34 34 0 1 1 28.4 8.1" stroke="#34D399" stroke-width="9"/>
+      <polygon points="36.9,5 30.8,14.7 26,1.5" fill="#34D399" stroke="#34D399" stroke-width="3"/>
+      <path d="M25 41 L35 51 L55 30" stroke="#FFFFFF" stroke-width="8"/>
+    </g>
+  </defs>
+  <rect width="1280" height="400" rx="24" fill="#0F172A"/>
+  <g clip-path="url(#frame)" fill="none">
+    <circle cx="1210" cy="410" r="250" stroke="#34D399" stroke-width="48" opacity="0.06"/>
+    <circle cx="-30" cy="-40" r="160" stroke="#E0E7FF" stroke-width="2" opacity="0.06"/>
+  </g>
+
+  <g transform="translate(72 80) scale(1.25)">
+    <use href="#mark"/>
+    <g transform="translate(102 6)" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+      <g stroke="#E0E7FF">
+        <path d="M3.5 8 H23.5 M3.5 60 H23.5 M13.5 8 V60"/>
+        <path d="M41.5 24 V60 M41.5 37 A13 13 0 0 1 67.5 37 V60"/>
+        <path d="M88 10 V48 A12 12 0 0 0 100 60 M80 24 H99"/>
+        <path d="M116 42 H152 A18 18 0 1 0 146.7 54.7"/>
+        <path d="M169 24 V60 M169 40 A16 16 0 0 1 185 24"/>
+      </g>
+      <g stroke="#34D399">
+        <path d="M200 8 V60"/>
+        <path d="M218 24 V60"/>
+        <path d="M236 24 V60 M236 37 A13 13 0 0 1 262 37 V60"/>
+        <path d="M282.5 10 V48 A12 12 0 0 0 294.5 60 M274.5 24 H293.5"/>
+      </g>
+      <circle cx="218" cy="9" r="5" fill="#34D399"/>
+    </g>
+  </g>
+
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="600">
+    <text x="76" y="248" fill="#E0E7FF">Your AI agent breaks your project rules.</text>
+    <text x="76" y="280" fill="#34D399">Make it fix them before it moves on.</text>
+  </g>
+
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16">
+    <text x="76" y="340" fill="#64748B">Runs your existing checks:</text>
+    <g fill="#CBD5E1" text-anchor="middle">
+      <rect x="292" y="318" width="100" height="34" rx="17" fill="#1E293B" stroke="#334155"/>
+      <text x="342" y="340">ArchUnit</text>
+      <rect x="402" y="318" width="116" height="34" rx="17" fill="#1E293B" stroke="#334155"/>
+      <text x="460" y="340">Checkstyle</text>
+      <rect x="528" y="318" width="62" height="34" rx="17" fill="#1E293B" stroke="#334155"/>
+      <text x="559" y="340">PMD</text>
+    </g>
+  </g>
+
+  <rect x="780" y="52" width="428" height="300" rx="14" fill="#020617" stroke="#1E293B" stroke-width="2"/>
+  <circle cx="804" cy="74" r="6" fill="#334155"/>
+  <circle cx="824" cy="74" r="6" fill="#334155"/>
+  <circle cx="844" cy="74" r="6" fill="#334155"/>
+  <text x="994" y="79" text-anchor="middle" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#64748B">Claude Code</text>
+  <path d="M781 92 H1207" stroke="#1E293B" stroke-width="2"/>
+
+  <rect x="796" y="130" width="396" height="84" rx="4" fill="#34D399" opacity="0.08"/>
+  <rect x="796" y="130" width="3" height="84" fill="#34D399"/>
+  <rect x="796" y="252" width="396" height="56" rx="4" fill="#34D399" opacity="0.08"/>
+  <rect x="796" y="252" width="3" height="56" fill="#34D399"/>
+  <use href="#mark" transform="translate(809.6 136.6) scale(0.16)"/>
+  <use href="#mark" transform="translate(809.6 258.6) scale(0.16)"/>
+  <path d="M812 168 L820 176 M820 168 L812 176" stroke="#F87171" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M811 291 L815 295 L823 286" fill="none" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <text x="804" y="120" fill="#94A3B8">› edit domain/Order.java</text>
+    <text x="830" y="148"><tspan fill="#34D399" font-weight="700">Interlint</tspan><tspan fill="#64748B"> · after edit</tspan></text>
+    <text x="830" y="176" fill="#F87171">ARCH-01 domain depends on infra</text>
+    <text x="830" y="204" fill="#64748B">Order.java:27 calls OrderEntity</text>
+    <text x="804" y="242" fill="#94A3B8">› fix: remove the dependency</text>
+    <text x="830" y="270"><tspan fill="#34D399" font-weight="700">Interlint</tspan><tspan fill="#64748B"> · task end</tspan></text>
+    <text x="830" y="298" fill="#34D399">all checks green</text>
+    <text x="804" y="332" fill="#E0E7FF">› task complete</text>
+  </g>
+</svg>
