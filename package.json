@@ -1,6 +1,6 @@
 {
   "name": "interlint",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Make your AI coding agent fix the rules it breaks before it moves on. Runs your existing ArchUnit, Checkstyle and PMD checks inside Claude Code and OpenCode.",
   "type": "module",
   "license": "MIT",
