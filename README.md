@@ -79,7 +79,7 @@ For the fastest feedback after each edit, install [`mvnd`](https://github.com/ap
 ## Known limits
 
 - Only Maven projects.
-- Checkstyle and PMD run over the whole project, so `init` sets them to run at task end, not after each edit.
+- After an edit, PMD still checks the whole project: it cannot be limited to one file from the command line. Only the failures of the changed file are shown; Checkstyle checks that file alone.
 
 ## Documentation
 

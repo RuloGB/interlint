@@ -18,6 +18,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     lock: (_projectDir, work) => work(),
     changes: { lookup: () => ({ changed: true, record: undefined, fingerprint: "" }), accept: () => {}, touch: () => {} },
     hasDirectory: () => true,
+    editScopes: {},
   }
   return { deps, launched }
 }
@@ -304,10 +305,50 @@ describe("a report that also lists what the build accepted", () => {
     expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
   })
 
+  it("keeps at edit an ArchUnit failure in a class the edit did not change", async () => {
+    const deps = depsExiting(1)
+    const elsewhere = { title: "ARCH-01", violations: [{ text: "Customer calls OrderEntity", path: "src/main/java/shop/Customer.java" }] }
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [elsewhere] }) } }
+    deps.hasExecutable = () => true
+
+    const [outcome] = await runEditChecks("/repo", config(mavenEdit), ["src/main/java/shop/Order.java"], deps)
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [elsewhere] })
+  })
+
   it("leaves the ArchUnit rule as it was: its failures count even when the command exits 0", async () => {
     const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), depsExiting(0))
 
     expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
+  })
+})
+
+describe("an edit check whose tool can check only some files", () => {
+  it("is limited to the changed sources of its project, given relative to its dir", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: true })
+    const scoped: { files: string[]; dir: string }[] = []
+    deps.editScopes = { maven: (command, files, dir) => (scoped.push({ files, dir }), `${command} --only`) }
+    const quality: Check = { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" }
+
+    await runEditChecks(
+      "/ws",
+      config(quality),
+      ["orders/app/src/main/java/shop/Order.java", "orders/README.md", "billing/src/main/java/shop/Invoice.java"],
+      deps,
+    )
+
+    expect(scoped).toEqual([{ files: ["app/src/main/java/shop/Order.java"], dir: "/ws/orders" }])
+    expect(launched).toEqual(["mvnd -q checkstyle:check --only"])
+  })
+
+  it("runs as written at task end", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    deps.editScopes = { maven: (command) => `${command} --only` }
+    const quality: Check = { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" }
+
+    await runTaskEndChecks("/repo", config(quality), deps)
+
+    expect(launched).toEqual(["./mvnw -q checkstyle:check"])
   })
 })
 
