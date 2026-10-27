@@ -21,11 +21,16 @@
  *
  * `session.idle` is not used: in OpenCode 2.1.4 it never reaches a plugin's event subscription.
  *
+ * One OpenCode server runs the sessions of every open project, and its plugins get the events and tool calls of all
+ * of them. The plugin acts only on the sessions that run in its own directory or inside it.
+ *
  * Install: `interlint init --agent opencode`, which copies this directory to `.opencode/plugins/interlint/`.
  * The file has no runtime imports besides Node built-ins: `Plugin.define` from `@opencode/plugin`
  * is the identity function, so the plain definition below is equivalent.
  */
 import { spawn } from "node:child_process"
+import { realpathSync } from "node:fs"
+import { resolve as resolvePath, sep } from "node:path"
 
 export const MAX_CONSECUTIVE_BLOCKS = 3
 /** Keeps the text injected into the session bounded, like the CLI does with build output. */
@@ -214,8 +219,11 @@ interface PluginContext {
   location: { directory: string }
   options?: { command?: unknown; timeoutMs?: unknown; editTimeoutMs?: unknown; subagentTimeoutMs?: unknown }
   session: {
-    /** A forked session has no `parentID`: only the sessions a subagent runs in have one. */
-    get(input: { sessionID: string }): Promise<{ parentID?: string }>
+    /**
+     * A forked session has no `parentID`: only the sessions a subagent runs in have one. `location` is where the
+     * session runs, which may be another project open in the same OpenCode.
+     */
+    get(input: { sessionID: string }): Promise<{ parentID?: string; location?: { directory?: unknown } }>
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
   event: {
@@ -253,7 +261,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const controller = new AbortController()
       /** The files each session changed with an edit tool since its own task-end checks last passed. */
       const written = new Map<string, Set<string>>()
-      const parents = new Map<string, string | undefined>()
+      /** What each session is to this plugin: its parent, and whether it runs in this plugin's project. */
+      const lookups = new Map<string, { parent: string | undefined; ours: boolean }>()
       const settling = new Map<string, Settling>()
       /** The sessions Interlint resumed, waiting for the end of the turn that resume started. */
       const resumed = new Map<string, { started: boolean; resolve: (end: TurnEnd) => void }>()
@@ -262,19 +271,28 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       /** Ends the wait of a deferred main session after subagentTimeoutMs, per main session. */
       const deferTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-      const parentOf = async (sessionID: string) => {
-        if (parents.has(sessionID)) return parents.get(sessionID)
+      const lookup = async (sessionID: string) => {
+        const known = lookups.get(sessionID)
+        if (known) return known
         try {
-          const { parentID } = await ctx.session.get({ sessionID })
+          const { parentID, location } = await ctx.session.get({ sessionID })
           const parent = typeof parentID === "string" ? parentID : undefined
-          parents.set(sessionID, parent)
-          return parent
+          // OpenCode runs the sessions of every open project in one server, and gives each plugin all their events.
+          const where = location?.directory
+          const ours = typeof where !== "string" || isWithin(where, directory)
+          const session = { parent, ours }
+          lookups.set(sessionID, session)
+          return session
         } catch (error) {
-          // Treated as the main agent: running its checks is better than not running them at all.
+          // Treated as this project's main agent: running its checks is better than not running them at all.
           console.error("[interlint] could not read session", sessionID, error)
-          return undefined
+          return { parent: undefined, ours: true }
         }
       }
+
+      const parentOf = async (sessionID: string) => (await lookup(sessionID)).parent
+      /** Whether the session runs in this plugin's project, so its changes are this project's to check. */
+      const isOurs = async (sessionID: string) => (await lookup(sessionID)).ours
 
       const rootOf = async (sessionID: string) => {
         let session = sessionID
@@ -315,7 +333,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const flushDeferred = async () => {
         for (const root of [...deferred]) {
           if (await hasUncheckedSubagent(root)) continue
-          undefer(root)
+          // The main session's own turn end may have taken it meanwhile, and runs the checks itself.
+          if (!undefer(root)) continue
           onTurnEnd(root).catch((error) => console.error("[interlint]", error))
         }
       }
@@ -417,7 +436,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       }
 
       const onTurnEnd = async (sessionID: string) => {
-        if (await parentOf(sessionID)) {
+        const { parent, ours } = await lookup(sessionID)
+        if (!ours) return
+        if (parent) {
           // A subagent gets only the failures of the projects it changed, and none if it changed nothing.
           if (written.get(sessionID)?.size) settle(sessionID)
           return
@@ -448,7 +469,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
 
       /** A subagent's turn failed or was interrupted: its parent answers for its unchecked changes. */
       const onTurnStopped = async (sessionID: string) => {
-        if (!(await parentOf(sessionID)) || settling.has(sessionID)) return
+        const { parent, ours } = await lookup(sessionID)
+        if (!ours || !parent || settling.has(sessionID)) return
         await handOver(sessionID)
         await flushDeferred()
       }
@@ -464,7 +486,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           return waiting.resolve("interrupted")
         }
         if (settling.has(sessionID)) return
-        if (parents.get(sessionID) !== undefined) await handOver(sessionID)
+        if (lookups.get(sessionID)?.parent !== undefined) await handOver(sessionID)
         else written.delete(sessionID)
         await flushDeferred()
       }
@@ -484,6 +506,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       // OpenCode waits for this hook before it sends the tool result to the agent.
       const afterTool = await ctx.tool.hook("execute.after", async (event) => {
         if (event.status !== "completed") return
+        // Only this project's edits are recorded, so a subagent it checks is always this project's.
         if (event.tool === SUBAGENT_TOOL) return await afterSubagent(event)
         const files = changedFiles(event.tool, event.input).filter((file) => {
           // A trailing backslash would escape the closing quote under sh.
@@ -491,7 +514,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           console.error("[interlint] skipping a path the shell could misread:", file)
           return false
         })
-        if (files.length === 0) return
+        if (files.length === 0 || !(await isOurs(event.sessionID))) return
         record(event.sessionID, files)
         const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file])]
         const run = await runChecks(directory, command, editTimeoutMs, args)
@@ -536,6 +559,29 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         void afterTool.dispose()
       }
     },
+  }
+}
+
+/**
+ * Whether `path` is `directory` or inside it. Both are compared as the real directories they name, so a symbolic
+ * link or another spelling of the same directory still matches, ignoring a trailing separator and, on Windows, case.
+ */
+function isWithin(path: string, directory: string): boolean {
+  const normal = (dir: string) => {
+    const real = realDirectory(dir)
+    return process.platform === "win32" ? real.toLowerCase() : real
+  }
+  const root = normal(directory)
+  const target = normal(path)
+  return target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)
+}
+
+/** The directory with its symbolic links resolved, or as written when it cannot be read. */
+function realDirectory(dir: string): string {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return resolvePath(dir)
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -120,15 +120,19 @@ type PluginEvent = { type: string; data?: { sessionID?: string } }
 /**
  * A fake OpenCode V2 plugin context that records what the plugin sends to the session.
  * `events` are delivered when the plugin subscribes; `emit` delivers more later, the way turns go on.
- * `sessions` maps a session ID to its parent, for the sessions a subagent runs in, and to how many lookups fail first.
+ * `sessions` maps a session ID to its parent, for the sessions a subagent runs in, to how many lookups fail first,
+ * and to the directory it runs in, `/repo` by default; `null` returns no location, as an older OpenCode might.
+ * The lookups of a `held` session wait until `release` answers them, the oldest first.
  * Sending a message to a session in `failingSynthetic` throws.
  */
 function fakeContext(
   events: PluginEvent[] = [],
-  sessions: Record<string, { parentID?: string; failedLookups?: number }> = {},
+  sessions: Record<string, { parentID?: string; failedLookups?: number; directory?: string | null; held?: boolean }> = {},
   failingSynthetic: string[] = [],
 ) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
+  const heldLookups: (() => void)[] = []
+  const release = () => heldLookups.shift()?.()
   const hooks = new Map<string, (event: ToolEvent) => Promise<void> | void>()
   const queue = [...events]
   let wake: (() => void) | undefined
@@ -142,11 +146,13 @@ function fakeContext(
       get: async (input: { sessionID: string }) => {
         const session = sessions[input.sessionID]
         if (input.sessionID === "missing") throw new Error("Session not found")
+        if (session?.held) await new Promise<void>((resolve) => heldLookups.push(resolve))
         if (session?.failedLookups) {
           session.failedLookups--
           throw new Error("Session lookup failed")
         }
-        return { id: input.sessionID, parentID: session?.parentID }
+        const directory = session?.directory === undefined ? "/repo" : session.directory
+        return { id: input.sessionID, parentID: session?.parentID, ...(directory === null ? {} : { location: { directory } }) }
       },
       synthetic: async (input: { sessionID: string; text: string; resume?: boolean }) => {
         if (failingSynthetic.includes(input.sessionID)) throw new Error("synthetic failed")
@@ -185,7 +191,7 @@ function fakeContext(
     await hooks.get("execute.after")?.(event)
     return event
   }
-  return { ctx, sent, done, emit, afterTool }
+  return { ctx, sent, done, emit, afterTool, release }
 }
 
 interface ToolCall {
@@ -251,6 +257,92 @@ describe("OpenCode plugin", () => {
     await settled()
 
     expect(runs).toEqual([{ directory: "/repo", args: TASK_END }])
+  })
+
+  it("ignores the turn end of a session of another project open in the same OpenCode", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "other" } }], {
+      other: { directory: "/other-repo" },
+    })
+
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await settled()
+
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it("ignores the edits of a session of another project open in the same OpenCode", async () => {
+    const runs: string[][] = []
+    const { ctx, done, afterTool } = fakeContext([], { other: { directory: "/other-repo" } })
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, args = []) => {
+      runs.push(args)
+      return VIOLATIONS
+    }).setup(ctx)
+    await done
+
+    const event = await afterTool("edit", { path: "src/Other.java" }, "completed", { sessionID: "other" })
+
+    expect(runs).toEqual([])
+    expect(event.result).toEqual({ content: [{ type: "text", text: "Edited the file" }] })
+  })
+
+  it("runs the task-end checks of a session opened in a directory inside the project", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }], {
+      s1: { directory: "/repo/orders" },
+    })
+
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await settled()
+
+    expect(runs).toEqual([TASK_END])
+  })
+
+  it("ignores a session of a sibling project whose name starts like this one's", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }], { s1: { directory: "/repo-api" } })
+
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await settled()
+
+    expect(runs).toEqual([])
+  })
+
+  it("runs the task-end checks of a session whose directory names the project through a symbolic link", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "interlint-plugin-"))
+    try {
+      const project = join(scratch, "project")
+      const link = join(scratch, "link")
+      mkdirSync(project)
+      // A junction on Windows, which needs no administrator rights.
+      symlinkSync(project, link, "junction")
+      const { runs, run } = checksGiving()
+      const { ctx, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }], { s1: { directory: link } })
+      ctx.location.directory = project
+
+      await createInterlintPlugin(run).setup(ctx)
+      await done
+      await settled()
+
+      expect(runs).toEqual([TASK_END])
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  })
+
+  it("runs the task-end checks of a session whose directory OpenCode does not give", async () => {
+    const { runs, run } = checksGiving()
+    const { ctx, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }], { s1: { directory: null } })
+
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await settled()
+
+    expect(runs).toEqual([TASK_END])
   })
 
   it("resumes the session with the failures", async () => {
@@ -464,7 +556,8 @@ describe("OpenCode plugin with subagents", () => {
   it("does not keep the main agent waiting for a subagent whose turn end it once took for the main agent's", async () => {
     const broken = { exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" }
     const { runs, run } = checksGiving(broken)
-    const { ctx, done, emit, afterTool } = fakeContext([], { writer: { parentID: "main", failedLookups: 1 } })
+    // Its edit and its turn end both look the session up: both fail.
+    const { ctx, done, emit, afterTool } = fakeContext([], { writer: { parentID: "main", failedLookups: 2 } })
     await createInterlintPlugin(run).setup(ctx)
     await done
     await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
@@ -571,6 +664,30 @@ describe("OpenCode plugin with subagents", () => {
       await waitFor(1)
       expect(runs).toEqual([WRITER_RUN, TASK_END, TASK_END])
     })
+  })
+
+  it("runs the main agent's checks once when a flush looks at its turn end while the turn end looks too", async () => {
+    const { runs, run } = checksGiving()
+    // `other` is a subagent of another main session, whose lookup both waits for.
+    const { ctx, done, emit, afterTool, release } = fakeContext([], {
+      other: { parentID: "otherMain" },
+      otherMain: { held: true },
+    })
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "other" })
+    emit(SUCCEEDED, "main")
+    await settled()
+    // A deleted session flushes the waiting main sessions, while the main turn end still looks at `other`.
+    emit("session.deleted", "gone")
+    await settled()
+
+    release()
+    await settled()
+    release()
+    await settled()
+
+    expect(runs).toEqual([TASK_END])
   })
 
   it("runs the main agent's checks at once when a subagent with unchecked changes is deleted", async () => {

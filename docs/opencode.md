@@ -12,6 +12,8 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this copies `integra
 
 `interlint` must be on the `PATH` of the OpenCode server.
 
+One OpenCode server runs the sessions of every project you open in it. The plugin only checks the sessions that run in its own project's directory, or in a directory inside it, symbolic links included, so a project without Interlint open in the same OpenCode is left alone.
+
 ## After each edit
 
 After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit.
