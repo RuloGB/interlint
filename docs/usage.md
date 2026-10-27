@@ -32,14 +32,14 @@ checks:
   - name: checkstyle
     run: ./mvnw -q checkstyle:check
     report: maven
-    when: task-end
+    when: edit
   - name: pmd
     run: ./mvnw -q compile pmd:check -Dcheckstyle.skip
     report: maven
-    when: task-end
+    when: edit
 ```
 
-- The check uses the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it: with `mvnd` the check runs after each edit, without it at task end (see [After each edit](#after-each-edit)). `init` says which applies on yours.
+- The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it: with `mvnd` the checks run after each edit, without it at task end (see [After each edit](#after-each-edit)). `init` says which applies on yours.
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
@@ -124,6 +124,8 @@ interlint check --when edit --file src/main/java/shop/Order.java
 - The output and exit codes are the same as at task end. `--file` can be repeated.
 - With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
 - Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end.
+- A `report: maven` check shows only the failures of the changed files: Checkstyle and PMD rate each file on its own, so another file's failures are not the edit's, and task end shows them. When Maven failed only because of other files, the check passes after the edit. An ArchUnit check shows every failure, because an edit can break a rule in a class it did not change.
+- A `run` with `checkstyle:check` gets `-Dcheckstyle.includes` with the changed files' paths from their source root, such as `shop/Order.java`, so Checkstyle checks only them, still with the build's configuration. PMD cannot be limited from the command line, so it checks the whole project. Checkstyle also checks the whole project when the `run` sets `checkstyle.includes` itself, or when the plugin's configuration in `pom.xml` sets `<includes>`, which Maven applies over `-D`.
 - Check runs on the same project never overlap: a second edit waits until the first one's checks finish.
 
 ## At task end
@@ -169,12 +171,12 @@ checks:
     dir: orders
     run: ./mvnw -q checkstyle:check@style
     report: maven
-    when: task-end
+    when: edit
   - name: billing/checkstyle
     dir: billing
     run: ./mvnw -q checkstyle:check@style
     report: maven
-    when: task-end
+    when: edit
 ```
 
 - `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` does not exist, a typo or a removed Git submodule, fails at every task end with `✗ <check> · its dir "<dir>" does not exist`, changed or not, so the agent and you always see it; the other projects still run. After an edit it is left to task end, so it does not block every edit.

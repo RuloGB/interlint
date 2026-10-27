@@ -17,6 +17,7 @@ import {
 import { claudeCodeSettingsFile, SettingsError } from "./adapters/claude-code/settings.js"
 import { type PlannedFile, stateOf, writeProjectFile } from "./adapters/files/project-files.js"
 import { withProjectLock } from "./adapters/lock/project-lock.js"
+import { checkstyleOnFiles } from "./adapters/maven/checkstyle-scope.js"
 import { mavenQualityReader } from "./adapters/maven/quality-reports.js"
 import { runCommand } from "./adapters/process/command-runner.js"
 import { lookupExecutable } from "./adapters/process/executable-lookup.js"
@@ -25,7 +26,7 @@ import { openCodePluginFiles } from "./adapters/opencode/plugin-files.js"
 import { fileChangeTracker } from "./adapters/state/change-tracker.js"
 import { CONFIG_FILE, ConfigError, loadConfig, renderConfig } from "./adapters/yaml-config/config.js"
 import { formatOutcomes } from "./core/format.js"
-import { mavenCommand, type ProjectFacts, projectChecks, type QualityPlugin, runnableClasses } from "./core/init.js"
+import { mavenCommand, type ProjectFacts, projectChecks, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./core/init.js"
 import { MAVEN_DAEMON } from "./core/maven.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./core/run-checks.js"
 
@@ -51,13 +52,15 @@ At task end, --file runs only the checks of the projects that hold one of those 
 integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: task-end)
+Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: edit)
 for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
 the checks of each Maven project below it, with their dir. It never replaces a different
 interlint.yaml without --force.
 
 A report: maven check fails only when Maven fails, and shows the most severe level in the
-Checkstyle and PMD reports, so nothing the project's build accepts is shown.
+Checkstyle and PMD reports, so nothing the project's build accepts is shown. At edit it shows
+only the failures of the changed files, and a run with checkstyle:check gets
+-Dcheckstyle.includes so Checkstyle checks only those files; PMD checks the whole project.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
 
@@ -88,6 +91,7 @@ const DEPS: CheckDeps = {
   lock: withProjectLock,
   changes: fileChangeTracker(),
   hasDirectory: isDirectory,
+  editScopes: { maven: checkstyleOnFiles },
 }
 
 export async function main(args: string[], io: Io): Promise<number> {
@@ -282,10 +286,12 @@ function init(args: string[], io: Io): number {
   })
 
   const single = projects.length === 1 && projects[0]?.dir === undefined
-  const [check, runs] = single ? ["check", "runs"] : ["checks", "run"]
+  const kinds = editCheckKinds(projects.map(({ facts }) => facts))
+  const plural = !single || kinds.length > 1
+  const subject = `${listOf(kinds)} ${plural ? "checks run" : "check runs"}`
   const daemon = DEPS.hasExecutable(MAVEN_DAEMON)
-    ? `on the PATH, so the architecture ${check} ${runs} after each edit`
-    : `not on the PATH, so the architecture ${check} ${runs} at task end; install mvnd to run ${single ? "it" : "them"} after each edit`
+    ? `on the PATH, so the ${subject} after each edit`
+    : `not on the PATH, so the ${subject} at task end; install mvnd to run ${plural ? "them" : "it"} after each edit`
   const detected = single
     ? ["Detected:", ...detectedLines(projects[0]!.facts, "  ")]
     : [
@@ -297,7 +303,7 @@ function init(args: string[], io: Io): number {
   io.stdout(
     [
       ...detected,
-      ...(checks.some((check) => check.report === "archunit") ? [`  mvnd: ${daemon}`] : []),
+      ...(checks.some((check) => check.when === "edit") ? [`  mvnd: ${daemon}`] : []),
       "",
       ...section("Wrote:", written),
       ...section("Unchanged:", unchanged),
@@ -306,13 +312,25 @@ function init(args: string[], io: Io): number {
   return EXIT.passed
 }
 
+/** What the edit checks `init` writes check, as the mvnd line names them. */
+function editCheckKinds(projects: ProjectFacts[]): string[] {
+  const architecture = projects.some((facts) => runnableClasses(facts).length > 0) ? ["architecture"] : []
+  const quality = QUALITY_PLUGINS.filter((plugin) => projects.some((facts) => facts.qualityPlugins.includes(plugin)))
+  return [...architecture, ...quality.map((plugin) => QUALITY_TOOLS[plugin])]
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listOf(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
+}
+
 /** What `init` found in one project. In a workspace, a project with nothing to check says so. */
 function detectedLines(facts: ProjectFacts, indent: string): string[] {
   if (projectChecks(facts).length === 0 && facts.archTestModules.length === 0) return [`${indent}nothing to check`]
   const modules = facts.archTestModules.filter((module) => module !== "")
   return [
     `${indent}ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}${modules.length > 0 ? ` (in ${modules.join(", ")})` : ""}`,
-    ...facts.qualityPlugins.map((plugin) => `${indent}${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml, checked at task end`),
+    ...facts.qualityPlugins.map((plugin) => `${indent}${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml`),
     `${indent}Maven: ${mavenCommand(facts)} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
   ]
 }

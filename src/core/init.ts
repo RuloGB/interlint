@@ -96,14 +96,15 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
 
 /**
  * One check per Checkstyle or PMD plugin the build declares. Each runs its own goal: in one Maven call the
- * first failing goal stops the rest. They run at task end, since they check the whole project, not the edit.
+ * first failing goal stops the rest. Always `when: edit`, as the architecture check: at edit Checkstyle checks only
+ * the changed files and both show only their failures; without mvnd they wait for task end.
  */
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
     run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin))}`,
     report: "maven",
-    when: "task-end",
+    when: "edit",
   }))
 }
 

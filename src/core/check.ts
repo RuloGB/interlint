@@ -10,6 +10,13 @@ const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = { archunit: [".java
 /** The tools behind each report format, as the output names them. */
 export const REPORT_TOOLS: Record<Report, string> = { archunit: "ArchUnit", maven: "Checkstyle or PMD" }
 
+/**
+ * Whether an `edit` check shows only the failures of the changed files. Checkstyle and PMD rate each file on its own,
+ * so another file's failures are not the edit's, and task end reports them. An ArchUnit rule is about how classes
+ * relate, so an edit can break it in a class the edit did not change.
+ */
+export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = { archunit: false, maven: true }
+
 /** Whether `file`, relative to the project, is a source the check verifies. */
 export function isSourceOf(report: Report, file: string): boolean {
   const lower = file.toLowerCase()

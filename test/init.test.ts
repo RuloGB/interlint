@@ -556,7 +556,7 @@ describe("interlint init with Checkstyle and PMD", () => {
     )
   }
 
-  it("adds a checkstyle and a pmd check at task end when pom.xml declares both plugins", async () => {
+  it("adds a checkstyle and a pmd check for edit when pom.xml declares both plugins", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
     pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
@@ -571,8 +571,8 @@ describe("interlint init with Checkstyle and PMD", () => {
         report: "archunit",
         when: "edit",
       },
-      { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "task-end" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "task-end" },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "edit" },
     ])
   })
 
@@ -698,10 +698,10 @@ describe("interlint init with Checkstyle and PMD", () => {
       [
         "Detected:",
         "  ArchUnit tests: ArchitectureRulesTest",
-        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
-        "  PMD: maven-pmd-plugin in pom.xml, checked at task end",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml",
+        "  PMD: maven-pmd-plugin in pom.xml",
         "  Maven: mvn (no Maven Wrapper)",
-        "  mvnd: on the PATH, so the architecture check runs after each edit",
+        "  mvnd: on the PATH, so the architecture, Checkstyle and PMD checks run after each edit",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -717,14 +717,15 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(0)
     expect(loadConfig(projectDir).checks).toEqual([
-      { name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "task-end" },
+      { name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "edit" },
     ])
     expect(stdout).toBe(
       [
         "Detected:",
         "  ArchUnit tests: none",
-        "  Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml",
         "  Maven: mvn (no Maven Wrapper)",
+        "  mvnd: not on the PATH, so the Checkstyle check runs at task end; install mvnd to run it after each edit",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -780,8 +781,8 @@ describe("interlint init in a multi-module project", () => {
         report: "archunit",
         when: "edit",
       },
-      { name: "checkstyle", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "task-end" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "task-end" },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
+      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit" },
     ])
   })
 
@@ -827,7 +828,7 @@ describe("interlint init in a multi-module project", () => {
       expect((await run("init")).exitCode).toBe(0)
 
       expect(loadConfig(projectDir).checks).toEqual([
-        { name: "apps/billing/checkstyle", dir: "apps/billing", run: "mvn -q checkstyle:check@style", report: "maven", when: "task-end" },
+        { name: "apps/billing/checkstyle", dir: "apps/billing", run: "mvn -q checkstyle:check@style", report: "maven", when: "edit" },
         {
           name: "orders/architecture",
           dir: "orders",
@@ -835,8 +836,8 @@ describe("interlint init in a multi-module project", () => {
           report: "archunit",
           when: "edit",
         },
-        { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "task-end" },
-        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "task-end" },
+        { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
+        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit" },
       ])
       expect(readConfig()).toContain("  - name: orders/architecture\n    dir: orders\n    run: ")
     })
@@ -852,16 +853,16 @@ describe("interlint init in a multi-module project", () => {
           "Detected 3 Maven projects:",
           "  apps/billing",
           "    ArchUnit tests: none",
-          "    Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
+          "    Checkstyle: maven-checkstyle-plugin in pom.xml",
           "    Maven: mvn (no Maven Wrapper)",
           "  legacy",
           "    nothing to check",
           "  orders",
           "    ArchUnit tests: OrdersRulesTest (in launcher)",
-          "    Checkstyle: maven-checkstyle-plugin in pom.xml, checked at task end",
-          "    PMD: maven-pmd-plugin in pom.xml, checked at task end",
+          "    Checkstyle: maven-checkstyle-plugin in pom.xml",
+          "    PMD: maven-pmd-plugin in pom.xml",
           "    Maven: ./mvnw (Maven Wrapper)",
-          "  mvnd: on the PATH, so the architecture checks run after each edit",
+          "  mvnd: on the PATH, so the architecture, Checkstyle and PMD checks run after each edit",
           "",
           "Wrote:",
           "  interlint.yaml",

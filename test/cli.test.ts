@@ -222,6 +222,79 @@ process.exit(${options.exitCode})
   })
 })
 
+describe("interlint check --when edit with report: maven", () => {
+  const ORDER = join("src", "main", "java", "shop", "Order.java")
+  const CUSTOMER = join("src", "main", "java", "shop", "Customer.java")
+
+  /**
+   * A stand-in for Maven running Checkstyle or PMD, as the goal in its arguments says: records its arguments,
+   * writes a report with one failure in each of `files`, and fails as Maven does when the plugin's check fails.
+   */
+  function fakeQuality(goal: string, files: string[]) {
+    const tool = goal.includes("pmd:check") ? "pmd" : "checkstyle"
+    const entries = files.map((file) => join(projectDir, file))
+    const report =
+      tool === "checkstyle"
+        ? `<checkstyle>${entries.map((name) => `<file name="${name}"><error line="8" severity="error" message="Line is longer than 100 characters" source="com.puppycrawl.tools.checkstyle.checks.sizes.LineLengthCheck"/></file>`).join("")}</checkstyle>`
+        : `<pmd>${entries.map((name) => `<file name="${name}"><violation beginline="11" rule="EmptyCatchBlock" priority="3">Avoid empty catch blocks</violation></file>`).join("")}</pmd>`
+    writeFileSync(
+      join(projectDir, "quality.mjs"),
+      `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
+appendFileSync("args.txt", process.argv.slice(2).join(" ") + "\\n")
+mkdirSync("target", { recursive: true })
+writeFileSync(${JSON.stringify(tool === "checkstyle" ? "target/checkstyle-result.xml" : "target/pmd.xml")}, ${JSON.stringify(report)})
+console.log("[ERROR] Failed to execute goal org.apache.maven.plugins:maven-${tool}-plugin:3.6.0:check (style) on project shop")
+process.exit(${files.length > 0 ? 1 : 0})
+`,
+    )
+    writeConfig({ name: tool, run: `node quality.mjs ${goal}`, report: "maven", when: "edit" })
+  }
+
+  const argsOfRuns = () => readFileSync(join(projectDir, "args.txt"), "utf8")
+
+  it("runs Checkstyle only on the changed file, with its path from the source root", async () => {
+    fakeQuality("checkstyle:check@style", [ORDER])
+
+    await run("check", "--when", "edit", "--file", ORDER)
+
+    expect(argsOfRuns()).toBe("checkstyle:check@style -Dcheckstyle.includes=shop/Order.java\n")
+  })
+
+  it("shows only the failures of the changed file, with its rule and file:line", async () => {
+    fakeQuality("compile pmd:check -Dcheckstyle.skip", [ORDER, CUSTOMER])
+
+    const { exitCode, stdout } = await run("check", "--when", "edit", "--file", ORDER)
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain("✗ pmd · EmptyCatchBlock\n\n  Avoid empty catch blocks\n    at src/main/java/shop/Order.java:11\n")
+    expect(stdout).not.toContain("Customer.java")
+  })
+
+  it("passes at edit when the failures are all in files the edit did not change", async () => {
+    fakeQuality("compile pmd:check -Dcheckstyle.skip", [CUSTOMER])
+
+    expect(await run("check", "--when", "edit", "--file", ORDER)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("runs Checkstyle and PMD on nothing when the changed file is not a Java source", async () => {
+    fakeQuality("checkstyle:check@style", [ORDER])
+
+    expect(await run("check", "--when", "edit", "--file", "README.md")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(existsSync(join(projectDir, "args.txt"))).toBe(false)
+  })
+
+  it("still checks the whole project at task end", async () => {
+    fakeQuality("checkstyle:check@style", [ORDER, CUSTOMER])
+
+    const { exitCode, stdout } = await run("check", "--when", "task-end")
+
+    expect(exitCode).toBe(1)
+    expect(argsOfRuns()).toBe("checkstyle:check@style\n")
+    expect(stdout).toContain("at src/main/java/shop/Order.java:8")
+    expect(stdout).toContain("at src/main/java/shop/Customer.java:8")
+  })
+})
+
 describe("interlint check --when task-end --changed", () => {
   function writeProject(name: string, exitCode: number) {
     mkdirSync(join(projectDir, name), { recursive: true })
