@@ -6,7 +6,7 @@ Interlint runs the checks your project **already has**, such as ArchUnit, inside
 
 **Works with [Claude Code](docs/claude-code.md) and [OpenCode](docs/opencode.md)**, on Maven projects that use ArchUnit, Checkstyle or PMD.
 
-> **Status:** 1.4.1. Stable for Maven projects, including multi-module projects and workspaces of several projects.
+> **Status:** 1.4.2. Stable for Maven projects, including multi-module projects and workspaces of several projects.
 
 ## The problem
 
