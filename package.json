@@ -1,7 +1,7 @@
 {
   "name": "interlint",
   "version": "1.4.0",
-  "description": "Deterministic harness that runs a project's existing checks inside an AI coding agent's session.",
+  "description": "Make your AI coding agent fix the rules it breaks before it moves on. Runs your existing ArchUnit, Checkstyle and PMD checks inside Claude Code and OpenCode.",
   "type": "module",
   "license": "MIT",
   "author": "Raul Garcia Barciela",
