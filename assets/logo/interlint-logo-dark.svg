@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 410 88" role="img" aria-label="Interlint">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M57 10.6 A34 34 0 1 1 28.4 8.1" stroke="#34D399" stroke-width="9"/>
+    <polygon points="36.9,5 30.8,14.7 26,1.5" fill="#34D399" stroke="#34D399" stroke-width="3"/>
+    <path d="M25 41 L35 51 L55 30" stroke="#FFFFFF" stroke-width="8"/>
+  </g>
+  <g transform="translate(102 6)" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#E0E7FF">
+      <path d="M3.5 8 H23.5 M3.5 60 H23.5 M13.5 8 V60"/>
+      <path d="M41.5 24 V60 M41.5 37 A13 13 0 0 1 67.5 37 V60"/>
+      <path d="M88 10 V48 A12 12 0 0 0 100 60 M80 24 H99"/>
+      <path d="M116 42 H152 A18 18 0 1 0 146.7 54.7"/>
+      <path d="M169 24 V60 M169 40 A16 16 0 0 1 185 24"/>
+    </g>
+    <g stroke="#34D399">
+      <path d="M200 8 V60"/>
+      <path d="M218 24 V60"/>
+      <path d="M236 24 V60 M236 37 A13 13 0 0 1 262 37 V60"/>
+      <path d="M282.5 10 V48 A12 12 0 0 0 294.5 60 M274.5 24 H293.5"/>
+    </g>
+    <circle cx="218" cy="9" r="5" fill="#34D399"/>
+  </g>
+</svg>
