@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Check } from "../src/core/check.js"
-import { usesMaven, withMavenDaemon } from "../src/core/maven.js"
-import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/core/run-checks.js"
+import type { Check } from "../src/domain/check.js"
+import { usesMaven, withMavenDaemon } from "../src/domain/maven-command.js"
+import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 
 const PASSING_READER = { snapshot: () => new Map(), read: () => ({ found: true, failures: [] }) }
 

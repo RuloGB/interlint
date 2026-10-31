@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { toPlatformCommand } from "../src/adapters/process/command-runner.js"
+import { toPlatformCommand } from "../src/adapters/driven/process/command-runner.js"
 
 describe("toPlatformCommand", () => {
   it("turns a leading ./ into .\\ on Windows, so cmd.exe finds mvnw.cmd", () => {

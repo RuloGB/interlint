@@ -25,7 +25,7 @@ describe("the npm package", () => {
       expect.arrayContaining([
         "LICENSE",
         "README.md",
-        "dist/cli.js",
+        "dist/main.js",
         "docs/claude-code.md",
         "docs/opencode.md",
         "docs/usage.md",
@@ -42,7 +42,7 @@ describe("the npm package", () => {
 
   it("declares the binary, the minimum Node version and the MIT license", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
-    expect(manifest.bin).toEqual({ interlint: "dist/cli.js" })
+    expect(manifest.bin).toEqual({ interlint: "dist/main.js" })
     expect(manifest.engines).toEqual({ node: ">=22" })
     expect(manifest.license).toBe("MIT")
     expect(manifest.private).toBeUndefined()

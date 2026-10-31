@@ -23,7 +23,7 @@
     "lint"
   ],
   "bin": {
-    "interlint": "dist/cli.js"
+    "interlint": "dist/main.js"
   },
   "files": [
     "dist",

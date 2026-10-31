@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { userStateDir } from "../src/adapters/state/user-state.js"
-import { main } from "../src/cli.js"
+import { userStateDir } from "../src/adapters/driven/state/user-state.js"
+import { main } from "../src/main.js"
 
 const VIOLATIONS_XML = readFileSync(
   join(import.meta.dirname, "fixtures", "surefire", "two-rules-violated.xml"),

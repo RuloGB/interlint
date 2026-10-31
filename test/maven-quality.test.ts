@@ -8,7 +8,7 @@ import {
   parsePmdXml,
   readQualityReports,
   snapshotQualityReports,
-} from "../src/adapters/maven/quality-reports.js"
+} from "../src/adapters/driven/maven/reports/quality-reader.js"
 
 const PROJECT = join(tmpdir(), "shop")
 const ORDER = join(PROJECT, "src", "main", "java", "shop", "Order.java")

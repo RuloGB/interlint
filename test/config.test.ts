@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ConfigError, loadConfig } from "../src/adapters/yaml-config/config.js"
+import { loadConfig } from "../src/adapters/driven/yaml-config/config.js"
+import { ConfigError } from "../src/application/checking/ports.js"
 
 let projectDir: string
 

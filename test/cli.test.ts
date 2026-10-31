@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { lockFileFor } from "../src/adapters/lock/project-lock.js"
-import { main } from "../src/cli.js"
+import { lockFileFor } from "../src/adapters/driven/state/project-lock.js"
+import { main } from "../src/main.js"
 
 const VIOLATIONS_XML = readFileSync(
   join(import.meta.dirname, "fixtures", "surefire", "two-rules-violated.xml"),
