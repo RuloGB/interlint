@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { hasExecutable } from "../src/adapters/process/executable-lookup.js"
+import { hasExecutable } from "../src/adapters/driven/process/executable-lookup.js"
 
 let binDir: string
 

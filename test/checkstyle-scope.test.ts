@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { checkstyleOnFiles } from "../src/adapters/maven/checkstyle-scope.js"
+import { checkstyleOnFiles } from "../src/adapters/driven/maven/checkstyle-scope.js"
 
 /** What every limited command ends with: the resources are left out, so the report holds only the files. */
 const ONLY_FILES = "-Dcheckstyle.includeResources=false -Dcheckstyle.includeTestResources=false"

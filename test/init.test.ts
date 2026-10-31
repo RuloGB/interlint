@@ -2,8 +2,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { loadConfig } from "../src/adapters/yaml-config/config.js"
-import { main } from "../src/cli.js"
+import { loadConfig } from "../src/adapters/driven/yaml-config/config.js"
+import { main } from "../src/main.js"
 
 let projectDir: string
 let binDir: string

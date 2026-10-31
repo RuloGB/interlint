@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { fileChangeTracker } from "../src/adapters/state/change-tracker.js"
+import { fileChangeTracker } from "../src/adapters/driven/state/change-tracker.js"
 
 let projectDir: string
 let stateDir: string

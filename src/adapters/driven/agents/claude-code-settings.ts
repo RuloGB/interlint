@@ -1,0 +1,103 @@
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { type AgentFiles, AgentSetupError } from "../../../application/setup/ports.js"
+
+/** The project's shared Claude Code settings, meant to be committed. */
+export const SETTINGS_FILE = ".claude/settings.json"
+
+interface InterlintHook {
+  event: "PostToolUse" | "Stop" | "SubagentStop"
+  matcher?: string
+  command: string
+  /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones, Claude Code's default. */
+  timeout: number
+}
+
+/**
+ * `Edit` and `Write` are the tools that change source files; `NotebookEdit` only changes notebooks.
+ * `Stop` fires for the main agent only; a subagent fires `SubagentStop`, so it gets the failures of its own changes.
+ */
+const HOOKS: InterlintHook[] = [
+  { event: "PostToolUse", matcher: "Edit|Write", command: "interlint hook claude-code post-edit", timeout: 120 },
+  { event: "Stop", command: "interlint hook claude-code stop", timeout: 600 },
+  { event: "SubagentStop", command: "interlint hook claude-code subagent-stop", timeout: 600 },
+]
+
+type JsonObject = Record<string, unknown>
+
+/** The project's Claude Code settings with Interlint's hooks added. Everything else in the file stays. */
+export const claudeCodeSettingsFiles: AgentFiles = (projectDir) => {
+  const path = join(projectDir, SETTINGS_FILE)
+  const current = existsSync(path) ? readFileSync(path, "utf8") : undefined
+  return [{ path: SETTINGS_FILE, content: withInterlintHooks(current), replace: true }]
+}
+
+/**
+ * Leaves each hook once: the first handler with the same command, matcher and timeout stays,
+ * every other handler with that command is an older setup or a copy and is removed, and the hook
+ * is added when none was the same. Settings that need no change keep their exact text, so a second
+ * `init` leaves the file as it is.
+ */
+export function withInterlintHooks(current: string | undefined): string {
+  const settings = current === undefined || current.trim() === "" ? {} : parseSettings(current)
+  const hooks = settings.hooks ?? {}
+  if (!isObject(hooks)) throw new AgentSetupError(`${SETTINGS_FILE}: hooks is not an object`)
+
+  let changed = current === undefined
+  for (const hook of HOOKS) {
+    const groups = hooks[hook.event] ?? []
+    if (!Array.isArray(groups)) throw new AgentSetupError(`${SETTINGS_FILE}: hooks.${hook.event} is not a list`)
+
+    let installed = false
+    let removed = false
+    const kept = groups.flatMap((group) => {
+      if (!isObject(group) || !Array.isArray(group.hooks)) return [group]
+      const handlers = group.hooks.filter((handler) => {
+        if (!isObject(handler) || handler.command !== hook.command) return true
+        if (!installed && isInstalled(group, handler, hook)) return (installed = true)
+        removed = true
+        return false
+      })
+      if (handlers.length === group.hooks.length) return [group]
+      return handlers.length === 0 ? [] : [{ ...group, hooks: handlers }]
+    })
+    if (!installed) {
+      kept.push({
+        ...(hook.matcher === undefined ? {} : { matcher: hook.matcher }),
+        hooks: [{ type: "command", command: hook.command, timeout: hook.timeout }],
+      })
+    }
+    if (installed && !removed) continue
+    hooks[hook.event] = kept
+    changed = true
+  }
+  if (!changed) return current as string
+  settings.hooks = hooks
+  return `${JSON.stringify(settings, null, 2)}\n`
+}
+
+function parseSettings(text: string): JsonObject {
+  let value: unknown
+  try {
+    // Editors on Windows may save the file with a byte order mark, which JSON.parse rejects.
+    value = JSON.parse(text.replace(/^﻿/, ""))
+  } catch {
+    throw new AgentSetupError(`${SETTINGS_FILE} is not valid JSON`)
+  }
+  if (!isObject(value)) throw new AgentSetupError(`${SETTINGS_FILE} is not a JSON object`)
+  return value
+}
+
+/** Whether `handler`, in `group`, is `hook` exactly as `init` writes it. */
+function isInstalled(group: JsonObject, handler: JsonObject, hook: InterlintHook): boolean {
+  return (
+    (group.matcher ?? "") === (hook.matcher ?? "") &&
+    handler.type === "command" &&
+    handler.command === hook.command &&
+    handler.timeout === hook.timeout
+  )
+}
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}

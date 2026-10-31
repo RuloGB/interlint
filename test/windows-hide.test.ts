@@ -16,7 +16,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, spawn }
 })
 
-const { runCommand } = await import("../src/adapters/process/command-runner.js")
+const { runCommand } = await import("../src/adapters/driven/process/command-runner.js")
 const { runInterlint } = await import("../integrations/opencode/interlint/index.js")
 
 let scratch: string

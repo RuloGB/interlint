@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, posix, sep } from "node:path"
 import { describe, expect, it } from "vitest"
 
-const CORE_DIR = join(import.meta.dirname, "..", "src", "core")
+const SRC_DIR = join(import.meta.dirname, "..", "src")
 
 /** `import … from "x"` and `export … from "x"`, type-only and multi-line ones included. */
 const FROM_CLAUSE =
@@ -44,11 +44,64 @@ describe("importsOf", () => {
   })
 })
 
-describe("core", () => {
-  const files = readdirSync(CORE_DIR).filter((name) => name.endsWith(".ts"))
+/** Every source file, as a `/`-separated path relative to `src/`. */
+function sourceFiles(): string[] {
+  return readdirSync(SRC_DIR, { recursive: true, encoding: "utf8" })
+    .filter((path) => path.endsWith(".ts"))
+    .map((path) => path.split(sep).join("/"))
+}
 
-  it.each(files)("%s imports only other core modules", (file) => {
-    const source = readFileSync(join(CORE_DIR, file), "utf8")
-    expect(importsOf(source).filter((specifier) => !specifier.startsWith("./"))).toEqual([])
+/**
+ * The layer a source file belongs to: `domain`, `application`, `driving`, one `driven/<adapter>`, or `main`.
+ * Driven adapters are told apart, so one never reaches into another.
+ */
+function layerOf(path: string): string {
+  const [top, side, adapter] = path.split("/")
+  if (top === "adapters") return side === "driven" ? `driven/${adapter}` : "driving"
+  return top === "main.ts" ? "main" : (top ?? "")
+}
+
+/** The source files `file` imports, relative to `src/`. Packages and Node built-ins are left out. */
+function importedFiles(file: string): string[] {
+  const source = readFileSync(join(SRC_DIR, file), "utf8")
+  return importsOf(source)
+    .filter((specifier) => specifier.startsWith("."))
+    .map((specifier) => posix.join(posix.dirname(file), specifier).replace(/\.js$/, ".ts"))
+}
+
+/** What each layer may import besides itself. A driven adapter also reaches its own files. */
+const ALLOWED: Record<string, (layer: string) => boolean> = {
+  domain: () => false,
+  application: (layer) => layer === "domain",
+  driving: (layer) => layer === "domain" || layer === "application",
+  driven: (layer) => layer === "domain" || layer === "application",
+  main: () => true,
+}
+
+describe("layers", () => {
+  const files = sourceFiles()
+
+  it("finds the source files of every layer", () => {
+    expect(new Set(files.map((file) => layerOf(file).split("/")[0]))).toEqual(
+      new Set(["domain", "application", "driving", "driven", "main"]),
+    )
   })
+
+  it.each(files)("%s imports only what its layer may", (file) => {
+    const layer = layerOf(file)
+    const allowed = ALLOWED[layer.split("/")[0] ?? ""] ?? (() => false)
+    const forbidden = importedFiles(file).filter((imported) => {
+      const target = layerOf(imported)
+      return target !== layer && !allowed(target)
+    })
+    expect(forbidden).toEqual([])
+  })
+
+  it.each(files.filter((file) => ["domain", "application"].includes(layerOf(file))))(
+    "%s imports no package or Node built-in",
+    (file) => {
+      const source = readFileSync(join(SRC_DIR, file), "utf8")
+      expect(importsOf(source).filter((specifier) => !specifier.startsWith("."))).toEqual([])
+    },
+  )
 })
