@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { AGENTS, type Agent, type InitDeps, initProject } from "../../../application/setup/init-project.js"
 import { AgentSetupError } from "../../../application/setup/ports.js"
-import { projectChecks } from "../../../domain/check-plan.js"
+import { projectChecks, QUALITY_WHEN } from "../../../domain/check-plan.js"
 import { mavenCommand } from "../../../domain/maven-command.js"
 import {
   type ProjectFacts,
@@ -81,11 +81,12 @@ function initOrUsageError(projectDir: string, agent: Agent | undefined, force: b
   }
 }
 
-/** What the edit checks `init` writes check, as the mvnd line names them. */
+/** What the edit checks `init` writes check, as the mvnd line names them. The architecture check runs at task end. */
 function editCheckKinds(projects: ProjectFacts[]): string[] {
-  const architecture = projects.some((facts) => runnableClasses(facts).length > 0) ? ["architecture"] : []
-  const quality = QUALITY_PLUGINS.filter((plugin) => projects.some((facts) => facts.qualityPlugins.includes(plugin)))
-  return [...architecture, ...quality.map((plugin) => QUALITY_TOOLS[plugin])]
+  const quality = QUALITY_PLUGINS.filter(
+    (plugin) => QUALITY_WHEN[plugin] === "edit" && projects.some((facts) => facts.qualityPlugins.includes(plugin)),
+  )
+  return quality.map((plugin) => QUALITY_TOOLS[plugin])
 }
 
 /** `a`, `a and b`, `a, b and c`. */

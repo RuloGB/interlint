@@ -1,4 +1,4 @@
-import type { Check } from "./check.js"
+import type { Check, When } from "./check.js"
 import { mavenCommand } from "./maven-command.js"
 import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
@@ -12,6 +12,13 @@ const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string) => string> = {
   checkstyle: (goal) => goal,
   pmd: (goal) => `compile ${goal} -Dcheckstyle.skip`,
 }
+
+/**
+ * When each check runs (decision 28). At edit Checkstyle checks only the changed files, which takes under a second.
+ * PMD analyses every module and ArchUnit builds the project, which in a large reactor takes tens of seconds on every
+ * edit, so both wait for task end. Teams can still set `when: edit` in `interlint.yaml`.
+ */
+export const QUALITY_WHEN: Record<QualityPlugin, When> = { checkstyle: "edit", pmd: "task-end" }
 
 /** An execution id made of letters, digits, `_`, `.` and `-` only. Anything else could mean something to the shell. */
 const PLAIN_EXECUTION_ID = /^[\w.-]+$/
@@ -41,8 +48,8 @@ function reactorArgs(facts: ProjectFacts): string {
 }
 
 /**
- * The check that runs only the ArchUnit test classes, or nothing when there are none.
- * Always `when: edit`: without mvnd it waits for task end anyway, so the file is the same on every machine.
+ * The check that runs only the ArchUnit test classes, or nothing when there are none. It runs at task end: it builds
+ * the project, which is too slow for every edit (decision 28).
  * `test` runs the lifecycle, so it skips the Checkstyle and PMD plugins the build declares: bound to an early
  * phase, their failure would stop the build before ArchUnit runs, and their own checks already report it.
  */
@@ -55,21 +62,21 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
     name: "architecture",
     run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${skips.join("")}`,
     report: "archunit",
-    when: "edit",
+    when: "task-end",
   }
 }
 
 /**
  * One check per Checkstyle or PMD plugin the build declares. Each runs its own goal: in one Maven call the
- * first failing goal stops the rest. Always `when: edit`, as the architecture check: at edit Checkstyle checks only
- * the changed files and both show only their failures; without mvnd they wait for task end.
+ * first failing goal stops the rest. Each runs when `QUALITY_WHEN` says; the file is the same with or without mvnd,
+ * since without it an `edit` check waits for task end anyway.
  */
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
     run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin))}`,
     report: "maven",
-    when: "edit",
+    when: QUALITY_WHEN[plugin],
   }))
 }
 
