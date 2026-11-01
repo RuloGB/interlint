@@ -85,10 +85,11 @@ An IDE that builds automatically, such as VS Code with the Java extension or Ecl
 ✗ architecture · the compiled classes are broken, so its ArchUnit violations are not shown
 
   The report names types without a package: <ProjectName>, <ProjectStatus>.
-  javac never compiles a class like that. Another compiler, usually an IDE building automatically,
-  wrote to target/ while the check ran. Do not change the code for these violations.
-  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.
+  javac never compiles a class like that. An IDE building automatically wrote to target/ while the check
+  ran. Do not change the code for these violations: check again.
 ```
+
+You do not need to close the IDE, turn off its automatic build or build with `clean`.
 
 Maven does not recompile those classes by itself, since they are newer than their sources. So before every check that runs Maven, Interlint deletes the classes in `target/classes` and `target/test-classes`, in the project and its modules, that the IDE compiled with errors: those that contain `Unresolved compilation problem`, which the Eclipse compiler writes and `javac` never does. Maven then compiles them again. If the check fails and the IDE wrote more of them while it ran, Interlint deletes them and runs the check once more, and shows that second run. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
 

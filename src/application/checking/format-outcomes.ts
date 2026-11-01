@@ -30,9 +30,8 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
           `✗ ${outcome.check.name} · the compiled classes are broken, so its ${tool} violations are not shown`,
           "",
           `  The report names types without a package: ${typeList(outcome.typesWithoutPackage)}.`,
-          "  javac never compiles a class like that. Another compiler, usually an IDE building automatically,",
-          "  wrote to target/ while the check ran. Do not change the code for these violations.",
-          "  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.",
+          "  javac never compiles a class like that. An IDE building automatically wrote to target/ while the check",
+          "  ran. Do not change the code for these violations: check again.",
         ].join("\n"),
       ]
     }
