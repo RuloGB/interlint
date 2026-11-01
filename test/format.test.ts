@@ -209,6 +209,14 @@ describe("formatNotices", () => {
     )
   })
 
+  it("says so when the run reported none of the store's violations", () => {
+    const output = formatNotices([
+      { check: architecture, status: "passed", durationMs: 10, brokenStores: [{ ...store, hidden: 0 }] },
+    ])
+
+    expect(output).toContain("  the code, so ArchUnit reports them as new. None of them came up in this run.\n")
+  })
+
   it("names the check's directory, and each store once", () => {
     const inModule: Check = { ...architecture, run: "mvn -q test", dir: "orders" }
     const moduleStore = { ...store, path: "orders/archunit_store" }

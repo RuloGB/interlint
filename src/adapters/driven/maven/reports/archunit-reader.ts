@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { join, relative, sep } from "node:path"
+import { join, relative, resolve, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { BrokenStore, ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
 import type { RuleFailure, Violation } from "../../../../domain/violation.js"
@@ -103,7 +103,8 @@ interface FrozenStore extends BrokenStore {
 /** The FreezingArchRule stores of the project and its modules whose frozen violations name types without a package. */
 function brokenStoresOf(projectDir: string, modules: string[]): FrozenStore[] {
   return modules.flatMap((module) => {
-    const dir = join(module, storePathOf(module))
+    // The path may also be absolute.
+    const dir = resolve(module, storePathOf(module))
     const lines = frozenViolationsIn(dir)
     const broken = lines.filter((line) => typesWithoutPackageIn([line]).length > 0)
     if (broken.length === 0) return []

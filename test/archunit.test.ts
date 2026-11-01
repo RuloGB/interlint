@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { parseSurefireXml, readArchUnitReport, snapshotReports } from "../src/adapters/driven/maven/reports/archunit-reader.js"
 
@@ -254,7 +254,7 @@ describe("a FreezingArchRule store written from broken classes", () => {
   const NEW_VIOLATION = "Method <com.acme.web.OrderController.list()> calls method <com.acme.infra.OrderRepository.all()> in (OrderController.java:21)"
 
   function store(module: string, path: string, ...violations: string[]) {
-    const dir = join(projectDir, module, path)
+    const dir = resolve(projectDir, module, path)
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, "stored.rules"), "classes\\ should\\ only\\ depend\\ on\\ domain=5d1b8a2e-rule\n")
     writeFileSync(join(dir, "5d1b8a2e-rule"), violations.join("\n"))
@@ -307,6 +307,24 @@ describe("a FreezingArchRule store written from broken classes", () => {
     expect(readArchUnitReport(projectDir, before).brokenStores).toEqual([
       { path: "orders/config/frozen", typesWithoutPackage: ["Order"], hidden: 1 },
     ])
+  })
+
+  it("is found at an absolute path from archunit.properties", () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), "interlint-store-elsewhere-"))
+    try {
+      mkdirSync(join(projectDir, "src", "test", "resources"), { recursive: true })
+      writeFileSync(
+        join(projectDir, "src", "test", "resources", "archunit.properties"),
+        `freeze.store.default.path=${join(elsewhere, "frozen").split("\\").join("/")}\n`,
+      )
+      store("", join(elsewhere, "frozen"), FROZEN_BROKEN)
+      const before = snapshotReports(projectDir)
+      report("", FROZEN_AGAIN)
+
+      expect(readArchUnitReport(projectDir, before).brokenStores).toMatchObject([{ typesWithoutPackage: ["Order"], hidden: 1 }])
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
   })
 
   it("is not reported when its violations name every type in full", () => {

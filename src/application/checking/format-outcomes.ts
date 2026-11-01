@@ -74,7 +74,7 @@ export function formatNotices(outcomes: CheckOutcome[]): string {
           `ℹ Interlint · for the user: the ArchUnit store ${store.path} was frozen from broken compiled classes`,
           "",
           `  It names types without a package: ${typeList(store.typesWithoutPackage)}. Its frozen violations no longer match`,
-          `  the code, so ArchUnit reports them as new. Interlint did not show the agent ${store.hidden} of them.`,
+          `  the code, so ArchUnit reports them as new. ${hiddenLine(store.hidden)}`,
           `  Refreeze it from a clean build${check.dir === undefined ? "" : `, in ${check.dir}`}: ${mavenOf(check.run)} clean test -D${REFREEZE}`,
           "  Agent: do not change the code for this. Tell the user.",
         ].join("\n"),
@@ -84,6 +84,10 @@ export function formatNotices(outcomes: CheckOutcome[]): string {
 }
 
 const REFREEZE = "archunit.freeze.refreeze=true"
+
+function hiddenLine(hidden: number): string {
+  return hidden === 0 ? "None of them came up in this run." : `Interlint did not show the agent ${hidden} of them.`
+}
 
 /** The Maven executable the check runs, so the user refreezes with the team's own Maven. */
 function mavenOf(run: string): string {
