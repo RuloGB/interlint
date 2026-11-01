@@ -15,7 +15,8 @@ function editNote(report: string): string {
 }
 
 function withNotice(text: string, notice: string): string {
-  return [text.trimEnd(), notice].filter((part) => part !== "").join("\n\n")
+  if (notice === "") return text
+  return text === "" ? notice : `${text.trimEnd()}\n\n${notice}`
 }
 
 /**

@@ -469,6 +469,17 @@ describe("a FreezingArchRule store frozen from broken classes, in the Claude Cod
     expect(stderr).toContain("  Agent: do not change the code for this. Tell the user.\n")
   })
 
+  it("leaves the stop text as it was when there is no notice", async () => {
+    rmSync(join(projectDir, "archunit_store"), { recursive: true })
+    writeCheck("edit", surefireReport(NEW_VIOLATION))
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    const { exitCode, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/Fix these problems before continuing\.\n$/)
+  })
+
   it("keeps the notice out of the edit hook, which passes when every failure was frozen", async () => {
     writeCheck("edit", surefireReport(FROZEN_AGAIN))
 
