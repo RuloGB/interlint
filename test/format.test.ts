@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Check } from "../src/domain/check.js"
-import { formatOutcomes } from "../src/application/checking/format-outcomes.js"
+import { formatNotices, formatOutcomes } from "../src/application/checking/format-outcomes.js"
 
 const architecture: Check = {
   name: "architecture",
@@ -183,5 +183,41 @@ describe("formatOutcomes for Checkstyle and PMD", () => {
 
     expect(failed(1)).toContain("✗ checkstyle · the command failed (exit code 1) and left no Checkstyle or PMD failures\n")
     expect(failed(0)).toContain("✗ checkstyle · the command exited 0 but wrote no Checkstyle or PMD report\n")
+  })
+})
+
+describe("formatNotices", () => {
+  const store = { path: "archunit_store", typesWithoutPackage: ["Order", "Customer"], hidden: 2 }
+
+  it("prints nothing when no store is broken", () => {
+    expect(formatNotices([{ check: architecture, status: "passed", durationMs: 10 }])).toBe("")
+  })
+
+  it("tells the user how to refreeze a store written from broken classes, with the check's Maven", () => {
+    const output = formatNotices([{ check: architecture, status: "passed", durationMs: 10, brokenStores: [store] }])
+
+    expect(output).toBe(
+      [
+        "ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes",
+        "",
+        "  It names types without a package: <Order>, <Customer>. Its frozen violations no longer match",
+        "  the code, so ArchUnit reports them as new. Interlint did not show the agent 2 of them.",
+        "  Refreeze it from a clean build: ./mvnw clean test -Darchunit.freeze.refreeze=true",
+        "  Agent: do not change the code for this. Tell the user.",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("names the check's directory, and each store once", () => {
+    const inModule: Check = { ...architecture, run: "mvn -q test", dir: "orders" }
+    const moduleStore = { ...store, path: "orders/archunit_store" }
+    const output = formatNotices([
+      { check: inModule, status: "passed", durationMs: 10, brokenStores: [moduleStore] },
+      { check: { ...inModule, name: "again" }, status: "passed", durationMs: 10, brokenStores: [moduleStore] },
+    ])
+
+    expect(output.match(/orders\/archunit_store/g)).toHaveLength(1)
+    expect(output).toContain("  Refreeze it from a clean build, in orders: mvn clean test -Darchunit.freeze.refreeze=true\n")
   })
 })

@@ -45,6 +45,19 @@ describe("TaskEndGate", () => {
     expect(gate.decide("s1", VIOLATIONS)).toMatchObject({ action: "continue", text: expect.stringContaining("attempt 1 of 3") })
   })
 
+  it("lets the task end and reports, without resuming the agent, a notice for the user", () => {
+    const notice = "ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes\n"
+    const gate = new TaskEndGate()
+    gate.decide("s1", VIOLATIONS)
+
+    expect(gate.decide("s1", { exitCode: 0, output: notice })).toEqual({ action: "report", text: notice })
+    expect(gate.decide("s1", VIOLATIONS)).toMatchObject({ text: expect.stringContaining("attempt 1 of 3") })
+  })
+
+  it("ignores other output when the checks pass", () => {
+    expect(new TaskEndGate().decide("s1", { exitCode: 0, output: "Picked up JAVA_TOOL_OPTIONS\n" })).toEqual({ action: "none" })
+  })
+
   it("starts counting again after the checks pass", () => {
     const gate = new TaskEndGate()
     gate.decide("s1", VIOLATIONS)

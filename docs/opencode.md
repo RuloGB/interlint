@@ -26,6 +26,7 @@ The plugin runs `interlint check --when task-end --changed`: the checks of the p
 
 - After 3 failed attempts in a row it reports the failures and lets the task end.
 - If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
+- If the checks pass with a notice for you, such as a [FreezingArchRule store frozen from broken classes](usage.md#freezingarchrule-store-frozen-from-broken-classes), the plugin reports it without making the agent continue. When a check fails, the notice comes after the failures. The plugin copied by an older `interlint init` does not report it: run `interlint init --agent opencode` again to update it.
 
 ## Subagents
 

@@ -56,6 +56,8 @@ const SUBAGENT_TOOL = "subagent"
 const SESSION_DELETED = "session.deleted"
 /** Every report the Interlint CLI prints starts with this mark. */
 const REPORT_MARK = "✗ "
+/** How the CLI starts a notice for the user, such as a FreezingArchRule store to refreeze, when no check failed. */
+const NOTICE_MARK = "ℹ Interlint · for the user:"
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** The built-in tools that change files. */
@@ -102,7 +104,8 @@ export class TaskEndGate {
   decide(sessionID: string, run: CheckRun): Decision {
     if (run.exitCode === 0) {
       this.blocks.delete(sessionID)
-      return { action: "none" }
+      // A notice is for the user: reported in the session without resuming the agent.
+      return run.output.startsWith(NOTICE_MARK) ? { action: "report", text: run.output } : { action: "none" }
     }
     if (!isReport(run)) {
       this.blocks.delete(sessionID)

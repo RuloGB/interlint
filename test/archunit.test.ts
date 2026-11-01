@@ -237,3 +237,97 @@ describe("readArchUnitReport", () => {
     expect(readArchUnitReport(projectDir, before)).not.toHaveProperty("typesWithoutPackage")
   })
 })
+
+describe("a FreezingArchRule store written from broken classes", () => {
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-store-"))
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  const FROZEN_BROKEN = "Field <com.acme.mapper.OrderMapper.order> has type <Order> in (OrderMapper.java:0)"
+  const FROZEN_AGAIN = "Field <com.acme.mapper.OrderMapper.order> has type <com.acme.domain.Order> in (OrderMapper.java:14)"
+  const NEW_VIOLATION = "Method <com.acme.web.OrderController.list()> calls method <com.acme.infra.OrderRepository.all()> in (OrderController.java:21)"
+
+  function store(module: string, path: string, ...violations: string[]) {
+    const dir = join(projectDir, module, path)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, "stored.rules"), "classes\\ should\\ only\\ depend\\ on\\ domain=5d1b8a2e-rule\n")
+    writeFileSync(join(dir, "5d1b8a2e-rule"), violations.join("\n"))
+  }
+
+  function report(module: string, ...violations: string[]) {
+    const dir = join(projectDir, module, "target", "surefire-reports")
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, "TEST-ArchitectureRulesTest.xml"),
+      suite(archUnitFailure("MAPPERS", "classes should only depend on domain, because ARCH-07: mappers", violations)),
+    )
+  }
+
+  it("leaves out the violations frozen there, and names the store and its types", () => {
+    store("", "archunit_store", FROZEN_BROKEN)
+    const before = snapshotReports(projectDir)
+    report("", FROZEN_AGAIN, NEW_VIOLATION)
+
+    const { failures, brokenStores } = readArchUnitReport(projectDir, before)
+
+    expect(failures.map((failure) => failure.violations.map((violation) => violation.text))).toEqual([[NEW_VIOLATION]])
+    expect(brokenStores).toEqual([{ path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }])
+  })
+
+  it("drops a rule whose violations were all frozen there", () => {
+    store("", "archunit_store", FROZEN_BROKEN)
+    const before = snapshotReports(projectDir)
+    report("", FROZEN_AGAIN)
+
+    expect(readArchUnitReport(projectDir, before)).toEqual({
+      found: true,
+      failures: [],
+      brokenStores: [{ path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }],
+    })
+  })
+
+  it("is found where archunit.properties puts it, in a module", () => {
+    writeFileSync(join(projectDir, "pom.xml"), "<project/>")
+    mkdirSync(join(projectDir, "orders", "src", "test", "resources"), { recursive: true })
+    writeFileSync(join(projectDir, "orders", "pom.xml"), "<project/>")
+    writeFileSync(
+      join(projectDir, "orders", "src", "test", "resources", "archunit.properties"),
+      "# frozen rules\nfreeze.store.default.path = config/frozen\n",
+    )
+    store("orders", "config/frozen", FROZEN_BROKEN)
+    const before = snapshotReports(projectDir)
+    report("orders", FROZEN_AGAIN)
+
+    expect(readArchUnitReport(projectDir, before).brokenStores).toEqual([
+      { path: "orders/config/frozen", typesWithoutPackage: ["Order"], hidden: 1 },
+    ])
+  })
+
+  it("is not reported when its violations name every type in full", () => {
+    store("", "archunit_store", FROZEN_AGAIN)
+    const before = snapshotReports(projectDir)
+    report("", NEW_VIOLATION)
+
+    const result = readArchUnitReport(projectDir, before)
+
+    expect(result).not.toHaveProperty("brokenStores")
+    expect(result.failures[0]?.violations).toHaveLength(1)
+  })
+
+  it("is reported, with nothing left out, when the run reported none of its violations", () => {
+    store("", "archunit_store", FROZEN_BROKEN)
+    const before = snapshotReports(projectDir)
+    report("", NEW_VIOLATION)
+
+    const { failures, brokenStores } = readArchUnitReport(projectDir, before)
+
+    expect(failures[0]?.violations).toHaveLength(1)
+    expect(brokenStores).toEqual([{ path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 0 }])
+  })
+})

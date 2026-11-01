@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
-import type { ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
+import type { BrokenStore, ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
 import type { RuleFailure, Violation } from "../../../../domain/violation.js"
 import { moduleDirs } from "../modules.js"
 
@@ -19,6 +19,16 @@ const SIGNATURE = /<[\w$.]+?(?:\.<(?:init|clinit)>)?\(([^()]*)\)>/g
 const TYPE = /(?<!generic )(?:of type|return type|has type) <([^<>]+)>/g
 const SIMPLE_NAME = /^[A-Za-z_$][\w$]*$/
 const PRIMITIVES = new Set(["boolean", "byte", "char", "short", "int", "long", "float", "double", "void"])
+
+/** Where ArchUnit reads its configuration from, on the test classpath. */
+const STORE_CONFIGS = [join("src", "test", "resources", "archunit.properties"), join("src", "main", "resources", "archunit.properties")]
+const STORE_PATH = /^[ \t]*freeze\.store\.default\.path[ \t]*[=:][ \t]*(.+)$/m
+/** ArchUnit's default, relative to the directory the tests run in: the module's, under Surefire. */
+const DEFAULT_STORE_PATH = "archunit_store"
+const STORED_RULES = "stored.rules"
+const PACKAGE_PREFIX = /\b(?:[a-z_$][\w$]*\.)+(?=[A-Z_$])/g
+const LINE_NUMBER = /\.java:\d+\)/g
+const LAMBDA_NUMBER = /lambda\$(\w+)\$\d+/g
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -55,12 +65,19 @@ function fingerprint(path: string): string {
 export function readArchUnitReport(projectDir: string, before: ReportSnapshot): ReportResult {
   const modules = moduleDirs(projectDir)
   const reports = reportFiles(modules).filter((path) => before.get(path) !== fingerprint(path))
-  const failures = reports.flatMap((path) => parseSurefireXml(readFileSync(path, "utf8")))
+  const read = reports.flatMap((path) => parseSurefireXml(readFileSync(path, "utf8")))
+  const stores = reports.length > 0 ? brokenStoresOf(projectDir, modules) : []
+  const failures = stores.length > 0 ? withoutFrozen(read, stores) : read
   for (const failure of failures) {
     for (const violation of failure.violations) resolvePath(projectDir, modules, violation)
   }
-  const typesWithoutPackage = typesWithoutPackageIn(failures)
-  return { found: reports.length > 0, failures, ...(typesWithoutPackage.length > 0 ? { typesWithoutPackage } : {}) }
+  const typesWithoutPackage = typesWithoutPackageIn(failures.flatMap(({ violations }) => violations.map(({ text }) => text)))
+  return {
+    found: reports.length > 0,
+    failures,
+    ...(typesWithoutPackage.length > 0 ? { typesWithoutPackage } : {}),
+    ...(stores.length > 0 ? { brokenStores: stores.map(({ frozen: _, ...store }) => store) } : {}),
+  }
 }
 
 /**
@@ -68,16 +85,89 @@ export function readArchUnitReport(projectDir: string, before: ReportSnapshot): 
  * a bare name comes from a class file that names it that way: one that Eclipse's compiler, as IDEs run it, writes
  * when it cannot resolve a type. A class in the default package would show the same, but rules rarely analyze it.
  */
-function typesWithoutPackageIn(failures: RuleFailure[]): string[] {
-  const types = failures.flatMap(({ violations }) =>
-    violations.flatMap(({ text }) => [
-      ...[...text.matchAll(SIGNATURE)].flatMap((match) => match[1]!.split(",")),
-      ...[...text.matchAll(TYPE)].map((match) => match[1]!),
-    ]),
-  )
+function typesWithoutPackageIn(violations: string[]): string[] {
+  const types = violations.flatMap((text) => [
+    ...[...text.matchAll(SIGNATURE)].flatMap((match) => match[1]!.split(",")),
+    ...[...text.matchAll(TYPE)].map((match) => match[1]!),
+  ])
   return [...new Set(types.map((type) => type.trim().replace(/(?:\[\])+$/, "")))].filter(
     (type) => SIMPLE_NAME.test(type) && !PRIMITIVES.has(type),
   )
+}
+
+interface FrozenStore extends BrokenStore {
+  /** Its frozen violations that name a type without a package, as `matchKey` gives them. */
+  frozen: Set<string>
+}
+
+/** The FreezingArchRule stores of the project and its modules whose frozen violations name types without a package. */
+function brokenStoresOf(projectDir: string, modules: string[]): FrozenStore[] {
+  return modules.flatMap((module) => {
+    const dir = join(module, storePathOf(module))
+    const lines = frozenViolationsIn(dir)
+    const broken = lines.filter((line) => typesWithoutPackageIn([line]).length > 0)
+    if (broken.length === 0) return []
+    const path = relative(projectDir, dir).split(sep).join("/")
+    return [{ path, typesWithoutPackage: typesWithoutPackageIn(broken), hidden: 0, frozen: new Set(broken.map(matchKey)) }]
+  })
+}
+
+/** Where the module's `archunit.properties` puts the store, relative to the module, as ArchUnit run by Surefire reads it. */
+function storePathOf(module: string): string {
+  for (const resources of STORE_CONFIGS) {
+    let properties: string
+    try {
+      properties = readFileSync(join(module, resources), "utf8")
+    } catch {
+      continue
+    }
+    const path = STORE_PATH.exec(properties)?.[1]?.trim()
+    if (path) return path
+  }
+  return DEFAULT_STORE_PATH
+}
+
+/** The violations frozen in the store, one per line in each rule's file. `stored.rules` maps rules to those files. */
+function frozenViolationsIn(storeDir: string): string[] {
+  let names: string[]
+  try {
+    names = readdirSync(storeDir).filter((name) => name !== STORED_RULES)
+  } catch {
+    return []
+  }
+  return names.flatMap((name) => {
+    try {
+      return readFileSync(join(storeDir, name), "utf8").split(/\r?\n/).filter((line) => line.trim() !== "")
+    } catch {
+      return []
+    }
+  })
+}
+
+/**
+ * The failures without the violations frozen in a broken store, and without the rules left with none. Each store
+ * counts the violations it held back.
+ */
+function withoutFrozen(failures: RuleFailure[], stores: FrozenStore[]): RuleFailure[] {
+  return failures.flatMap((failure) => {
+    const violations = failure.violations.filter(({ text }) => {
+      const store = stores.find(({ frozen }) => frozen.has(matchKey(text)))
+      if (store) store.hidden++
+      return store === undefined
+    })
+    return failure.violations.length > 0 && violations.length === 0 ? [] : [{ ...failure, violations }]
+  })
+}
+
+/**
+ * A violation as ArchUnit matches it against the store, ignoring line numbers and lambda numbering, and, to match one
+ * frozen from broken classes, the packages of the types it names.
+ */
+function matchKey(violation: string): string {
+  return violation
+    .replace(PACKAGE_PREFIX, "")
+    .replace(LINE_NUMBER, ".java:0)")
+    .replace(LAMBDA_NUMBER, "lambda$$$1$$0")
 }
 
 export const archUnitReader: ReportReader = { snapshot: snapshotReports, read: readArchUnitReport }

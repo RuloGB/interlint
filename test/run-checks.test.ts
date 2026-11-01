@@ -465,6 +465,41 @@ describe("classes an IDE compiled with errors", () => {
   })
 })
 
+describe("a FreezingArchRule store written from broken classes", () => {
+  const store = { path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }
+
+  it("passes a check whose failures were all frozen in it, and names the store from the root", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [store] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config({ ...mavenEdit, dir: "orders" }), deps)
+
+    expect(outcome).toMatchObject({ status: "passed", brokenStores: [{ ...store, path: "orders/archunit_store" }] })
+  })
+
+  it("still shows the failures it did not hold", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const failure = { title: "ARCH-02", violations: [{ text: "Method <com.acme.web.Ctl.list()> calls method <com.acme.infra.Repo.all()> in (Ctl.java:21)" }] }
+    deps.run = async () => ({ exitCode: 1, output: "" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure], brokenStores: [store] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [failure], brokenStores: [store] })
+  })
+
+  it("does not pass a failed run that it held nothing back from", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "[ERROR] Tests run: 1, Errors: 1" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [{ ...store, hidden: 0 }] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "failed", exitCode: 1 })
+  })
+})
+
 describe("the command output", () => {
   it("reaches the report reader, for reports that cannot say why the command failed", async () => {
     const { deps } = fakeDeps({ mvnd: false })

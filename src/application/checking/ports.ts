@@ -67,6 +67,21 @@ export interface ReportResult {
    * that, so the classes the report was made from are broken and its failures cannot be trusted.
    */
   typesWithoutPackage?: string[]
+  /** The FreezingArchRule stores written from broken classes, present only when there are some. */
+  brokenStores?: BrokenStore[]
+}
+
+/**
+ * A FreezingArchRule store whose frozen violations name types without a package: it was written while the classes
+ * were broken. ArchUnit compares violations with the store as text, so once the classes are sound again those frozen
+ * violations look new. They are the team's accepted debt, not the agent's to fix.
+ */
+export interface BrokenStore {
+  /** The store directory, `/`-separated and relative to the project. */
+  path: string
+  typesWithoutPackage: string[]
+  /** How many violations of the run were frozen in the store, and so left out of the failures. */
+  hidden: number
 }
 
 /** Report files present before a run, with a fingerprint of each (modification time and size). */

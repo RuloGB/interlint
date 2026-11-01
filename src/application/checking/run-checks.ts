@@ -3,6 +3,7 @@ import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-com
 import type { RuleFailure } from "../../domain/violation.js"
 import type {
   BrokenClassRemover,
+  BrokenStore,
   ChangeTracker,
   CommandResult,
   CommandRunner,
@@ -15,12 +16,16 @@ import type {
   ReportResult,
 } from "./ports.js"
 
-export type CheckOutcome =
+export type CheckOutcome = (
   | { check: Check; durationMs: number; status: "passed" }
   | { check: Check; durationMs: number; status: "violations"; failures: RuleFailure[] }
   | { check: Check; durationMs: number; status: "failed"; command: string; exitCode: number; outputTail: string }
   | { check: Check; durationMs: number; status: "missing-dir" }
   | { check: Check; durationMs: number; status: "broken-build"; typesWithoutPackage: string[] }
+) & {
+  /** The FreezingArchRule stores written from broken classes, with paths from the root: for the user, not the agent. */
+  brokenStores?: BrokenStore[]
+}
 
 const OUTPUT_TAIL_LINES = 30
 
@@ -200,10 +205,21 @@ function outcomeOf(
   check: Check,
   command: string,
   reader: ReportReader,
-  { exitCode, output, durationMs, found, failures, typesWithoutPackage }: Attempt,
+  attempt: Attempt,
   onlyFiles?: string[],
 ): CheckOutcome {
+  const outcome = agentOutcomeOf(check, command, reader, attempt, onlyFiles)
+  const brokenStores = attempt.brokenStores?.map((store) => ({ ...store, path: fromRoot(check, store.path) }))
+  return brokenStores === undefined ? outcome : { ...outcome, brokenStores }
+}
 
+function agentOutcomeOf(
+  check: Check,
+  command: string,
+  reader: ReportReader,
+  { exitCode, output, durationMs, found, failures, typesWithoutPackage, brokenStores }: Attempt,
+  onlyFiles?: string[],
+): CheckOutcome {
   // Violations read from broken classes are not the agent's: showing them would send it to fix code that is fine.
   if (typesWithoutPackage !== undefined) return { check, durationMs, status: "broken-build", typesWithoutPackage }
 
@@ -217,6 +233,8 @@ function outcomeOf(
   }
   // At edit, failures all in files the edit did not change are not the edit's: task end reports them.
   if (all.length > 0 && shown.length === 0) return { check, durationMs, status: "passed" }
+  // A run that failed only on violations frozen in a broken store failed on the team's accepted debt, not the agent's.
+  if (all.length === 0 && brokenStores?.some(({ hidden }) => hidden > 0)) return { check, durationMs, status: "passed" }
   // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
   if (exitCode !== 0 || (!found && !exitCodeDecides)) {
     return { check, durationMs, status: "failed", command, exitCode, outputTail: tail(output) }
