@@ -25,8 +25,8 @@ At task end, --file runs only the checks of the projects that hold one of those 
 integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn) and when: edit, and a checkstyle and a pmd check (report: maven, when: edit)
-for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
+Wrapper (or mvn) and when: task-end, and a checkstyle check (report: maven, when: edit) and a
+pmd check (report: maven, when: task-end) for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
 the checks of each Maven project below it, with their dir. It never replaces a different
 interlint.yaml without --force.
 

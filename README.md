@@ -19,8 +19,8 @@ By then the agent's session is over, and someone has to fix the code by hand.
 
 ## What Interlint does
 
-- **After each edit,** fast checks run and any violation goes straight back to the agent. This needs [`mvnd`](#install-mvnd-strongly-recommended).
-- **At task end,** the full checks run, for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
+- **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. This needs [`mvnd`](#install-mvnd-strongly-recommended).
+- **At task end,** every check runs, ArchUnit and PMD included, for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
 
@@ -72,9 +72,9 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
 ### Install mvnd (strongly recommended)
 
 > [!IMPORTANT]
-> Without [`mvnd`](https://github.com/apache/maven-mvnd) on your `PATH`, Interlint cannot check after each edit. Every check waits for task end, so the agent only hears about a broken rule when it tries to finish, after it may have built more code on top of it.
+> Without [`mvnd`](https://github.com/apache/maven-mvnd) on your `PATH`, Interlint cannot check after each edit. Checkstyle waits for task end too, so the agent only hears about a broken rule when it tries to finish, after it may have built more code on top of it.
 
-`mvnd` keeps Maven running between checks, which makes a check after each edit fast enough. Install it following the instructions in [its repository](https://github.com/apache/maven-mvnd). Interlint finds it on its own: there is nothing to change in `interlint.yaml`.
+`mvnd` keeps Maven running between checks, which makes a check after each edit fast enough, and every check at task end faster. Install it following the instructions in [its repository](https://github.com/apache/maven-mvnd). Interlint finds it on its own: there is nothing to change in `interlint.yaml`.
 
 ## Supported today
 
@@ -88,7 +88,7 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
 ## Known limits
 
 - Only Maven projects.
-- After an edit, PMD still checks the whole project: it cannot be limited to one file from the command line. Only the failures of the changed file are shown; Checkstyle checks that file alone.
+- PMD cannot be limited to one file from the command line, so `init` runs it at task end. With `when: edit` it checks the whole project after each edit and shows only the failures of the changed file.
 
 ## Documentation
 
