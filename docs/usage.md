@@ -85,12 +85,30 @@ An IDE that builds automatically, such as VS Code with the Java extension or Ecl
 ✗ architecture · the compiled classes are broken, so its ArchUnit violations are not shown
 
   The report names types without a package: <ProjectName>, <ProjectStatus>.
-  javac never compiles a class like that. Another compiler, usually an IDE building automatically,
-  wrote to target/ while the check ran. Do not change the code for these violations.
-  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.
+  javac never compiles a class like that. An IDE building automatically wrote to target/ while the check
+  ran. Do not change the code for these violations: check again.
 ```
 
-Maven does not recompile those classes by itself, since they are newer than their sources, so the check stays broken until a build with `clean`. In VS Code, `"java.autobuild.enabled": false` in the project's settings stops the IDE from writing there. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
+You do not need to close the IDE, turn off its automatic build or build with `clean`.
+
+Maven does not recompile those classes by itself, since they are newer than their sources. So before every check that runs Maven, Interlint deletes the classes in `target/classes` and `target/test-classes`, in the project and its modules, that the IDE compiled with errors: those that contain `Unresolved compilation problem`, which the Eclipse compiler writes and `javac` never does. Maven then compiles them again. If the check fails and the IDE wrote more of them while it ran, Interlint deletes them and runs the check once more, and shows that second run. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
+
+### FreezingArchRule store frozen from broken classes
+
+A `FreezingArchRule` store records the violations a team accepted. If ArchUnit created or updated it while the classes were broken, it saved them with types without a package. ArchUnit compares violations with the store as text, so once the classes are sound again those violations look new, and the agent would get violations it is not meant to fix.
+
+Interlint reads the store of the project and of each module: the `freeze.store.default.path` of its `src/test/resources/archunit.properties`, or `archunit_store`. When the store holds violations that name types without a package, Interlint leaves out the reported violations that match them, ignoring packages, line numbers and lambda numbers. A check that failed only on those passes; if Maven also failed for another reason, such as a module that does not compile, it still fails. Then it prints a notice for you, after the failures, if any:
+
+```text
+ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes
+
+  It names types without a package: <Order>. Its frozen violations no longer match
+  the code, so ArchUnit reports them as new. Interlint did not show the agent 1 of them.
+  Refreeze it from a clean build: ./mvnw clean test -Darchunit.freeze.refreeze=true
+  Agent: do not change the code for this. Tell the user.
+```
+
+The notice does not change the exit code. Each agent shows it to you at task end: Claude Code as a message for you (see [Claude Code](claude-code.md#what-the-hooks-do)), OpenCode as a message in the session that does not make the agent continue (see [OpenCode](opencode.md#when-a-turn-ends)).
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 

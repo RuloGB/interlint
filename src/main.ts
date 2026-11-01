@@ -5,6 +5,7 @@ import { claudeCodeSettingsFiles } from "./adapters/driven/agents/claude-code-se
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
+import { removeBrokenClasses } from "./adapters/driven/maven/broken-classes.js"
 import { checkstyleOnFiles } from "./adapters/driven/maven/checkstyle-scope.js"
 import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
 import { archUnitReader } from "./adapters/driven/maven/reports/archunit-reader.js"
@@ -29,6 +30,7 @@ const checking: CheckProjectDeps = {
   changes: fileChangeTracker(),
   hasDirectory: isDirectory,
   editScopes: { maven: checkstyleOnFiles },
+  removeBrokenClasses,
 }
 
 const DEPS: CliDeps = {

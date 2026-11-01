@@ -14,6 +14,11 @@ function editNote(report: string): string {
   return `Interlint: the checks fail after this edit.\n\n${report}`
 }
 
+function withNotice(text: string, notice: string): string {
+  if (notice === "") return text
+  return text === "" ? notice : `${text.trimEnd()}\n\n${notice}`
+}
+
 /**
  * A Claude Code hook. Any error exits 1, never 2: Claude Code would read 2 as a block
  * and keep the agent going on a problem it cannot fix.
@@ -32,27 +37,24 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
     if (event === "post-edit") {
       if (input.filePath === undefined) return HOOK_EXIT.pass
       const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
-      const output = await afterEdit(projectDir, input, changed, deps)
-      if (output === "") return HOOK_EXIT.pass
-      io.stderr(editNote(output))
-      return HOOK_EXIT.block
-    }
-
-    if (event === "subagent-stop") {
-      const decision = await subagentStop(projectDir, input, deps)
-      if (decision.action !== "block") return HOOK_EXIT.pass
-      io.stderr(decision.text)
+      // The notice waits for the stop: shown after every edit, it would repeat what the user already read.
+      const { report } = await afterEdit(projectDir, input, changed, deps)
+      if (report === "") return HOOK_EXIT.pass
+      io.stderr(editNote(report))
       return HOOK_EXIT.block
     }
 
     // Only the projects the agent changed since their checks last passed, as the OpenCode plugin does.
-    const decision = await mainStop(projectDir, input, deps)
+    const { decision, notice } =
+      event === "subagent-stop" ? await subagentStop(projectDir, input, deps) : await mainStop(projectDir, input, deps)
+    // Claude Code reads stdout only when the hook does not block, so a blocked stop gives Claude the notice to pass on.
     if (decision.action === "block") {
-      io.stderr(decision.text)
+      io.stderr(withNotice(decision.text, notice))
       return HOOK_EXIT.block
     }
     // Past the limit the task may end, and the user still sees the failures.
-    if (decision.action === "report") io.stdout(`${JSON.stringify({ systemMessage: decision.text })}\n`)
+    const forUser = withNotice(decision.action === "report" && event === "stop" ? decision.text : "", notice)
+    if (forUser !== "") io.stdout(`${JSON.stringify({ systemMessage: forUser })}\n`)
     return HOOK_EXIT.pass
   } catch (error) {
     reportError(error, io)

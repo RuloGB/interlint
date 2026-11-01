@@ -19,6 +19,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     changes: { lookup: () => ({ changed: true, record: undefined, fingerprint: "" }), accept: () => {}, touch: () => {} },
     hasDirectory: () => true,
     editScopes: {},
+    removeBrokenClasses: () => [],
   }
   return { deps, launched }
 }
@@ -370,6 +371,145 @@ describe("a report from broken compiled classes", () => {
     expect(outcome).toMatchObject({ status: "broken-build", typesWithoutPackage: ["OrderStatus"] })
     expect(outcome).not.toHaveProperty("failures")
     expect(accepted).toEqual([])
+  })
+})
+
+describe("classes an IDE compiled with errors", () => {
+  const scriptCheck: Check = { name: "script", run: "node check.mjs", report: "archunit", when: "task-end" }
+
+  it("are removed from the check's project before a Maven check runs", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const events: string[] = []
+    deps.removeBrokenClasses = (dir) => (events.push(`remove ${dir}`), [])
+    deps.run = async (command, cwd) => (events.push(`run ${command} in ${cwd}`), { exitCode: 0, output: "" })
+    const inModule: Check = { ...mavenEdit, dir: "orders" }
+
+    await runTaskEndChecks("/repo", config(inModule), deps)
+
+    expect(events).toEqual(["remove /repo/orders", "run ./mvnw -q test -Dtest=ArchitectureRulesTest in /repo/orders"])
+  })
+
+  it("are left alone for a check that does not run Maven", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const removed: string[] = []
+    deps.removeBrokenClasses = (dir) => (removed.push(dir), [])
+
+    await runTaskEndChecks("/repo", config(scriptCheck), deps)
+
+    expect(removed).toEqual([])
+  })
+
+  it("written while a Maven check ran make Interlint remove them and run it once more", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    const leftovers = [[], ["/repo/target/classes/shop/Order.class"], []]
+    deps.removeBrokenClasses = () => leftovers.shift() ?? []
+    const exits = [1, 0]
+    deps.run = async (command) => (launched.push(command), { exitCode: exits.shift() ?? 0, output: "" })
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(launched).toHaveLength(2)
+    expect(outcome).toMatchObject({ status: "passed" })
+  })
+
+  it("make a passing report from the second run the one shown, with the edit's command", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: true })
+    let removals = 0
+    deps.removeBrokenClasses = () => (++removals === 2 ? ["/repo/target/classes/shop/Order.class"] : [])
+    const failure = { title: "ARCH-01", violations: [{ text: "Field <com.acme.Order.status> has type <OrderStatus>" }] }
+    const reads = [
+      { found: true, failures: [failure], typesWithoutPackage: ["OrderStatus"] },
+      { found: true, failures: [] },
+    ]
+    const exits = [1, 0]
+    deps.run = async (command) => (launched.push(command), { exitCode: exits.shift() ?? 0, output: "" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => reads.shift() ?? { found: true, failures: [] } } }
+
+    const [outcome] = await runEditChecks("/repo", config(mavenEdit), ["src/main/java/shop/Order.java"], deps)
+
+    expect(launched).toEqual(["mvnd -q test -Dtest=ArchitectureRulesTest", "mvnd -q test -Dtest=ArchitectureRulesTest"])
+    expect(outcome).toMatchObject({ status: "passed" })
+  })
+
+  it("do not make a failed check run again when there are none", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    deps.run = async (command) => (launched.push(command), { exitCode: 1, output: "[ERROR] COMPILATION ERROR" })
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(launched).toHaveLength(1)
+    expect(outcome).toMatchObject({ status: "failed", exitCode: 1 })
+  })
+
+  it("make a check run again only once, and show the second run's failure", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    let removals = 0
+    deps.removeBrokenClasses = () => (++removals === 1 ? [] : ["/repo/target/classes/shop/Order.class"])
+    const outputs = ["first", "[ERROR] cannot access CustomerData"]
+    deps.run = async (command) => (launched.push(command), { exitCode: 1, output: outputs.shift() ?? "" })
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(launched).toHaveLength(2)
+    expect(outcome).toMatchObject({ status: "failed", outputTail: "[ERROR] cannot access CustomerData" })
+  })
+
+  it("found after a passing check do not make it run again", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    let removals = 0
+    deps.removeBrokenClasses = () => (++removals === 2 ? ["/repo/target/classes/shop/Order.class"] : [])
+
+    await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(launched).toHaveLength(1)
+  })
+})
+
+describe("a FreezingArchRule store written from broken classes", () => {
+  const store = { path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }
+
+  it("passes a check whose failures were all frozen in it, and names the store from the root", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [store] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config({ ...mavenEdit, dir: "orders" }), deps)
+
+    expect(outcome).toMatchObject({ status: "passed", brokenStores: [{ ...store, path: "orders/archunit_store" }] })
+  })
+
+  it("still shows the failures it did not hold", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    const failure = { title: "ARCH-02", violations: [{ text: "Method <com.acme.web.Ctl.list()> calls method <com.acme.infra.Repo.all()> in (Ctl.java:21)" }] }
+    deps.run = async () => ({ exitCode: 1, output: "" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure], brokenStores: [store] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [failure], brokenStores: [store] })
+  })
+
+  it("does not pass a run that also failed for another reason, such as a module that does not compile", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "[ERROR] Failed to execute goal ...maven-compiler-plugin..." })
+    deps.readers = {
+      ...deps.readers,
+      archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [store], otherFailure: true }) },
+    }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "failed", exitCode: 1, brokenStores: [store] })
+  })
+
+  it("does not pass a failed run that it held nothing back from", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "[ERROR] Tests run: 1, Errors: 1" })
+    deps.readers = { ...deps.readers, archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [{ ...store, hidden: 0 }] }) } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "failed", exitCode: 1 })
   })
 })
 

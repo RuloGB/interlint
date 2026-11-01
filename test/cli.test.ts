@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { lockFileFor } from "../src/adapters/driven/state/project-lock.js"
 import { main } from "../src/main.js"
+import { FROZEN_AGAIN, FROZEN_BROKEN, NEW_VIOLATION, surefireReport, writeStore } from "./fixtures/frozen-store.js"
 
 const VIOLATIONS_XML = readFileSync(
   join(import.meta.dirname, "fixtures", "surefire", "two-rules-violated.xml"),
@@ -531,5 +532,46 @@ describe("interlint usage", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toContain('interlint: unknown command "lint"')
+  })
+})
+
+describe("interlint check with a FreezingArchRule store frozen from broken classes", () => {
+  const NOTICE = "ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes"
+
+  it("passes when every failure was frozen there, and prints the notice for the user", async () => {
+    writeStore(projectDir, FROZEN_BROKEN)
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: surefireReport(FROZEN_AGAIN), exitCode: 1 }) })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toMatch(new RegExp(`^${NOTICE}\n`))
+    expect(stdout).toContain("  Refreeze it from a clean build: mvn clean test -Darchunit.freeze.refreeze=true\n")
+  })
+
+  it("still fails when a test that is not an ArchUnit rule failed in the same run", async () => {
+    writeStore(projectDir, FROZEN_BROKEN)
+    const unitTest = '<testcase name="totals" classname="OrderTest"><failure message="expected: &lt;3&gt; but was: &lt;2&gt;"/></testcase>'
+    const report = surefireReport(FROZEN_AGAIN).replace("</testsuite>", `${unitTest}\n</testsuite>`)
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report, exitCode: 1 }) })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toMatch(/^✗ architecture · totals: expected: <3> but was: <2>\n/)
+    expect(stdout).not.toContain("OrderMapper")
+  })
+
+  it("prints the other failures first, then the notice, and exits 1", async () => {
+    writeStore(projectDir, FROZEN_BROKEN)
+    const report = surefireReport(FROZEN_AGAIN, NEW_VIOLATION)
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report, exitCode: 1 }) })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toMatch(/^✗ architecture · ARCH-07: mappers\n\n {2}Method <com\.acme\.web\.OrderController\.list\(\)>/)
+    expect(stdout).not.toContain("OrderMapper")
+    expect(stdout).toContain(`Fix these problems before continuing.\n\n${NOTICE}\n`)
   })
 })

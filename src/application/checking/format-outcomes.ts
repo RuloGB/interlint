@@ -1,4 +1,5 @@
 import { REPORT_TOOLS } from "../../domain/check.js"
+import { usesMaven } from "../../domain/maven-command.js"
 import type { Violation } from "../../domain/violation.js"
 import type { CheckOutcome } from "./run-checks.js"
 
@@ -30,9 +31,8 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
           `✗ ${outcome.check.name} · the compiled classes are broken, so its ${tool} violations are not shown`,
           "",
           `  The report names types without a package: ${typeList(outcome.typesWithoutPackage)}.`,
-          "  javac never compiles a class like that. Another compiler, usually an IDE building automatically,",
-          "  wrote to target/ while the check ran. Do not change the code for these violations.",
-          "  Turn off the IDE's automatic build for this project, or run the build with clean, and check again.",
+          "  javac never compiles a class like that. An IDE building automatically wrote to target/ while the check",
+          "  ran. Do not change the code for these violations: check again.",
         ].join("\n"),
       ]
     }
@@ -54,6 +54,45 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
   })
 
   return blocks.length === 0 ? "" : `${[...blocks, FOOTER].join("\n\n")}\n`
+}
+
+/**
+ * Formats what the user, not the agent, has to do: refreeze each FreezingArchRule store written from broken classes.
+ * Returns an empty string when there is nothing. The agent may still read it, so it says what the agent should do.
+ */
+export function formatNotices(outcomes: CheckOutcome[]): string {
+  const seen = new Set<string>()
+  const blocks = outcomes.flatMap(({ check, brokenStores = [] }) =>
+    brokenStores
+      .filter(({ path }) => {
+        if (seen.has(path)) return false
+        seen.add(path)
+        return true
+      })
+      .map((store) =>
+        [
+          `ℹ Interlint · for the user: the ArchUnit store ${store.path} was frozen from broken compiled classes`,
+          "",
+          `  It names types without a package: ${typeList(store.typesWithoutPackage)}. Its frozen violations no longer match`,
+          `  the code, so ArchUnit reports them as new. ${hiddenLine(store.hidden)}`,
+          `  Refreeze it from a clean build${check.dir === undefined ? "" : `, in ${check.dir}`}: ${mavenOf(check.run)} clean test -D${REFREEZE}`,
+          "  Agent: do not change the code for this. Tell the user.",
+        ].join("\n"),
+      ),
+  )
+  return blocks.length === 0 ? "" : `${blocks.join("\n\n")}\n`
+}
+
+const REFREEZE = "archunit.freeze.refreeze=true"
+
+function hiddenLine(hidden: number): string {
+  return hidden === 0 ? "None of them came up in this run." : `Interlint did not show the agent ${hidden} of them.`
+}
+
+/** The Maven executable the check runs, so the user refreezes with the team's own Maven. */
+function mavenOf(run: string): string {
+  const executable = run.trimStart().split(/\s+/)[0] ?? ""
+  return usesMaven(executable) ? executable : "mvn"
 }
 
 function typeList(types: string[]): string {

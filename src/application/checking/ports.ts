@@ -21,6 +21,13 @@ export type ExecutableLookup = (name: string) => boolean
 /** Whether a directory, such as the `dir` of a check, exists. */
 export type DirectoryLookup = (path: string) => boolean
 
+/**
+ * Deletes the class files of a project and its modules that were compiled with errors, and returns their paths.
+ * javac never writes such a class; an IDE's Eclipse compiler does, into the same `target/` as Maven, and Maven
+ * keeps it while it is newer than its source. Once deleted, the next build compiles it again with javac.
+ */
+export type BrokenClassRemover = (projectDir: string) => string[]
+
 /** Runs `work` while no other Interlint process runs checks on the same project. */
 export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
 
@@ -60,6 +67,26 @@ export interface ReportResult {
    * that, so the classes the report was made from are broken and its failures cannot be trusted.
    */
   typesWithoutPackage?: string[]
+  /** The FreezingArchRule stores written from broken classes, present only when there are some. */
+  brokenStores?: BrokenStore[]
+  /**
+   * Whether the command's output shows it also failed on more than the tests, such as a module that does not
+   * compile. Present, as true, only then: the report cannot tell, so its failures alone do not explain the exit code.
+   */
+  otherFailure?: boolean
+}
+
+/**
+ * A FreezingArchRule store whose frozen violations name types without a package: it was written while the classes
+ * were broken. ArchUnit compares violations with the store as text, so once the classes are sound again those frozen
+ * violations look new. They are the team's accepted debt, not the agent's to fix.
+ */
+export interface BrokenStore {
+  /** The store directory, `/`-separated and relative to the project. */
+  path: string
+  typesWithoutPackage: string[]
+  /** How many violations of the run were frozen in the store, and so left out of the failures. */
+  hidden: number
 }
 
 /** Report files present before a run, with a fingerprint of each (modification time and size). */

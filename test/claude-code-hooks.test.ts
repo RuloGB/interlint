@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { userStateDir } from "../src/adapters/driven/state/user-state.js"
 import { main } from "../src/main.js"
+import { FROZEN_AGAIN, FROZEN_BROKEN, NEW_VIOLATION, surefireReport, writeStore } from "./fixtures/frozen-store.js"
 
 const VIOLATIONS_XML = readFileSync(
   join(import.meta.dirname, "fixtures", "surefire", "two-rules-violated.xml"),
@@ -435,5 +436,57 @@ describe("userStateDir", () => {
   it("uses LOCALAPPDATA on Windows, and ignores it when it is relative", () => {
     expect(userStateDir("win32", { LOCALAPPDATA: "C:/Users/me/AppData/Local" })).toBe("C:/Users/me/AppData/Local")
     expect(userStateDir("win32", { LOCALAPPDATA: "AppData" })).toBe(join(homedir(), "AppData", "Local"))
+  })
+})
+
+describe("a FreezingArchRule store frozen from broken classes, in the Claude Code hooks", () => {
+  const NOTICE = "ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes"
+
+  beforeEach(() => writeStore(projectDir, FROZEN_BROKEN))
+
+  it("lets the task end and shows the user the notice when every failure was frozen there", async () => {
+    writeCheck("edit", surefireReport(FROZEN_AGAIN))
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    const { exitCode, stdout, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    expect(JSON.parse(stdout).systemMessage).toMatch(new RegExp(`^${NOTICE}\n`))
+  })
+
+  it("gives Claude the notice to pass on when the stop blocks for other failures", async () => {
+    writeCheck("edit", surefireReport(FROZEN_AGAIN, NEW_VIOLATION))
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    const { exitCode, stdout, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stdout).toBe("")
+    expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-07: mappers/)
+    expect(stderr).not.toContain("OrderMapper")
+    expect(stderr).toContain(`Fix these problems before continuing.\n\n${NOTICE}\n`)
+    expect(stderr).toContain("  Agent: do not change the code for this. Tell the user.\n")
+  })
+
+  it("leaves the stop text as it was when there is no notice", async () => {
+    rmSync(join(projectDir, "archunit_store"), { recursive: true })
+    writeCheck("edit", surefireReport(NEW_VIOLATION))
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    const { exitCode, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/Fix these problems before continuing\.\n$/)
+  })
+
+  it("keeps the notice out of the edit hook, which passes when every failure was frozen", async () => {
+    writeCheck("edit", surefireReport(FROZEN_AGAIN))
+
+    expect(await hook("post-edit", postToolUse(join(projectDir, "src", "main", "java", "Order.java")))).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    })
   })
 })
