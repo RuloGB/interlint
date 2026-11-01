@@ -90,7 +90,7 @@ An IDE that builds automatically, such as VS Code with the Java extension or Ecl
   Turn off the IDE's automatic build for this project, or run the build with clean, and check again.
 ```
 
-Maven does not recompile those classes by itself, since they are newer than their sources, so the check stays broken until a build with `clean`. In VS Code, `"java.autobuild.enabled": false` in the project's settings stops the IDE from writing there. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
+Maven does not recompile those classes by itself, since they are newer than their sources. So before every check that runs Maven, Interlint deletes the classes in `target/classes` and `target/test-classes`, in the project and its modules, that the IDE compiled with errors: those that contain `Unresolved compilation problem`, which the Eclipse compiler writes and `javac` never does. Maven then compiles them again. If the check fails and the IDE wrote more of them while it ran, Interlint deletes them and runs the check once more, and shows that second run. A rule that analyzes classes of the default package would show the same message, since their names have no package either.
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 

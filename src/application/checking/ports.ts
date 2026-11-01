@@ -21,6 +21,13 @@ export type ExecutableLookup = (name: string) => boolean
 /** Whether a directory, such as the `dir` of a check, exists. */
 export type DirectoryLookup = (path: string) => boolean
 
+/**
+ * Deletes the class files of a project and its modules that were compiled with errors, and returns their paths.
+ * javac never writes such a class; an IDE's Eclipse compiler does, into the same `target/` as Maven, and Maven
+ * keeps it while it is newer than its source. Once deleted, the next build compiles it again with javac.
+ */
+export type BrokenClassRemover = (projectDir: string) => string[]
+
 /** Runs `work` while no other Interlint process runs checks on the same project. */
 export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
 

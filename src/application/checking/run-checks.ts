@@ -2,13 +2,17 @@ import { type Check, type Config, EDIT_SHOWS_CHANGED_FILES_ONLY, fromRoot, isInP
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
 import type { RuleFailure } from "../../domain/violation.js"
 import type {
+  BrokenClassRemover,
   ChangeTracker,
+  CommandResult,
   CommandRunner,
   DirectoryLookup,
   EditScope,
   ExecutableLookup,
   ProjectLock,
+  ReportReader,
   ReportReaders,
+  ReportResult,
 } from "./ports.js"
 
 export type CheckOutcome =
@@ -30,6 +34,7 @@ export interface CheckDeps {
   hasDirectory: DirectoryLookup
   /** For the report formats whose tool can check only some files, how to limit its command at edit. */
   editScopes: Partial<Record<Report, EditScope>>
+  removeBrokenClasses: BrokenClassRemover
 }
 
 export interface TaskEndOptions {
@@ -155,21 +160,49 @@ function inProject(check: Check, file: string): string {
 /**
  * Runs one check in its own directory. Its reports are read there, and their paths given from `projectDir`.
  * With `onlyFiles`, relative to `projectDir`, only the failures in those files are shown.
+ *
+ * A Maven check first removes the classes an IDE compiled with errors, so Maven compiles them again. An IDE that
+ * builds automatically can still write some while the check runs: when the check fails and such classes appeared,
+ * they are removed and the check runs once more, and that run is the one shown.
  */
 async function runCheck(
   projectDir: string,
   check: Check,
   command: string,
-  { run, readers }: CheckDeps,
+  deps: CheckDeps,
   onlyFiles?: string[],
 ): Promise<CheckOutcome> {
-  const reader = readers[check.report]
   const checkDir = checkDirOf(projectDir, check)
+  const maven = usesMaven(command)
+  if (maven) deps.removeBrokenClasses(checkDir)
+  const first = await attempt(checkDir, check, command, deps)
+  const failed = first.exitCode !== 0 || first.typesWithoutPackage !== undefined
+  const retry = maven && failed && deps.removeBrokenClasses(checkDir).length > 0
+  const result = retry ? await attempt(checkDir, check, command, deps) : first
+  if (retry) result.durationMs += first.durationMs
+  return outcomeOf(check, command, deps.readers[check.report], result, onlyFiles)
+}
+
+interface Attempt extends CommandResult, ReportResult {
+  durationMs: number
+}
+
+async function attempt(checkDir: string, check: Check, command: string, { run, readers }: CheckDeps): Promise<Attempt> {
+  const reader = readers[check.report]
   const before = reader.snapshot(checkDir)
   const startedAt = performance.now()
   const { exitCode, output } = await run(command, checkDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  const { found, failures, typesWithoutPackage } = reader.read(checkDir, before, output)
+  return { exitCode, output, durationMs, ...reader.read(checkDir, before, output) }
+}
+
+function outcomeOf(
+  check: Check,
+  command: string,
+  reader: ReportReader,
+  { exitCode, output, durationMs, found, failures, typesWithoutPackage }: Attempt,
+  onlyFiles?: string[],
+): CheckOutcome {
 
   // Violations read from broken classes are not the agent's: showing them would send it to fix code that is fine.
   if (typesWithoutPackage !== undefined) return { check, durationMs, status: "broken-build", typesWithoutPackage }
