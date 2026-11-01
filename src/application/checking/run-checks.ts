@@ -217,7 +217,7 @@ function agentOutcomeOf(
   check: Check,
   command: string,
   reader: ReportReader,
-  { exitCode, output, durationMs, found, failures, typesWithoutPackage, brokenStores }: Attempt,
+  { exitCode, output, durationMs, found, failures, typesWithoutPackage, brokenStores, otherFailure }: Attempt,
   onlyFiles?: string[],
 ): CheckOutcome {
   // Violations read from broken classes are not the agent's: showing them would send it to fix code that is fine.
@@ -234,7 +234,9 @@ function agentOutcomeOf(
   // At edit, failures all in files the edit did not change are not the edit's: task end reports them.
   if (all.length > 0 && shown.length === 0) return { check, durationMs, status: "passed" }
   // A run that failed only on violations frozen in a broken store failed on the team's accepted debt, not the agent's.
-  if (all.length === 0 && brokenStores?.some(({ hidden }) => hidden > 0)) return { check, durationMs, status: "passed" }
+  // A run that also failed for another reason, such as a module that does not compile, is still a failure.
+  const onlyFrozen = all.length === 0 && otherFailure !== true && brokenStores?.some(({ hidden }) => hidden > 0)
+  if (onlyFrozen) return { check, durationMs, status: "passed" }
   // Without a fresh report, a zero exit code may mean the tests were skipped, not that they passed.
   if (exitCode !== 0 || (!found && !exitCodeDecides)) {
     return { check, durationMs, status: "failed", command, exitCode, outputTail: tail(output) }

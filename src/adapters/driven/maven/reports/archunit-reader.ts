@@ -29,6 +29,9 @@ const STORED_RULES = "stored.rules"
 const PACKAGE_PREFIX = /\b(?:[a-z_$][\w$]*\.)+(?=[A-Z_$])/g
 const LINE_NUMBER = /\.java:\d+\)/g
 const LAMBDA_NUMBER = /lambda\$(\w+)\$\d+/g
+/** `Failed to execute goal <groupId>:<artifactId>:<version>:<goal>`, as Maven reports a goal that failed. */
+const FAILED_GOAL = /Failed to execute goal [\w.-]+:([\w.-]+):/g
+const TEST_PLUGINS = new Set(["maven-surefire-plugin", "maven-failsafe-plugin"])
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -62,7 +65,7 @@ function fingerprint(path: string): string {
  * Reads the Surefire XML reports written or rewritten since `before`, in the project and its modules, and returns
  * their ArchUnit failures. Reports left in `target/` by previous runs are ignored.
  */
-export function readArchUnitReport(projectDir: string, before: ReportSnapshot): ReportResult {
+export function readArchUnitReport(projectDir: string, before: ReportSnapshot, output = ""): ReportResult {
   const modules = moduleDirs(projectDir)
   const reports = reportFiles(modules).filter((path) => before.get(path) !== fingerprint(path))
   const read = reports.flatMap((path) => parseSurefireXml(readFileSync(path, "utf8")))
@@ -77,7 +80,13 @@ export function readArchUnitReport(projectDir: string, before: ReportSnapshot): 
     failures,
     ...(typesWithoutPackage.length > 0 ? { typesWithoutPackage } : {}),
     ...(stores.length > 0 ? { brokenStores: stores.map(({ frozen: _, ...store }) => store) } : {}),
+    ...(failedBeyondTests(output) ? { otherFailure: true } : {}),
   }
+}
+
+/** Whether Maven says a goal other than running the tests failed, such as compiling a module. */
+function failedBeyondTests(output: string): boolean {
+  return [...output.matchAll(FAILED_GOAL)].some((match) => !TEST_PLUGINS.has(match[1]!))
 }
 
 /**

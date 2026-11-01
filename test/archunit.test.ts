@@ -327,6 +327,22 @@ describe("a FreezingArchRule store written from broken classes", () => {
     }
   })
 
+  it("comes with whether Maven failed on more than the tests", () => {
+    store("", "archunit_store", FROZEN_BROKEN)
+    const tests =
+      "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project api: There are test failures."
+    const compiler =
+      "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile (default-compile) on project web: Compilation failure"
+    const read = (output: string) => {
+      const before = snapshotReports(projectDir)
+      report("", FROZEN_AGAIN)
+      return readArchUnitReport(projectDir, before, output)
+    }
+
+    expect(read(`${tests}\n`)).not.toHaveProperty("otherFailure")
+    expect(read(`${tests}\n${compiler}\n`)).toMatchObject({ failures: [], otherFailure: true })
+  })
+
   it("is not reported when its violations name every type in full", () => {
     store("", "archunit_store", FROZEN_AGAIN)
     const before = snapshotReports(projectDir)

@@ -69,6 +69,11 @@ export interface ReportResult {
   typesWithoutPackage?: string[]
   /** The FreezingArchRule stores written from broken classes, present only when there are some. */
   brokenStores?: BrokenStore[]
+  /**
+   * Whether the command's output shows it also failed on more than the tests, such as a module that does not
+   * compile. Present, as true, only then: the report cannot tell, so its failures alone do not explain the exit code.
+   */
+  otherFailure?: boolean
 }
 
 /**

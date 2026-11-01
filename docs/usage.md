@@ -97,7 +97,7 @@ Maven does not recompile those classes by itself, since they are newer than thei
 
 A `FreezingArchRule` store records the violations a team accepted. If ArchUnit created or updated it while the classes were broken, it saved them with types without a package. ArchUnit compares violations with the store as text, so once the classes are sound again those violations look new, and the agent would get violations it is not meant to fix.
 
-Interlint reads the store of the project and of each module: the `freeze.store.default.path` of its `src/test/resources/archunit.properties`, or `archunit_store`. When the store holds violations that name types without a package, Interlint leaves out the reported violations that match them, ignoring packages, line numbers and lambda numbers. A check that failed only on those passes. Then it prints a notice for you, after the failures, if any:
+Interlint reads the store of the project and of each module: the `freeze.store.default.path` of its `src/test/resources/archunit.properties`, or `archunit_store`. When the store holds violations that name types without a package, Interlint leaves out the reported violations that match them, ignoring packages, line numbers and lambda numbers. A check that failed only on those passes; if Maven also failed for another reason, such as a module that does not compile, it still fails. Then it prints a notice for you, after the failures, if any:
 
 ```text
 ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes

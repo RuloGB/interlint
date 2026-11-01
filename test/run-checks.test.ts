@@ -489,6 +489,19 @@ describe("a FreezingArchRule store written from broken classes", () => {
     expect(outcome).toMatchObject({ status: "violations", failures: [failure], brokenStores: [store] })
   })
 
+  it("does not pass a run that also failed for another reason, such as a module that does not compile", async () => {
+    const { deps } = fakeDeps({ mvnd: false })
+    deps.run = async () => ({ exitCode: 1, output: "[ERROR] Failed to execute goal ...maven-compiler-plugin..." })
+    deps.readers = {
+      ...deps.readers,
+      archunit: { snapshot: () => new Map(), read: () => ({ found: true, failures: [], brokenStores: [store], otherFailure: true }) },
+    }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(mavenEdit), deps)
+
+    expect(outcome).toMatchObject({ status: "failed", exitCode: 1, brokenStores: [store] })
+  })
+
   it("does not pass a failed run that it held nothing back from", async () => {
     const { deps } = fakeDeps({ mvnd: false })
     deps.run = async () => ({ exitCode: 1, output: "[ERROR] Tests run: 1, Errors: 1" })
