@@ -63,7 +63,8 @@ function fingerprint(path: string): string {
 
 /**
  * Reads the Surefire XML reports written or rewritten since `before`, in the project and its modules, and returns
- * their ArchUnit failures. Reports left in `target/` by previous runs are ignored.
+ * their failures: each ArchUnit rule with its violations, and any other failed test by its name and message.
+ * Reports left in `target/` by previous runs are ignored.
  */
 export function readArchUnitReport(projectDir: string, before: ReportSnapshot, output = ""): ReportResult {
   const modules = moduleDirs(projectDir)

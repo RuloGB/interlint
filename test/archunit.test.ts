@@ -343,6 +343,20 @@ describe("a FreezingArchRule store written from broken classes", () => {
     expect(read(`${tests}\n${compiler}\n`)).toMatchObject({ failures: [], otherFailure: true })
   })
 
+  it("keeps a failed test that is not an ArchUnit rule next to violations all frozen there", () => {
+    store("", "archunit_store", FROZEN_BROKEN)
+    const before = snapshotReports(projectDir)
+    const dir = join(projectDir, "target", "surefire-reports")
+    mkdirSync(dir, { recursive: true })
+    report("", FROZEN_AGAIN)
+    writeFileSync(
+      join(dir, "TEST-OrderTest.xml"),
+      suite('<testcase name="totals" classname="OrderTest"><failure message="expected: &lt;3&gt; but was: &lt;2&gt;"/></testcase>'),
+    )
+
+    expect(readArchUnitReport(projectDir, before).failures).toEqual([{ title: "totals: expected: <3> but was: <2>", violations: [] }])
+  })
+
   it("is not reported when its violations name every type in full", () => {
     store("", "archunit_store", FROZEN_AGAIN)
     const before = snapshotReports(projectDir)

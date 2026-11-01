@@ -549,6 +549,19 @@ describe("interlint check with a FreezingArchRule store frozen from broken class
     expect(stdout).toContain("  Refreeze it from a clean build: mvn clean test -Darchunit.freeze.refreeze=true\n")
   })
 
+  it("still fails when a test that is not an ArchUnit rule failed in the same run", async () => {
+    writeStore(projectDir, FROZEN_BROKEN)
+    const unitTest = '<testcase name="totals" classname="OrderTest"><failure message="expected: &lt;3&gt; but was: &lt;2&gt;"/></testcase>'
+    const report = surefireReport(FROZEN_AGAIN).replace("</testsuite>", `${unitTest}\n</testsuite>`)
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report, exitCode: 1 }) })
+
+    const { exitCode, stdout } = await run("check")
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toMatch(/^✗ architecture · totals: expected: <3> but was: <2>\n/)
+    expect(stdout).not.toContain("OrderMapper")
+  })
+
   it("prints the other failures first, then the notice, and exits 1", async () => {
     writeStore(projectDir, FROZEN_BROKEN)
     const report = surefireReport(FROZEN_AGAIN, NEW_VIOLATION)
