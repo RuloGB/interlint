@@ -20,12 +20,12 @@ export function fileChangeTracker(stateDir?: string): ChangeTracker {
     join(stateDir ?? join(userStateDir(), "interlint", "projects"), projectKey(projectDir))
   return {
     lookup(projectDir) {
-      const current = fingerprint(projectDir)
+      const { fingerprint: current, lastModifiedMs } = scan(projectDir)
       const record = read(recordOf(projectDir))
       if (record === undefined) {
-        return { changed: !save(recordOf(projectDir), current), record: current, fingerprint: current }
+        return { changed: !save(recordOf(projectDir), current), record: current, fingerprint: current, lastModifiedMs }
       }
-      return { changed: record.startsWith(TOUCHED) || record !== current, record, fingerprint: current }
+      return { changed: record.startsWith(TOUCHED) || record !== current, record, fingerprint: current, lastModifiedMs }
     },
     // The files as the checks saw them, not as they are after: a change made while the checks ran, by any
     // means, keeps the project changed. A check that writes outside build output only makes the next run repeat.
@@ -45,33 +45,56 @@ export function fileChangeTracker(stateDir?: string): ChangeTracker {
  * command, changes it; a commit does not, since it leaves the files as they are.
  */
 export function fingerprint(projectDir: string): string {
+  return scan(projectDir).fingerprint
+}
+
+/**
+ * The fingerprint of the project's files, and the latest modification time among them and their directories:
+ * removing a file changes no file left, only its directory. A directory that holds build output or Node
+ * dependencies is left out, since a build changes its time when it creates or cleans them.
+ */
+function scan(projectDir: string): { fingerprint: string; lastModifiedMs: number } {
   const hash = createHash("sha256")
-  for (const file of filesOf(projectDir)) {
+  const dirs: string[] = []
+  let lastModifiedMs = 0
+  for (const file of filesOf(projectDir, dirs)) {
     try {
       const { size, mtimeMs } = statSync(file)
       hash.update(`${relative(projectDir, file).split(sep).join("/")}\0${size}\0${mtimeMs}\n`)
+      lastModifiedMs = Math.max(lastModifiedMs, mtimeMs)
     } catch {
       // Removed while walking: it is gone from the next fingerprint too.
     }
   }
-  return hash.digest("hex")
+  for (const dir of dirs) {
+    try {
+      lastModifiedMs = Math.max(lastModifiedMs, statSync(dir).mtimeMs)
+    } catch {
+      // Removed while walking, like a file.
+    }
+  }
+  return { fingerprint: hash.digest("hex"), lastModifiedMs }
 }
 
-/** The files below `dir`, in a stable order. Symbolic links are not followed. */
-function filesOf(dir: string): string[] {
+/**
+ * The files below `dir`, in a stable order. Symbolic links are not followed. The directories walked that hold no
+ * build output or Node dependencies, `dir` included, are added to `dirs`.
+ */
+function filesOf(dir: string, dirs: string[]): string[] {
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
     return []
   }
+  if (!entries.some((entry) => entry.isDirectory() && IGNORED_DIRS.has(entry.name))) dirs.push(dir)
   return entries
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .flatMap((entry) => {
       const path = join(dir, entry.name)
       if (entry.isFile()) return [path]
       if (!entry.isDirectory() || entry.name.startsWith(".") || IGNORED_DIRS.has(entry.name)) return []
-      return filesOf(path)
+      return filesOf(path, dirs)
     })
 }
 

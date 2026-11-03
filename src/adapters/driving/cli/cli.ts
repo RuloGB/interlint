@@ -21,7 +21,8 @@ mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 --changed runs only the checks of the projects that changed since their checks last passed:
 a file changed, or an edit check named one of its files. The agent integrations use it.
-At task end, --file runs only the checks of the projects that hold one of those files: the agent
+With --changed, a check passes without running when a build since the last change, such as
+mvn verify run by the agent, left all the reports it writes and they list no failure. At task end, --file runs only the checks of the projects that hold one of those files: the agent
 integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven

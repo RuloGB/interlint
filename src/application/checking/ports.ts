@@ -56,6 +56,8 @@ export interface ProjectChange {
   record: string | undefined
   /** The project's files when it was looked up, before its checks ran. */
   fingerprint: string
+  /** When the project last changed, in milliseconds since the epoch: a report written later saw it as it is. */
+  lastModifiedMs: number
 }
 
 export interface ReportResult {
@@ -97,6 +99,12 @@ export interface ReportReader {
   snapshot(projectDir: string): ReportSnapshot
   /** `output` is the end of the command's output, for reports that cannot say on their own why the command failed. */
   read(projectDir: string, before: ReportSnapshot, output: string): ReportResult
+  /**
+   * Reads the reports `command` writes from those a build already left, such as one the agent ran itself, when each
+   * of them is there and was written after `sinceMs`; otherwise nothing. A report that also lists what the build
+   * accepted gives all its findings as failures: without the build's exit code they cannot be told apart.
+   */
+  readFresh?(projectDir: string, command: string, sinceMs: number): ReportResult | undefined
   /**
    * Whether the report also lists what the build accepted, such as warnings under the project's threshold.
    * The exit code then decides: its failures count only when the command failed, and a zero exit passes even

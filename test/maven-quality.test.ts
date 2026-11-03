@@ -6,6 +6,7 @@ import {
   mavenQualityReader,
   parseCheckstyleXml,
   parsePmdXml,
+  readFreshQualityReports,
   readQualityReports,
   snapshotQualityReports,
 } from "../src/adapters/driven/maven/reports/quality-reader.js"
@@ -338,5 +339,90 @@ describe("readQualityReports", () => {
 
   it("is the reader of a report that also lists what the build accepted", () => {
     expect(mavenQualityReader.alsoListsAccepted).toBe(true)
+  })
+})
+
+describe("readFreshQualityReports", () => {
+  /** In milliseconds, as the change tracker gives it. Reports are dated in seconds, as `utimesSync` takes them. */
+  const SINCE_MS = 1_000_000
+  const AFTER = 2000
+  const PMD = "./mvnw -q compile pmd:check"
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-fresh-maven-"))
+    writeFileSync(join(projectDir, "pom.xml"), "<project/>")
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  function report(path: string, xml: string, writtenAt = AFTER) {
+    const file = join(projectDir, path)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, xml)
+    utimesSync(file, writtenAt, writtenAt)
+  }
+
+  const order = () => join(projectDir, "src", "main", "java", "shop", "Order.java")
+
+  it("passes when the report of the goal the command runs, written after the project's last change, lists nothing", () => {
+    report("target/pmd.xml", pmdXml({}))
+
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)).toEqual({ found: true, failures: [] })
+  })
+
+  it("gives every finding as a failure, even one the build may accept, since it has no exit code to tell", () => {
+    report("target/pmd.xml", pmdXml({ [order()]: [pmdViolation(4, 5, "UnusedLocalVariable", "Avoid unused local variables")] }))
+
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)?.failures).toEqual([
+      {
+        title: "UnusedLocalVariable",
+        violations: [{ text: "Avoid unused local variables", file: "Order.java", line: 4, path: "src/main/java/shop/Order.java" }],
+      },
+    ])
+  })
+
+  it("ignores the report of a goal the command does not run", () => {
+    report("target/pmd.xml", pmdXml({}))
+    report(
+      "target/checkstyle-result.xml",
+      checkstyleXml({ [order()]: [checkstyleError(8, "error", "sizes.LineLengthCheck", "Too long.")] }),
+      SINCE_MS / 1000,
+    )
+
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)).toEqual({ found: true, failures: [] })
+  })
+
+  it("reads nothing when that report is missing or was written before the project's last change", () => {
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)).toBeUndefined()
+
+    report("target/pmd.xml", pmdXml({}), SINCE_MS / 1000)
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads nothing when that report was cut short", () => {
+    report("target/pmd.xml", pmdXml({}).slice(0, 60))
+
+    expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads nothing when the command runs no check goal", () => {
+    report("target/pmd.xml", pmdXml({}))
+
+    expect(readFreshQualityReports(projectDir, "./mvnw -q verify", SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads each goal's report when the command runs both, as checkstyle:check@id names an execution", () => {
+    report("target/pmd.xml", pmdXml({}))
+
+    expect(readFreshQualityReports(projectDir, "./mvnw -q checkstyle:check@style pmd:check", SINCE_MS)).toBeUndefined()
+
+    report("target/checkstyle-result.xml", checkstyleXml({}))
+    expect(readFreshQualityReports(projectDir, "./mvnw -q checkstyle:check@style pmd:check", SINCE_MS)).toEqual({
+      found: true,
+      failures: [],
+    })
   })
 })

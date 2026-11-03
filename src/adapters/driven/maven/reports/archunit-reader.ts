@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { join, relative, resolve, sep } from "node:path"
+import { basename, join, relative, resolve, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { BrokenStore, ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
 import type { RuleFailure, Violation } from "../../../../domain/violation.js"
@@ -32,6 +32,10 @@ const LAMBDA_NUMBER = /lambda\$(\w+)\$\d+/g
 /** `Failed to execute goal <groupId>:<artifactId>:<version>:<goal>`, as Maven reports a goal that failed. */
 const FAILED_GOAL = /Failed to execute goal [\w.-]+:([\w.-]+):/g
 const TEST_PLUGINS = new Set(["maven-surefire-plugin", "maven-failsafe-plugin"])
+/** `-Dtest` naming test classes by simple name, as `init` writes it. A pattern or a method is not plain. */
+const PLAIN_TEST_CLASSES = /(?:^|\s)-Dtest=([\w$]+(?:,[\w$]+)*)(?=\s|$)/
+/** How a Surefire report ends when it was written whole: one cut short, by a build that stopped, ends before it. */
+const COMPLETE_REPORT = /<\/testsuite>\s*$/
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -83,6 +87,30 @@ export function readArchUnitReport(projectDir: string, before: ReportSnapshot, o
     ...(stores.length > 0 ? { brokenStores: stores.map(({ frozen: _, ...store }) => store) } : {}),
     ...(failedBeyondTests(output) ? { otherFailure: true } : {}),
   }
+}
+
+/**
+ * Reads the Surefire reports of the test classes `command` names with `-Dtest`, when each class has one written
+ * after `sinceMs` and written whole, as a build the agent ran after its last change leaves them. Other reports, such as
+ * those of the project's other tests, are ignored, as a run of `command` would not write them.
+ */
+export function readFreshArchUnitReport(projectDir: string, command: string, sinceMs: number): ReportResult | undefined {
+  const classes = PLAIN_TEST_CLASSES.exec(command)?.[1]?.split(",")
+  if (classes === undefined) return undefined
+  const reports = reportFiles(moduleDirs(projectDir))
+  const named = reports.filter((path) => classes.some((name) => isReportOf(path, name)))
+  if (!classes.every((name) => named.some((path) => isReportOf(path, name)))) return undefined
+  if (!named.every((path) => statSync(path).mtimeMs > sinceMs && COMPLETE_REPORT.test(readFileSync(path, "utf8")))) {
+    return undefined
+  }
+  const others = new Map(reports.filter((path) => !named.includes(path)).map((path) => [path, fingerprint(path)]))
+  return readArchUnitReport(projectDir, others)
+}
+
+/** Whether a Surefire report, named after the test class in full, is that of the class with this simple name. */
+function isReportOf(path: string, simpleName: string): boolean {
+  const name = basename(path)
+  return name === `TEST-${simpleName}.xml` || name.endsWith(`.${simpleName}.xml`)
 }
 
 /** Whether Maven says a goal other than running the tests failed, such as compiling a module. */
@@ -181,7 +209,11 @@ function matchKey(violation: string): string {
     .replace(LAMBDA_NUMBER, "lambda$$$1$$0")
 }
 
-export const archUnitReader: ReportReader = { snapshot: snapshotReports, read: readArchUnitReport }
+export const archUnitReader: ReportReader = {
+  snapshot: snapshotReports,
+  read: readArchUnitReport,
+  readFresh: readFreshArchUnitReport,
+}
 
 export function parseSurefireXml(xml: string): RuleFailure[] {
   const document = xmlParser.parse(xml)
