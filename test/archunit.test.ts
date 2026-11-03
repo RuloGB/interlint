@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { parseSurefireXml, readArchUnitReport, snapshotReports } from "../src/adapters/driven/maven/reports/archunit-reader.js"
+import {
+  parseSurefireXml,
+  readArchUnitReport,
+  readFreshArchUnitReport,
+  snapshotReports,
+} from "../src/adapters/driven/maven/reports/archunit-reader.js"
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", "surefire", name), "utf8")
@@ -377,5 +382,80 @@ describe("a FreezingArchRule store written from broken classes", () => {
 
     expect(failures[0]?.violations).toHaveLength(1)
     expect(brokenStores).toEqual([{ path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 0 }])
+  })
+})
+
+describe("readFreshArchUnitReport", () => {
+  /** In milliseconds, as the change tracker gives it. Reports are dated in seconds, as `utimesSync` takes them. */
+  const SINCE_MS = 1_000_000
+  const AFTER = 2000
+  const COMMAND = "./mvnw -q test -Dtest=LayersTest,NamingTest -Dcheckstyle.skip"
+  const PASSING = suite('<testcase name="rule" classname="com.acme.NamingTest"/>')
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-fresh-archunit-"))
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  function report(testClass: string, xml: string, writtenAt = AFTER) {
+    const dir = join(projectDir, "target", "surefire-reports")
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `TEST-com.acme.${testClass}.xml`)
+    writeFileSync(path, xml)
+    utimesSync(path, writtenAt, writtenAt)
+  }
+
+  const layersViolated = () =>
+    report("LayersTest", suite(archUnitFailure("layers", "no classes should, because ARCH-01: layers", ["Order calls OrderEntity in (Order.java:3)"])))
+
+  it("reads the reports of the classes the command names, when each was written after the project's last change", () => {
+    layersViolated()
+    report("NamingTest", PASSING)
+    report("OrderServiceTest", suite(`<testcase name="works"><failure message="expected 1"/></testcase>`))
+
+    const result = readFreshArchUnitReport(projectDir, COMMAND, SINCE_MS)
+
+    expect(result?.found).toBe(true)
+    expect(result?.failures.map((failure) => failure.title)).toEqual(["ARCH-01: layers"])
+  })
+
+  it("passes when those reports hold no failure", () => {
+    report("LayersTest", PASSING)
+    report("NamingTest", PASSING)
+
+    expect(readFreshArchUnitReport(projectDir, COMMAND, SINCE_MS)).toEqual({ found: true, failures: [] })
+  })
+
+  it("reads nothing when a class the command names has no report, as after a build that ran other tests", () => {
+    report("NamingTest", PASSING)
+
+    expect(readFreshArchUnitReport(projectDir, COMMAND, SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads nothing when one of those reports was written before the project's last change", () => {
+    layersViolated()
+    report("NamingTest", PASSING, SINCE_MS / 1000)
+
+    expect(readFreshArchUnitReport(projectDir, COMMAND, SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads nothing when one of those reports was cut short", () => {
+    report("LayersTest", PASSING)
+    report("NamingTest", PASSING.slice(0, 60))
+
+    expect(readFreshArchUnitReport(projectDir, COMMAND, SINCE_MS)).toBeUndefined()
+  })
+
+  it("reads nothing when the command does not name its test classes plainly", () => {
+    report("LayersTest", PASSING)
+    report("NamingTest", PASSING)
+
+    for (const command of ["./mvnw -q test", "./mvnw -q test -Dtest=*Test", "./mvnw -q test -Dtest=LayersTest#rule"]) {
+      expect(readFreshArchUnitReport(projectDir, command, SINCE_MS)).toBeUndefined()
+    }
   })
 })

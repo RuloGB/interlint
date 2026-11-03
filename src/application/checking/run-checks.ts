@@ -10,6 +10,7 @@ import type {
   DirectoryLookup,
   EditScope,
   ExecutableLookup,
+  ProjectChange,
   ProjectLock,
   ReportReader,
   ReportReaders,
@@ -55,6 +56,7 @@ export interface TaskEndOptions {
 /**
  * Runs the checks that apply at task end: all of them, `edit` ones included, or with `changedOnly` those of the
  * projects that changed, and with `files` only those of the projects that hold one of them.
+ * With `changedOnly`, a check whose reports from a build since the last change show it passed passes without running.
  * A project whose checks all pass is remembered as passing, as it is now.
  * A check whose `dir` does not exist fails every time, changed or not, so a typo in `dir` never goes unnoticed;
  * the other projects still run.
@@ -78,13 +80,43 @@ export async function runTaskEndChecks(
     const checks = config.checks.filter(
       (check) => holds(check) && (!present.includes(check) || dirs.includes(checkDirOf(projectDir, check))),
     )
-    const outcomes = await runInOrder(projectDir, checks, deps)
+    // Decided before any check runs, since a check writes the reports of others, such as when it compiles.
+    const built = changedOnly ? checks.filter((check) => passedInLastBuild(projectDir, check, selected, deps)) : []
+    const ran = await runInOrder(projectDir, checks.filter((check) => !built.includes(check)), deps)
+    const outcomes = checks.map((check): CheckOutcome =>
+      built.includes(check) ? { check, durationMs: 0, status: "passed" } : ran.shift()!,
+    )
     for (const { dir, seen } of selected) {
       const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)
       if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir, seen)
     }
     return outcomes
   })
+}
+
+/**
+ * Whether the reports a build left, such as `mvn verify` run by the agent itself, show the check passed, each written
+ * after the project last changed: running it again would give the same. A report with any failure, or one that shows
+ * the classes or the FreezingArchRule store were broken, does not count, and the check runs as usual.
+ */
+function passedInLastBuild(
+  projectDir: string,
+  check: Check,
+  projects: { dir: string; seen: ProjectChange }[],
+  deps: CheckDeps,
+): boolean {
+  const dir = checkDirOf(projectDir, check)
+  const project = projects.find((candidate) => candidate.dir === dir)
+  if (project === undefined) return false
+  const result = deps.readers[check.report].readFresh?.(dir, check.run, project.seen.lastModifiedMs)
+  return (
+    result !== undefined &&
+    result.found &&
+    result.failures.length === 0 &&
+    result.typesWithoutPackage === undefined &&
+    result.brokenStores === undefined &&
+    result.otherFailure !== true
+  )
 }
 
 /**

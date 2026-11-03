@@ -137,3 +137,39 @@ describe("fileChangeTracker", () => {
     expect(fileChangeTracker(join(blocked, "projects")).lookup(projectDir).changed).toBe(true)
   })
 })
+
+describe("the project's last change", () => {
+  /** In seconds, as `utimesSync` takes it. */
+  const LONG_AGO = 1000
+
+  /** Dates the project, its directories and its files back to `LONG_AGO`. */
+  function ageProject() {
+    for (const path of readdirSync(projectDir, { recursive: true }).map(String)) {
+      utimesSync(join(projectDir, path), LONG_AGO, LONG_AGO)
+    }
+    utimesSync(projectDir, LONG_AGO, LONG_AGO)
+  }
+
+  it("is the latest modification time of the project's files", () => {
+    ageProject()
+    utimesSync(join(projectDir, "pom.xml"), 5000, 5000)
+
+    expect(fileChangeTracker(stateDir).lookup(projectDir).lastModifiedMs).toBe(5_000_000)
+  })
+
+  it("moves when a file is removed, though no file left changed", () => {
+    write("domain/src/main/java/shop/Customer.java", "class Customer {}")
+    ageProject()
+    rmSync(join(projectDir, "domain/src/main/java/shop/Customer.java"))
+
+    expect(fileChangeTracker(stateDir).lookup(projectDir).lastModifiedMs).toBeGreaterThan(LONG_AGO * 1000)
+  })
+
+  it("ignores build output and the directories that hold it, which a build changes", () => {
+    ageProject()
+    write("target/classes/shop/Order.class", "x")
+    write("domain/target/surefire-reports/TEST-A.xml", "<testsuite/>")
+
+    expect(fileChangeTracker(stateDir).lookup(projectDir).lastModifiedMs).toBe(LONG_AGO * 1000)
+  })
+})

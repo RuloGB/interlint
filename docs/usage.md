@@ -170,6 +170,19 @@ interlint check --when task-end --changed --file orders/src/main/java/shop/Order
 
 A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project changed while its checks ran, by an edit or any other means: a project is remembered with its files as the checks saw them. A check that writes files outside `target/` therefore makes its project run once more at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
 
+### Reports from the agent's own build
+
+With `--changed`, a check does not run when a build since the project's last change already left its reports, such as `mvn clean verify` run by the agent because your `AGENTS.md` asks it to. The check passes, and the project is remembered as passing, when all of these hold:
+
+- Each report the check's command writes is in `target/`, written after the last change to the project's files. Removing a file counts as a change too.
+  - `report: archunit`: the Surefire report of every class that `-Dtest` names, as `init` writes it. A command without `-Dtest`, or with a pattern or a method in it, always runs.
+  - `report: maven`: the report of each `checkstyle:check` or `pmd:check` goal of the command, in every module where it is. A command without one of those goals always runs.
+- The reports were written whole, not cut short by a build that stopped, and list no failure. A Checkstyle or PMD report must list no finding at all: without Maven's exit code, Interlint cannot tell what the build accepted.
+
+Otherwise the check runs as usual. So a build that skipped the tests or a plugin, or ran only some tests, does not count. A file changed while that build ran, after the build read it, still makes the reports look new: keep the agent's build as the last thing that touches the files.
+
+Without `--changed`, as when you run `interlint check` yourself, and after an edit, every check runs.
+
 ## Multi-module projects and workspaces
 
 Start Interlint, and your agent, in the root of either layout:

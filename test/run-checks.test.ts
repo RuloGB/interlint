@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Check } from "../src/domain/check.js"
+import type { Check, Report } from "../src/domain/check.js"
 import { usesMaven, withMavenDaemon } from "../src/domain/maven-command.js"
+import type { ReportResult } from "../src/application/checking/ports.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 
 const PASSING_READER = { snapshot: () => new Map(), read: () => ({ found: true, failures: [] }) }
@@ -16,7 +17,11 @@ function fakeDeps(options: { mvnd: boolean }) {
     readers: { archunit: PASSING_READER, maven: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
-    changes: { lookup: () => ({ changed: true, record: undefined, fingerprint: "" }), accept: () => {}, touch: () => {} },
+    changes: {
+      lookup: () => ({ changed: true, record: undefined, fingerprint: "", lastModifiedMs: 0 }),
+      accept: () => {},
+      touch: () => {},
+    },
     hasDirectory: () => true,
     editScopes: {},
     removeBrokenClasses: () => [],
@@ -184,7 +189,7 @@ describe("only the projects that changed", () => {
     const touched: string[] = []
     deps.run = async (command) => (launched.push(command), { exitCode: failing.includes(command) ? 1 : 0, output: "" })
     deps.changes = {
-      lookup: (dir) => ({ changed: changed.includes(dir), record: `record of ${dir}`, fingerprint: "" }),
+      lookup: (dir) => ({ changed: changed.includes(dir), record: `record of ${dir}`, fingerprint: "", lastModifiedMs: 0 }),
       accept: (dir, seen) => void accepted.push(seen.record === `record of ${dir}` ? dir : `${dir} (wrong record)`),
       touch: (dir) => void touched.push(dir),
     }
@@ -279,6 +284,83 @@ describe("only the projects that changed", () => {
 
     expect(touched).toEqual(["/ws/orders", "/ws/billing"])
     expect(launched).toEqual([])
+  })
+})
+
+describe("the reports a build already left", () => {
+  const architecture: Check = { name: "architecture", run: "./mvnw -q test -Dtest=LayersTest", report: "archunit", when: "task-end" }
+  const pmd: Check = { name: "pmd", run: "./mvnw -q pmd:check", report: "maven", when: "task-end" }
+  const failure = { title: "ARCH-01: rule", violations: [{ text: "Order calls OrderEntity" }] }
+  const store = { path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }
+
+  function reusingDeps(fresh: { archunit?: ReportResult; maven?: ReportResult }) {
+    const { deps, launched } = fakeDeps({ mvnd: false })
+    const accepted: string[] = []
+    const asked: [string, string, number][] = []
+    deps.changes = {
+      lookup: () => ({ changed: true, record: "record", fingerprint: "", lastModifiedMs: 1000 }),
+      accept: (dir) => void accepted.push(dir),
+      touch: () => {},
+    }
+    const readFresh = (report: Report) => (dir: string, command: string, sinceMs: number) => {
+      asked.push([dir, command, sinceMs])
+      return fresh[report]
+    }
+    deps.readers = {
+      archunit: { ...PASSING_READER, readFresh: readFresh("archunit") },
+      maven: { ...PASSING_READER, alsoListsAccepted: true, readFresh: readFresh("maven") },
+    }
+    return { deps, launched, accepted, asked }
+  }
+
+  it("passes at task end, without running it, a check whose reports written since the project's last change show it passed", async () => {
+    const { deps, launched, accepted, asked } = reusingDeps({ archunit: { found: true, failures: [] } })
+
+    const outcomes = await runTaskEndChecks("/repo", config(architecture, pmd), deps, { changedOnly: true })
+
+    expect(outcomes.map((outcome) => [outcome.check.name, outcome.status])).toEqual([
+      ["architecture", "passed"],
+      ["pmd", "passed"],
+    ])
+    expect(launched).toEqual([pmd.run])
+    expect(asked).toEqual([
+      ["/repo", architecture.run, 1000],
+      ["/repo", pmd.run, 1000],
+    ])
+    expect(accepted).toEqual(["/repo"])
+  })
+
+  it("runs the check when those reports show failures, broken classes or a broken store", async () => {
+    for (const result of [
+      { found: true, failures: [failure] },
+      { found: true, failures: [], typesWithoutPackage: ["Order"] },
+      { found: true, failures: [], brokenStores: [store] },
+    ]) {
+      const { deps, launched } = reusingDeps({ archunit: result })
+
+      await runTaskEndChecks("/repo", config(architecture), deps, { changedOnly: true })
+
+      expect(launched).toEqual([architecture.run])
+    }
+  })
+
+  it("runs every check without changedOnly, whatever the reports show", async () => {
+    const { deps, launched, asked } = reusingDeps({ archunit: { found: true, failures: [] }, maven: { found: true, failures: [] } })
+
+    await runTaskEndChecks("/repo", config(architecture, pmd), deps)
+
+    expect(launched).toEqual([architecture.run, pmd.run])
+    expect(asked).toEqual([])
+  })
+
+  it("never reads them at edit", async () => {
+    const { deps, launched, asked } = reusingDeps({ archunit: { found: true, failures: [] } })
+    deps.hasExecutable = () => true
+
+    await runEditChecks("/repo", config({ ...architecture, when: "edit" }), ["src/main/java/shop/Order.java"], deps)
+
+    expect(launched).toEqual([withMavenDaemon(architecture.run)])
+    expect(asked).toEqual([])
   })
 })
 
