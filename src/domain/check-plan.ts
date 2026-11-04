@@ -1,4 +1,4 @@
-import type { Check, When } from "./check.js"
+import type { Check } from "./check.js"
 import { mavenCommand } from "./maven-command.js"
 import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
@@ -14,11 +14,19 @@ const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string) => string> = {
 }
 
 /**
- * When each check runs (decision 28). At edit Checkstyle checks only the changed files, which takes under a second.
- * PMD analyses every module and ArchUnit builds the project, which in a large reactor takes tens of seconds on every
- * edit, so both wait for task end. Teams can still set `when: edit` in `interlint.yaml`.
+ * How many edited files a slow check waits for (decision 30). PMD analyses every module and ArchUnit builds the
+ * project, which in a large reactor takes tens of seconds, too slow for every edit. A larger value would leave
+ * most agent tasks, which touch a few files, to task end. Teams can change `every` in `interlint.yaml`.
  */
-export const QUALITY_WHEN: Record<QualityPlugin, When> = { checkstyle: "edit", pmd: "task-end" }
+export const SLOW_CHECK_EVERY = 3
+
+/** The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none. */
+export const QUALITY_EVERY: Record<QualityPlugin, number | undefined> = { checkstyle: undefined, pmd: SLOW_CHECK_EVERY }
+
+/** Every check `init` writes runs after edits; `every`, when there is one, spaces the slow ones out. */
+function afterEdits(every: number | undefined): Pick<Check, "when" | "every"> {
+  return every === undefined ? { when: "edit" } : { when: "edit", every }
+}
 
 /** An execution id made of letters, digits, `_`, `.` and `-` only. Anything else could mean something to the shell. */
 const PLAIN_EXECUTION_ID = /^[\w.-]+$/
@@ -48,8 +56,8 @@ function reactorArgs(facts: ProjectFacts): string {
 }
 
 /**
- * The check that runs only the ArchUnit test classes, or nothing when there are none. It runs at task end: it builds
- * the project, which is too slow for every edit (decision 28).
+ * The check that runs only the ArchUnit test classes, or nothing when there are none. It builds the project, so it
+ * runs after every `SLOW_CHECK_EVERY` edited files.
  * `test` runs the lifecycle, so it skips the Checkstyle and PMD plugins the build declares: bound to an early
  * phase, their failure would stop the build before ArchUnit runs, and their own checks already report it.
  */
@@ -62,21 +70,21 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
     name: "architecture",
     run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${skips.join("")}`,
     report: "archunit",
-    when: "task-end",
+    ...afterEdits(SLOW_CHECK_EVERY),
   }
 }
 
 /**
  * One check per Checkstyle or PMD plugin the build declares. Each runs its own goal: in one Maven call the
- * first failing goal stops the rest. Each runs when `QUALITY_WHEN` says; the file is the same with or without mvnd,
- * since without it an `edit` check waits for task end anyway.
+ * first failing goal stops the rest. Each runs after edits, as often as `QUALITY_EVERY` says; the file is the same
+ * with or without mvnd, since without it an `edit` check waits for task end anyway.
  */
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
     run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin))}`,
     report: "maven",
-    when: QUALITY_WHEN[plugin],
+    ...afterEdits(QUALITY_EVERY[plugin]),
   }))
 }
 
@@ -88,5 +96,5 @@ export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
   const architecture = architectureCheck(facts)
   const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
   if (dir === undefined) return checks
-  return checks.map(({ name, run, report, when }) => ({ name: `${dir}/${name}`, dir, run, report, when }))
+  return checks.map(({ name, ...rest }) => ({ name: `${dir}/${name}`, dir, ...rest }))
 }
