@@ -202,6 +202,43 @@ checks:
     )
   })
 
+  it("reads how many written lines a check waits for, with every or without it", () => {
+    writeConfig(`
+checks:
+  - name: pmd
+    run: mvnd -q pmd:check
+    report: maven
+    when: edit
+    every: 5
+    lines: 100
+  - name: architecture
+    run: mvnd -q test
+    report: archunit
+    when: edit
+    lines: 200
+`)
+
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "pmd", run: "mvnd -q pmd:check", report: "maven", when: "edit", every: 5, lines: 100 },
+      { name: "architecture", run: "mvnd -q test", report: "archunit", when: "edit", lines: 200 },
+    ])
+  })
+
+  it.each(["0", "-1", "2.5", '"100"', "many", "[]"])("rejects lines: %s and says what it expects", (value) => {
+    writeConfig(`
+checks:
+  - name: pmd
+    run: mvnd -q pmd:check
+    report: maven
+    when: edit
+    lines: ${value}
+`)
+
+    expect(configErrorOf(() => loadConfig(projectDir)).message).toMatch(
+      /^interlint\.yaml: checks\[0\]\.lines must be a whole number of 1 or more \(got .+\)$/,
+    )
+  })
+
   it("rejects two checks with the same name", () => {
     writeConfig(`
 checks:

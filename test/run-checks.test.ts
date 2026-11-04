@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Check, Report } from "../src/domain/check.js"
 import { usesMaven, withMavenDaemon } from "../src/domain/maven-command.js"
-import type { PendingEdits, ReportResult } from "../src/application/checking/ports.js"
+import type { PendingEdit, PendingEdits, ReportResult } from "../src/application/checking/ports.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 
 const PASSING_READER = { snapshot: () => new Map(), read: () => ({ found: true, failures: [] }) }
@@ -31,14 +31,19 @@ function fakeDeps(options: { mvnd: boolean }) {
 }
 
 /** Pending edits kept in memory, as the state directory keeps them across processes. */
-function memoryPending(): PendingEdits & { saved: Map<string, string[]> } {
-  const saved = new Map<string, string[]>()
+function memoryPending(): PendingEdits & { saved: Map<string, PendingEdit[]>; files(check: string): string[] } {
+  const saved = new Map<string, PendingEdit[]>()
   return {
     saved,
     list: (projectDir, check) => [...(saved.get(`${projectDir}|${check}`) ?? [])],
-    save: (projectDir, check, files) => (saved.set(`${projectDir}|${check}`, [...files]), true),
+    save: (projectDir, check, edits) => (saved.set(`${projectDir}|${check}`, [...edits]), true),
+    /** The check's pending files in `/repo`, without their lines. */
+    files: (check) => (saved.get(`/repo|${check}`) ?? []).map(({ file }) => file),
   }
 }
+
+/** Pending edits of `files` that wrote no lines, as an edit without line counts leaves them. */
+const noLines = (files: string[]): PendingEdit[] => files.map((file) => ({ file, lines: 0 }))
 
 function config(...checks: Check[]) {
   return { checks }
@@ -543,7 +548,7 @@ describe("an edit check with every", () => {
     await editOneByOne(deps, [pmd], [a, b, c, d, e, f])
 
     expect(launched).toEqual([pmd.run])
-    expect(pending.list("/repo", "pmd")).toEqual([f])
+    expect(pending.files("pmd")).toEqual([f])
   })
 
   it("keeps the files pending while the check fails, so each next edit runs it on them all", async () => {
@@ -560,7 +565,7 @@ describe("an edit check with every", () => {
     failing = []
     await editOneByOne(deps, [pmd], [c])
     expect(scoped.at(-1)).toEqual([a, b, c, d, e, f])
-    expect(pending.list("/repo", "pmd")).toEqual([])
+    expect(pending.files("pmd")).toEqual([])
     await editOneByOne(deps, [pmd], [g])
     expect(launched).toHaveLength(3)
   })
@@ -573,7 +578,7 @@ describe("an edit check with every", () => {
     const outcomes = await editOneByOne(deps, [pmd], [a, b, c, d, e])
 
     expect(outcomes[4]![0]!.status).toBe("failed")
-    expect(pending.list("/repo", "pmd")).toEqual([a, b, c, d, e])
+    expect(pending.files("pmd")).toEqual([a, b, c, d, e])
   })
 
   it("runs at once when the pending files cannot be saved", async () => {
@@ -587,7 +592,7 @@ describe("an edit check with every", () => {
 
   it("runs at once on the edited files when the pending files cannot be read, and leaves them as they were", async () => {
     const { deps, launched, scoped } = pmdDeps(() => [])
-    const saved: string[][] = []
+    const saved: PendingEdit[][] = []
     deps.pending = { list: () => undefined, save: (_dir, _check, files) => (saved.push(files), true) }
 
     await editOneByOne(deps, [pmd], [a])
@@ -599,23 +604,23 @@ describe("an edit check with every", () => {
 
   it("does not count pending files that are no longer sources of the check", async () => {
     const { deps, launched, pending } = pmdDeps(() => [])
-    pending.save("/repo", "pmd", ["README.md", "other/pom.xml", b, c, d])
+    pending.save("/repo", "pmd", noLines(["README.md", "other/pom.xml", b, c, d]))
 
     await editOneByOne(deps, [{ ...pmd, dir: undefined }], [e])
 
     expect(launched).toEqual([])
-    expect(pending.list("/repo", "pmd")).toEqual([b, c, d, e])
+    expect(pending.files("pmd")).toEqual([b, c, d, e])
   })
 
   it("does not count pending sources outside the check's dir, as after its dir changed", async () => {
     const { deps, launched, pending } = pmdDeps(() => [])
     const orders: Check = { ...pmd, dir: "orders" }
-    pending.save("/repo", "pmd", [`billing/${a}`, `orders/${b}`, `orders/${c}`, `orders/${d}`])
+    pending.save("/repo", "pmd", noLines([`billing/${a}`, `orders/${b}`, `orders/${c}`, `orders/${d}`]))
 
     await editOneByOne(deps, [orders], [`orders/${e}`])
 
     expect(launched).toEqual([])
-    expect(pending.list("/repo", "pmd")).toEqual([`orders/${b}`, `orders/${c}`, `orders/${d}`, `orders/${e}`])
+    expect(pending.files("pmd")).toEqual([`orders/${b}`, `orders/${c}`, `orders/${d}`, `orders/${e}`])
   })
 
   it("keeps a count per project of a workspace", async () => {
@@ -662,7 +667,7 @@ describe("an edit check with every", () => {
     await Promise.all([a, b, c, d].map((file) => runEditChecks("/repo", config(two), [file], deps)))
 
     expect(launched).toEqual([pmd.run, pmd.run])
-    expect(memory.list("/repo", "pmd")).toEqual([])
+    expect(memory.files("pmd")).toEqual([])
   })
 })
 
@@ -690,7 +695,100 @@ describe("task end with pending edits", () => {
 
     await runTaskEndChecks("/repo", config(pmd), deps, { changedOnly: true })
 
-    expect(deps.pending.list("/repo", "pmd")).toEqual([file])
+    expect(deps.pending.list("/repo", "pmd")).toEqual([{ file, lines: 0 }])
+  })
+})
+
+describe("an edit check with lines", () => {
+  const pmd: Check = { name: "pmd", run: "mvnd -q pmd:check", report: "maven", when: "edit", every: 5, lines: 100 }
+  const source = (name: string) => `src/main/java/shop/${name}.java`
+  const [a, b, c, d, e] = ["A", "B", "C", "D", "E"].map(source) as [string, string, string, string, string]
+
+  function scopedDeps() {
+    const { deps, launched } = fakeDeps({ mvnd: true })
+    const scoped: string[][] = []
+    deps.editScopes = { maven: (command, files) => (scoped.push(files), command) }
+    return { deps, launched, scoped }
+  }
+
+  /** One edit of `file` that wrote `lines` lines in it. */
+  const edit = (deps: CheckDeps, check: Check, file: string, lines: number) =>
+    runEditChecks("/repo", config(check), [file], deps, new Map([[file, lines]]))
+
+  it("does not run after small edits of a few files, and leaves them to task end", async () => {
+    const { deps, launched } = scopedDeps()
+
+    for (const file of [a, b, c]) await edit(deps, pmd, file, 2)
+    expect(launched).toEqual([])
+
+    await runTaskEndChecks("/repo", config(pmd), deps, { changedOnly: true })
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("runs on the edit that brings the lines written to lines, on all the pending files", async () => {
+    const { deps, launched, scoped } = scopedDeps()
+
+    expect(await edit(deps, pmd, a, 60)).toEqual([])
+    const outcomes = await edit(deps, pmd, b, 40)
+
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["passed"])
+    expect(launched).toEqual([pmd.run])
+    expect(scoped).toEqual([[a, b]])
+  })
+
+  it("runs on every edited files before reaching lines, whichever comes first", async () => {
+    const { deps, launched } = scopedDeps()
+
+    for (const file of [a, b, c, d]) await edit(deps, pmd, file, 1)
+    expect(launched).toEqual([])
+    await edit(deps, pmd, e, 1)
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("adds up the lines of a file edited twice", async () => {
+    const { deps, launched } = scopedDeps()
+
+    await edit(deps, pmd, a, 60)
+    await edit(deps, pmd, a, 40)
+
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("waits only for lines when it has no every, however many files are edited", async () => {
+    const { deps, launched } = scopedDeps()
+    const onlyLines: Check = { ...pmd, every: undefined }
+
+    for (const file of [a, b, c, d, e, source("F")]) await edit(deps, onlyLines, file, 1)
+    expect(launched).toEqual([])
+    await edit(deps, onlyLines, a, 94)
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("counts no lines for an edit that gives none", async () => {
+    const { deps, launched } = scopedDeps()
+
+    for (const file of [a, b, c, d]) await runEditChecks("/repo", config(pmd), [file], deps)
+    expect(launched).toEqual([])
+    expect(deps.pending.list("/repo", "pmd")).toEqual([a, b, c, d].map((file) => ({ file, lines: 0 })))
+  })
+
+  it("does not count the lines of files that are not sources of the check", async () => {
+    const { deps, launched } = scopedDeps()
+
+    await runEditChecks("/repo", config(pmd), [a, "README.md"], deps, new Map([[a, 1], ["README.md", 500]]))
+
+    expect(launched).toEqual([])
+    expect(deps.pending.list("/repo", "pmd")).toEqual([{ file: a, lines: 1 }])
+  })
+
+  it("counts the lines from zero again once the check passed", async () => {
+    const { deps, launched } = scopedDeps()
+
+    await edit(deps, pmd, a, 100)
+    await edit(deps, pmd, b, 99)
+
+    expect(launched).toEqual([pmd.run])
+    expect(deps.pending.list("/repo", "pmd")).toEqual([{ file: b, lines: 99 }])
   })
 })
 

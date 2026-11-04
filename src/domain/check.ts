@@ -35,14 +35,27 @@ export interface Check {
   dir?: string
   /**
    * At edit, how many distinct sources of the check must be edited before it runs, on all of them. Absent, it runs
-   * on every edit, as with 1. It has no effect at task end.
+   * on every edit, as with 1, unless it has `lines`. It has no effect at task end.
    */
   every?: number
+  /**
+   * At edit, how many lines the edits of its sources must write before it runs, on all of them. With `every` too,
+   * it runs on whichever comes first. It has no effect at task end.
+   */
+  lines?: number
 }
 
-/** How many distinct edited sources an `edit` check waits for before it runs. */
-export function editsBeforeRun(check: Check): number {
-  return check.every ?? 1
+/** Whether an `edit` check waits for its edits to add up to `every` or `lines`, instead of running on each one. */
+export function waitsForEdits(check: Check): boolean {
+  return check.lines !== undefined || (check.every ?? 1) > 1
+}
+
+/**
+ * Whether the edits pending for a check that waits are enough to run it: `every` distinct sources, or `lines` lines
+ * written in them, whichever comes first.
+ */
+export function editsAreDue(check: Check, sources: number, lines: number): boolean {
+  return (check.every !== undefined && sources >= check.every) || (check.lines !== undefined && lines >= check.lines)
 }
 
 /** Whether `file`, relative to the directory of `interlint.yaml` and `/`-separated, is inside the check's project. */

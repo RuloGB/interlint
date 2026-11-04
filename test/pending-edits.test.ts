@@ -22,22 +22,22 @@ describe("filePendingEdits", () => {
   })
 
   it("keeps the files across instances, as across the processes of two edits", () => {
-    expect(filePendingEdits(stateDir).save(projectDir, "pmd", ["src/A.java", "src/B.java"])).toBe(true)
+    expect(filePendingEdits(stateDir).save(projectDir, "pmd", [{ file: "src/A.java", lines: 12 }, { file: "src/B.java", lines: 0 }])).toBe(true)
 
-    expect(filePendingEdits(stateDir).list(projectDir, "pmd")).toEqual(["src/A.java", "src/B.java"])
+    expect(filePendingEdits(stateDir).list(projectDir, "pmd")).toEqual([{ file: "src/A.java", lines: 12 }, { file: "src/B.java", lines: 0 }])
   })
 
   it("keeps the files of each check and each project apart", () => {
     const other = mkdtempSync(join(tmpdir(), "interlint-pending-other-"))
     try {
       const pending = filePendingEdits(stateDir)
-      pending.save(projectDir, "pmd", ["src/A.java"])
-      pending.save(projectDir, "architecture", ["src/B.java"])
-      pending.save(other, "pmd", ["src/C.java"])
+      pending.save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])
+      pending.save(projectDir, "architecture", [{ file: "src/B.java", lines: 1 }])
+      pending.save(other, "pmd", [{ file: "src/C.java", lines: 1 }])
 
-      expect(pending.list(projectDir, "pmd")).toEqual(["src/A.java"])
-      expect(pending.list(projectDir, "architecture")).toEqual(["src/B.java"])
-      expect(pending.list(other, "pmd")).toEqual(["src/C.java"])
+      expect(pending.list(projectDir, "pmd")).toEqual([{ file: "src/A.java", lines: 1 }])
+      expect(pending.list(projectDir, "architecture")).toEqual([{ file: "src/B.java", lines: 1 }])
+      expect(pending.list(other, "pmd")).toEqual([{ file: "src/C.java", lines: 1 }])
     } finally {
       rmSync(other, { recursive: true, force: true })
     }
@@ -45,24 +45,38 @@ describe("filePendingEdits", () => {
 
   it("empties the files when saved with none", () => {
     const pending = filePendingEdits(stateDir)
-    pending.save(projectDir, "pmd", ["src/A.java"])
+    pending.save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])
     pending.save(projectDir, "pmd", [])
 
     expect(pending.list(projectDir, "pmd")).toEqual([])
   })
 
-  it("has no pending files when the record is not a list of paths", () => {
+  it("reads a record of an earlier version, a list of paths, as files that wrote no lines", () => {
     const pending = filePendingEdits(stateDir)
-    pending.save(projectDir, "pmd", ["src/A.java"])
+    pending.save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])
+    const [record] = readdirSync(stateDir)
+    writeFileSync(join(stateDir, record!), JSON.stringify(["src/A.java", "src/B.java"]))
+
+    expect(pending.list(projectDir, "pmd")).toEqual([
+      { file: "src/A.java", lines: 0 },
+      { file: "src/B.java", lines: 0 },
+    ])
+  })
+
+  it("has no pending files when the record is not a list of pending edits", () => {
+    const pending = filePendingEdits(stateDir)
+    pending.save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])
     const [record] = readdirSync(stateDir)
     writeFileSync(join(stateDir, record!), "{not json")
+    expect(pending.list(projectDir, "pmd")).toEqual([])
 
+    writeFileSync(join(stateDir, record!), JSON.stringify([{ file: "src/A.java", lines: "many" }]))
     expect(pending.list(projectDir, "pmd")).toEqual([])
   })
 
   it("says the files cannot be read when the record exists but is not readable", () => {
     const pending = filePendingEdits(stateDir)
-    pending.save(projectDir, "pmd", ["src/A.java"])
+    pending.save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])
     const [record] = readdirSync(stateDir)
     rmSync(join(stateDir, record!))
     mkdirSync(join(stateDir, record!))
@@ -74,6 +88,6 @@ describe("filePendingEdits", () => {
     const blocked = join(stateDir, "blocked")
     writeFileSync(blocked, "a file, not a directory")
 
-    expect(filePendingEdits(blocked).save(projectDir, "pmd", ["src/A.java"])).toBe(false)
+    expect(filePendingEdits(blocked).save(projectDir, "pmd", [{ file: "src/A.java", lines: 1 }])).toBe(false)
   })
 })
