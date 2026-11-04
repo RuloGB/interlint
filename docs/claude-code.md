@@ -42,7 +42,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 
 ## What the hooks do
 
-- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; Claude and its subagents add to the same count.
+- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit, and you see a line that names the checks that failed, such as `✗ Interlint · checks failed after this edit: architecture`. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; Claude and its subagents add to the same count.
 - **When Claude finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. Only the main agent runs it: a subagent ends with `SubagentStop`.
 - **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed with `Edit` or `Write`, so the failures go to the agent that wrote the code. A subagent that changed no file, such as a read-only reviewer, runs nothing. If a check fails, the subagent cannot stop and gets the failures to fix them, before the main agent gets its answer. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 
@@ -60,6 +60,6 @@ The count of blocks, per session and per subagent, and the files each subagent c
 
 | Exit code | Meaning |
 |---|---|
-| 0 | Nothing for the agent: the checks passed, or no check reads the edited file. A message for you, if any, is on stdout as `systemMessage` |
-| 2 | A check failed: the failures go to Claude on stderr |
+| 0 | The checks passed, or no check reads the edited file. A message for you, if any, is on stdout as `systemMessage`. For `post-edit`, it is also the code when a check failed: stdout holds `"decision": "block"` with the failures for Claude as `reason`, and the checks that failed for you as `systemMessage` |
+| 2 | A check failed at `stop` or `subagent-stop`: the failures go to Claude on stderr, and it cannot stop yet |
 | 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |

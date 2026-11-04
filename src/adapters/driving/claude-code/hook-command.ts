@@ -14,6 +14,11 @@ function editNote(report: string): string {
   return `Interlint: the checks fail after this edit.\n\n${report}`
 }
 
+/** What the post-edit hook shows the user when the checks fail: Claude Code shows the user none of what Claude gets. */
+function failedLine(failed: string[]): string {
+  return `✗ Interlint · checks failed after this edit: ${failed.join(", ")}`
+}
+
 function withNotice(text: string, notice: string): string {
   if (notice === "") return text
   return text === "" ? notice : `${text.trimEnd()}\n\n${notice}`
@@ -49,10 +54,11 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
       if (input.filePath === undefined) return HOOK_EXIT.pass
       const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
       // The notice waits for the stop: shown after every edit, it would repeat what the user already read.
-      const { report, passed } = await afterEdit(projectDir, input, changed, deps)
+      const { report, passed, failed } = await afterEdit(projectDir, input, changed, deps)
       if (report !== "") {
-        io.stderr(editNote(report))
-        return HOOK_EXIT.block
+        // The tool already ran: `block` adds the reason next to its result for Claude, and the user reads the message.
+        io.stdout(`${JSON.stringify({ decision: "block", reason: editNote(report), systemMessage: failedLine(failed) })}\n`)
+        return HOOK_EXIT.pass
       }
       // Only the user reads it, so the user sees Interlint ran and Claude spends nothing on it.
       tellUser(io, withPassed("", passed))

@@ -24,6 +24,8 @@ export interface CheckResult {
   report: string
   notice: string
   passed: string
+  /** The names of the checks that did not pass, each once: empty when every check passed. */
+  failed: string[]
 }
 
 /** Runs the checks for the request and formats their failures for the agent and their notices for the user. */
@@ -33,5 +35,6 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
     request.when === "edit"
       ? await runEditChecks(projectDir, config, request.files, deps)
       : await runTaskEndChecks(projectDir, config, deps, { changedOnly: request.changedOnly, files: request.files })
-  return { report: formatOutcomes(outcomes), notice: formatNotices(outcomes), passed: formatPassed(outcomes) }
+  const failed = [...new Set(outcomes.filter((outcome) => outcome.status !== "passed").map((outcome) => outcome.check.name))]
+  return { report: formatOutcomes(outcomes), notice: formatNotices(outcomes), passed: formatPassed(outcomes), failed }
 }
