@@ -73,7 +73,7 @@ describe("interlint init", () => {
           run: "./mvnw -q test -Dtest=ArchitectureRulesTest,LayersTest",
           report: "archunit",
           when: "edit",
-          every: 3,
+          every: 5, lines: 100,
         },
       ],
     })
@@ -173,7 +173,7 @@ describe("interlint init", () => {
     expect((await run("init", "--force")).exitCode).toBe(0)
 
     expect(readConfig()).toBe(withoutDaemon)
-    expect(loadConfig(projectDir).checks[0]).toMatchObject({ run: "./mvnw -q test -Dtest=ArchitectureRulesTest", when: "edit", every: 3 })
+    expect(loadConfig(projectDir).checks[0]).toMatchObject({ run: "./mvnw -q test -Dtest=ArchitectureRulesTest", when: "edit", every: 5, lines: 100 })
   })
 
   it("uses the Windows wrapper when only mvnw.cmd is there", async () => {
@@ -205,7 +205,7 @@ describe("interlint init", () => {
         "Detected:",
         "  ArchUnit tests: ArchitectureRulesTest",
         "  Maven: ./mvnw (Maven Wrapper)",
-        "  mvnd: on the PATH, so the ArchUnit check runs after every 3 edited files",
+        "  mvnd: on the PATH, so the ArchUnit check runs after every 5 edited files or 100 written lines",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -220,7 +220,7 @@ describe("interlint init", () => {
     const { stdout } = await run("init")
 
     expect(stdout).toContain(
-      "  Maven: mvn (no Maven Wrapper)\n  mvnd: not on the PATH, so the ArchUnit check runs at task end; install mvnd to run it after every 3 edited files\n",
+      "  Maven: mvn (no Maven Wrapper)\n  mvnd: not on the PATH, so the ArchUnit check runs at task end; install mvnd to run it after every 5 edited files or 100 written lines\n",
     )
   })
 
@@ -580,7 +580,7 @@ describe("interlint init with Checkstyle and PMD", () => {
     )
   }
 
-  it("adds a checkstyle check for each edit and a pmd check for every 3 edited files when pom.xml declares both plugins", async () => {
+  it("adds a checkstyle check for each edit and a pmd check for every 5 edited files or 100 written lines when pom.xml declares both plugins", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
     pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
@@ -594,10 +594,10 @@ describe("interlint init with Checkstyle and PMD", () => {
         run: "./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip",
         report: "archunit",
         when: "edit",
-        every: 3,
+        every: 5, lines: 100,
       },
       { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "edit", every: 3 },
+      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
     ])
   })
 
@@ -726,7 +726,7 @@ describe("interlint init with Checkstyle and PMD", () => {
         "  Checkstyle: maven-checkstyle-plugin in pom.xml",
         "  PMD: maven-pmd-plugin in pom.xml",
         "  Maven: mvn (no Maven Wrapper)",
-        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and PMD checks run after every 3 edited files",
+        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 100 written lines",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -816,10 +816,10 @@ describe("interlint init in a multi-module project", () => {
         run: "./mvnw -q test -pl launcher -am -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
         report: "archunit",
         when: "edit",
-        every: 3,
+        every: 5, lines: 100,
       },
       { name: "checkstyle", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 3 },
+      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
     ])
   })
 
@@ -872,13 +872,13 @@ describe("interlint init in a multi-module project", () => {
           run: "./mvnw -q test -pl launcher -am -Dtest=OrdersRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
           report: "archunit",
           when: "edit",
-          every: 3,
+          every: 5, lines: 100,
         },
         { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
-        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 3 },
+        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
       ])
       expect(readConfig()).toContain("  - name: orders/architecture\n    dir: orders\n    run: ")
-      expect(readConfig()).toContain("    report: archunit\n    when: edit\n    every: 3\n")
+      expect(readConfig()).toContain("    report: archunit\n    when: edit\n    every: 5\n    lines: 100\n")
     })
 
     it("lists each project with what it detected", async () => {
@@ -901,7 +901,7 @@ describe("interlint init in a multi-module project", () => {
           "    Checkstyle: maven-checkstyle-plugin in pom.xml",
           "    PMD: maven-pmd-plugin in pom.xml",
           "    Maven: ./mvnw (Maven Wrapper)",
-          "  mvnd: on the PATH, so the Checkstyle checks run after each edit, and the ArchUnit and PMD checks run after every 3 edited files",
+          "  mvnd: on the PATH, so the Checkstyle checks run after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 100 written lines",
           "",
           "Wrote:",
           "  interlint.yaml",

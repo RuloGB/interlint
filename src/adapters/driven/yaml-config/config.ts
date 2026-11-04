@@ -40,7 +40,8 @@ export function loadConfig(projectDir: string): Config {
 function parseCheck(entry: unknown, at: string): Check {
   if (!isRecord(entry)) throw invalid(`${at} must be a mapping with name, run, report and when`)
   const dir = optionalDir(entry, at)
-  const every = optionalEvery(entry, at)
+  const every = optionalCount(entry, "every", at)
+  const lines = optionalCount(entry, "lines", at)
   return {
     name: requireString(entry, "name", at),
     run: requireString(entry, "run", at),
@@ -48,15 +49,19 @@ function parseCheck(entry: unknown, at: string): Check {
     when: requireOneOf(entry, "when", WHENS, at),
     ...(dir === undefined ? {} : { dir }),
     ...(every === undefined ? {} : { every }),
+    ...(lines === undefined ? {} : { lines }),
   }
 }
 
-/** How many edited files the check waits for at edit: a whole number of 1 or more, as a YAML number. */
-function optionalEvery(entry: Record<string, unknown>, at: string): number | undefined {
-  const value = entry.every
+/**
+ * How many edited files (`every`) or written lines (`lines`) the check waits for at edit: a whole number of 1 or
+ * more, as a YAML number.
+ */
+function optionalCount(entry: Record<string, unknown>, field: "every" | "lines", at: string): number | undefined {
+  const value = entry[field]
   if (value === undefined) return undefined
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw invalid(`${at}.every must be a whole number of 1 or more (got ${JSON.stringify(value)})`)
+    throw invalid(`${at}.${field} must be a whole number of 1 or more (got ${JSON.stringify(value)})`)
   }
   return value
 }

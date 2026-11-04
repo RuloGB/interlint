@@ -29,7 +29,8 @@ checks:
     run: ./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip
     report: archunit
     when: edit
-    every: 3
+    every: 5
+    lines: 100
   - name: checkstyle
     run: ./mvnw -q checkstyle:check
     report: maven
@@ -38,11 +39,12 @@ checks:
     run: ./mvnw -q compile pmd:check -Dcheckstyle.skip
     report: maven
     when: edit
-    every: 3
+    every: 5
+    lines: 100
 ```
 
 - The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it.
-- Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after every 3 edited files, with [`every: 3`](#every-n-edited-files): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. `init` says which applies on yours. To run them after each edit, remove `every`; to wait for more files, raise it; to leave them to task end, set their `when` to `task-end`.
+- Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after 5 edited files or 100 written lines, whichever comes first, with [`every: 5` and `lines: 100`](#every-n-files-or-lines): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. A few small edits, such as a log line in three files, wait for task end. `init` says which applies on yours. To run them after each edit, remove `every` and `lines`; to wait for more, raise them; to leave them to task end, set their `when` to `task-end`.
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Without `--agent` it then writes nothing and exits with 2. With `--agent` it keeps your `interlint.yaml`, lists it under `Kept:`, and still writes or updates the agent's files, so you can update them after editing the config. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
@@ -151,6 +153,7 @@ interlint check --when edit --file src/main/java/shop/Order.java
 
 - Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`. Any other file, such as `README.md`, runs nothing and exits with 0.
 - The output and exit codes are the same as at task end. `--file` can be repeated.
+- `--lines <n>` gives the lines the edit wrote in a file, for checks with [`lines`](#every-n-files-or-lines). Give one `--lines` after each `--file`, as in `--file A.java --lines 12 --file B.java --lines 0`, or none at all: files without it wrote no lines. The agent integrations always give it.
 - With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
 - Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end.
 - A `report: maven` check shows only the failures of the changed files: Checkstyle and PMD rate each file on its own, so another file's failures are not the edit's, and task end shows them. When Maven failed only because of other files, the check passes after the edit. An ArchUnit check shows every failure, because an edit can break a rule in a class it did not change.
@@ -159,9 +162,9 @@ interlint check --when edit --file src/main/java/shop/Order.java
 - When Maven fails, only the most severe level in the whole report is shown, as at task end, and then only in the changed files. So when PMD also fails in another file at a more severe priority, a failure in the changed file shows at task end, not after the edit.
 - Check runs on the same project never overlap: a second edit waits until the first one's checks finish.
 
-### Every N edited files
+### Every N files or lines
 
-A slow `edit` check, such as ArchUnit or PMD in a large project, can wait for several edited files with `every`:
+A slow `edit` check, such as ArchUnit or PMD in a large project, can wait for several edited files with `every`, for several written lines with `lines`, or for whichever comes first with both:
 
 ```yaml
 checks:
@@ -174,15 +177,18 @@ checks:
     report: maven
     when: edit
     every: 5
+    lines: 100
 ```
 
-- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, and it runs on all 5: the failures of any of them are shown, not only those of the last one, and a Checkstyle check with `every` checks those 5 files. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
+- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, or to 100 lines written in them, and it runs on all of them: the failures of any of them are shown, not only those of the last one, and a Checkstyle check with `every` checks those files. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
 - A Maven check with `every` still needs `mvnd` to run after edits. Without it, edits do not count and the check runs at task end.
-- A file edited twice counts once. Files that are not sources of the check, such as `README.md`, do not count.
+- A file edited twice counts once for `every`, and its lines add up for `lines`. Files that are not sources of the check, such as `README.md`, do not count.
+- The lines an edit wrote are those it adds or changes, not the ones it keeps around them and not the ones it removes: a log line added between two lines counts 1. Every line of a new or rewritten file counts, and so does each `+` line of an OpenCode patch.
+- With `lines` and no `every`, the number of files does not matter: the check waits only for the lines. With `every` and no `lines`, lines do not matter.
 - The count is kept per check, so for each project of a workspace, and is shared by the main agent and its subagents.
 - When the check fails, its files stay pending, so each next edit of one of its sources runs it again on them all, until it passes. Then it counts from zero.
-- At task end the check runs as usual, even before reaching `every`, since every edit marks its project as changed. When it passes there, its pending files are forgotten too.
-- `every` must be a whole number of 1 or more. Without it, or with `every: 1`, the check runs after each edit. It has no effect on a `task-end` check.
+- At task end the check runs as usual, even before reaching `every` or `lines`, since every edit marks its project as changed. When it passes there, its pending files are forgotten too.
+- `every` and `lines` must be whole numbers of 1 or more. Without both, or with `every: 1`, the check runs after each edit. They have no effect on a `task-end` check.
 - The pending files are kept in your user's state directory (`%LOCALAPPDATA%\interlint\pending` on Windows, `$XDG_STATE_HOME/interlint/pending` or `~/.local/state/interlint/pending` elsewhere), never in the project. When they cannot be read or saved, the check runs after that edit.
 
 ## At task end
@@ -237,7 +243,8 @@ checks:
     run: ./mvnw -q test -pl launcher -am -Dtest=OrdersArchitectureTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip
     report: archunit
     when: edit
-    every: 3
+    every: 5
+    lines: 100
   - name: orders/checkstyle
     dir: orders
     run: ./mvnw -q checkstyle:check@style

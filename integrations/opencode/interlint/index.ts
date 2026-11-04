@@ -210,6 +210,48 @@ export function changedFiles(tool: string, input: unknown): string[] {
   return typeof path === "string" ? [path] : []
 }
 
+/**
+ * The lines a tool call wrote in each file it changed: those an edit adds or changes, every line of a write, and the
+ * added lines of each file of a patch. A file it wrote no line in, such as one a patch deletes, is left out.
+ */
+export function linesWritten(tool: string, input: unknown): Map<string, number> {
+  const written = new Map<string, number>()
+  if (!FILE_TOOLS.has(tool) || typeof input !== "object" || input === null) return written
+  const { path, oldString, newString, content, patchText } = input as Record<string, unknown>
+  if (tool === "patch") {
+    if (typeof patchText !== "string") return written
+    let file: string | undefined
+    for (const line of patchText.split(/\r?\n/)) {
+      const header = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/.exec(line)
+      // Lines after `Move to` still belong to the file the patch updates.
+      if (header) file = header[1] === "Move to" ? file : header[2]!.trim()
+      else if (file !== undefined && line.startsWith("+")) written.set(file, (written.get(file) ?? 0) + 1)
+    }
+    return written
+  }
+  if (typeof path !== "string") return written
+  if (typeof newString === "string") written.set(path, countWritten(typeof oldString === "string" ? oldString : "", newString))
+  else if (typeof content === "string") written.set(path, countWritten("", content))
+  return written
+}
+
+/**
+ * How many lines of `after` are not matched by a line of `before`, each line of `before` matching once: the lines an
+ * edit adds or changes, not the ones it keeps around them. The same count as Interlint's own, for the Claude Code hook.
+ */
+function countWritten(before: string, after: string): number {
+  const lines = (text: string) => (text === "" ? [] : text.replace(/\r?\n$/, "").split(/\r?\n/))
+  const kept = new Map<string, number>()
+  for (const line of lines(before)) kept.set(line, (kept.get(line) ?? 0) + 1)
+  let written = 0
+  for (const line of lines(after)) {
+    const left = kept.get(line) ?? 0
+    if (left > 0) kept.set(line, left - 1)
+    else written++
+  }
+  return written
+}
+
 /** The note added to a tool result after an edit, or nothing when the checks pass or could not run. */
 export function editNote(run: CheckRun): string | undefined {
   // A run that could not happen is not the agent's mistake: the task-end check reports it.
@@ -540,7 +582,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         })
         if (files.length === 0 || !(await isOurs(event.sessionID))) return
         record(event.sessionID, files)
-        const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file])]
+        const lines = linesWritten(event.tool, event.input)
+        const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file, "--lines", `${lines.get(file) ?? 0}`])]
         const run = await runChecks(directory, command, editTimeoutMs, args)
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)

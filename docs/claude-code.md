@@ -42,7 +42,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 
 ## What the hooks do
 
-- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; Claude and its subagents add to the same count.
+- **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines, on all of them; Claude and its subagents add to the same count. The hook counts the lines each `Edit` adds or changes, and every line of a `Write`.
 - **When Claude finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. Only the main agent runs it: a subagent ends with `SubagentStop`.
 - **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed with `Edit` or `Write`, so the failures go to the agent that wrote the code. A subagent that changed no file, such as a read-only reviewer, runs nothing. If a check fails, the subagent cannot stop and gets the failures to fix them, before the main agent gets its answer. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 

@@ -15,17 +15,23 @@ const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string) => string> = {
 
 /**
  * How many edited files a slow check waits for (decision 30). PMD analyses every module and ArchUnit builds the
- * project, which in a large reactor takes tens of seconds, too slow for every edit. A larger value would leave
- * most agent tasks, which touch a few files, to task end. Teams can change `every` in `interlint.yaml`.
+ * project, which in a large reactor takes tens of seconds, too slow for every edit. Teams can change `every` in
+ * `interlint.yaml`.
  */
-export const SLOW_CHECK_EVERY = 3
+export const SLOW_CHECK_EVERY = 5
+
+/**
+ * How many written lines a slow check waits for, if it reaches them before `SLOW_CHECK_EVERY` files: a few small
+ * edits, such as a log line in three files, wait for task end, while a new class runs the check at once.
+ */
+export const SLOW_CHECK_LINES = 100
 
 /** The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none. */
 export const QUALITY_EVERY: Record<QualityPlugin, number | undefined> = { checkstyle: undefined, pmd: SLOW_CHECK_EVERY }
 
-/** Every check `init` writes runs after edits; `every`, when there is one, spaces the slow ones out. */
-function afterEdits(every: number | undefined): Pick<Check, "when" | "every"> {
-  return every === undefined ? { when: "edit" } : { when: "edit", every }
+/** Every check `init` writes runs after edits; `every` and `lines`, when there is an `every`, space the slow ones out. */
+function afterEdits(every: number | undefined): Pick<Check, "when" | "every" | "lines"> {
+  return every === undefined ? { when: "edit" } : { when: "edit", every, lines: SLOW_CHECK_LINES }
 }
 
 /** An execution id made of letters, digits, `_`, `.` and `-` only. Anything else could mean something to the shell. */
@@ -57,7 +63,7 @@ function reactorArgs(facts: ProjectFacts): string {
 
 /**
  * The check that runs only the ArchUnit test classes, or nothing when there are none. It builds the project, so it
- * runs after every `SLOW_CHECK_EVERY` edited files.
+ * runs after every `SLOW_CHECK_EVERY` edited files or `SLOW_CHECK_LINES` written lines.
  * `test` runs the lifecycle, so it skips the Checkstyle and PMD plugins the build declares: bound to an early
  * phase, their failure would stop the build before ArchUnit runs, and their own checks already report it.
  */

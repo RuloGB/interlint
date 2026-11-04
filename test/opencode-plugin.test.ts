@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import plugin, {
   type CheckRun,
   changedFiles,
+  linesWritten,
   createInterlintPlugin,
   DEFAULT_EDIT_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
@@ -812,6 +813,43 @@ describe("changedFiles", () => {
   })
 })
 
+describe("linesWritten", () => {
+  it("counts the lines an edit adds or changes, and every line a write gives", () => {
+    const edit = { path: "src/A.java", oldString: "    pay();", newString: '    log.info("pay");\n    pay();' }
+
+    expect(linesWritten("edit", edit)).toEqual(new Map([["src/A.java", 1]]))
+    expect(linesWritten("write", { path: "src/A.java", content: "class A {\n  int id;\n}\n" })).toEqual(new Map([["src/A.java", 3]]))
+  })
+
+  it("counts the added lines of each file of a patch", () => {
+    const patchText = [
+      "*** Begin Patch",
+      "*** Add File: src/main/java/shop/New.java",
+      "+class New {",
+      "+}",
+      "*** Update File: src/main/java/shop/Order.java",
+      "*** Move to: src/main/java/shop/domain/Order.java",
+      "@@ class Order",
+      " int id;",
+      "-int a;",
+      "+int b;",
+      "*** Delete File: src/main/java/shop/Old.java",
+      "*** End Patch",
+    ].join("\n")
+
+    expect(linesWritten("patch", { patchText })).toEqual(
+      new Map([
+        ["src/main/java/shop/New.java", 2],
+        ["src/main/java/shop/Order.java", 1],
+      ]),
+    )
+  })
+
+  it("counts none for tools that do not change files", () => {
+    expect(linesWritten("read", { path: "src/A.java" })).toEqual(new Map())
+  })
+})
+
 describe("editNote", () => {
   it("shows the failures with the same report the task end shows", () => {
     expect(editNote(VIOLATIONS)).toBe(`Interlint: the checks fail after this edit.\n\n${VIOLATIONS.output}`)
@@ -836,7 +874,9 @@ describe("OpenCode plugin after an edit", () => {
 
     const event = await afterTool("edit", { path: "src/main/java/shop/Order.java" })
 
-    expect(runs).toEqual([{ directory: "/repo", args: ["check", "--when", "edit", "--file", "src/main/java/shop/Order.java"] }])
+    expect(runs).toEqual([
+      { directory: "/repo", args: ["check", "--when", "edit", "--file", "src/main/java/shop/Order.java", "--lines", "0"] },
+    ])
     expect(event).toMatchObject({
       result: {
         content: [
@@ -845,6 +885,16 @@ describe("OpenCode plugin after an edit", () => {
         ],
       },
     })
+  })
+
+  it("gives the checks the lines the edit wrote in each file", async () => {
+    const runs: (string[] | undefined)[] = []
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, args) => (runs.push(args), PASSED)).setup(ctx)
+
+    await afterTool("write", { path: "src/main/java/shop/Order.java", content: "class Order {\n}\n" })
+
+    expect(runs).toEqual([["check", "--when", "edit", "--file", "src/main/java/shop/Order.java", "--lines", "2"]])
   })
 
   it("tells the session which checks passed, without resuming it, since OpenCode Desktop does not show tool results", async () => {

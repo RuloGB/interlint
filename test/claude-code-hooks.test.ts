@@ -127,6 +127,23 @@ describe("interlint hook claude-code post-edit", () => {
     expect(() => readFileSync(join(projectDir, "target", "ran"))).toThrow()
   })
 
+  it("counts the lines each Edit or Write adds for a check with lines, and runs it once they reach it", async () => {
+    writeCheck("edit", PASSING_XML)
+    writeFileSync(join(projectDir, "interlint.yaml"), `${readFileSync(join(projectDir, "interlint.yaml"), "utf8")}    lines: 5\n`)
+    const ran = () => existsSync(join(projectDir, "target", "ran"))
+    const logLine = { file_path: JAVA_FILE(), old_string: "    pay();", new_string: '    log.info("pay");\n    pay();' }
+
+    expect(await hook("post-edit", postToolUse(JAVA_FILE(), { tool_input: logLine }))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(ran()).toBe(false)
+
+    const newClass = { file_path: JAVA_FILE(), content: "class Order {\n  int id;\n  int total;\n}\n" }
+    const { exitCode, stdout } = await hook("post-edit", postToolUse(JAVA_FILE(), { tool_name: "Write", tool_input: newClass }))
+
+    expect(exitCode).toBe(0)
+    expect(systemMessage(stdout)).toMatch(PASSED_MESSAGE)
+    expect(ran()).toBe(true)
+  })
+
   it("runs only edit checks", async () => {
     writeCheck("task-end", VIOLATIONS_XML)
 

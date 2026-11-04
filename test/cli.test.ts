@@ -438,6 +438,70 @@ describe("interlint check --when task-end --changed", () => {
   })
 })
 
+describe("interlint check --when edit --lines", () => {
+  const ORDER = join("src", "main", "java", "shop", "Order.java")
+  const CUSTOMER = join("src", "main", "java", "shop", "Customer.java")
+
+  beforeEach(() => {
+    const run = fakeCheck("arch", { report: PASSING_XML, exitCode: 0 })
+    writeFileSync(
+      join(projectDir, "interlint.yaml"),
+      `checks:\n  - name: architecture\n    run: ${run}\n    report: archunit\n    when: edit\n    lines: 10\n`,
+    )
+  })
+
+  const ran = () => existsSync(join(projectDir, "target", "surefire-reports"))
+
+  it("waits until the edits of its sources write lines lines, and then runs", async () => {
+    expect(await run("check", "--when", "edit", "--file", ORDER, "--lines", "4")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(ran()).toBe(false)
+
+    const { exitCode, stdout } = await run("check", "--when", "edit", "--file", CUSTOMER, "--lines", "6")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toEqual(passedLine("architecture"))
+  })
+
+  it("gives each --lines to the --file in the same place", async () => {
+    await run("check", "--when", "edit", "--file", "README.md", "--lines", "50", "--file", ORDER, "--lines", "9")
+    expect(ran()).toBe(false)
+
+    await run("check", "--when", "edit", "--file", ORDER, "--lines", "1")
+    expect(ran()).toBe(true)
+  })
+
+  it("counts no lines for files given without --lines", async () => {
+    await run("check", "--when", "edit", "--file", ORDER)
+    await run("check", "--when", "edit", "--file", CUSTOMER)
+
+    expect(ran()).toBe(false)
+  })
+
+  it("needs one --lines for each --file", async () => {
+    expect(await run("check", "--when", "edit", "--file", ORDER, "--file", CUSTOMER, "--lines", "3")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "interlint: --lines needs one value for each --file (got 1 --lines for 2 --file)\n",
+    })
+  })
+
+  it.each(["-1", "2.5", "many", ""])("rejects --lines %s", async (value) => {
+    expect(await run("check", "--when", "edit", "--file", ORDER, `--lines=${value}`)).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: `interlint: --lines must be a whole number of 0 or more (got "${value}")\n`,
+    })
+  })
+
+  it("is only valid with --when edit", async () => {
+    expect(await run("check", "--when", "task-end", "--file", ORDER, "--lines", "3")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "interlint: --lines is only valid with --when edit\n",
+    })
+  })
+})
+
 describe("interlint check --when edit", () => {
   const ORDER = join("src", "main", "java", "shop", "Order.java")
 

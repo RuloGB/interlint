@@ -2,11 +2,12 @@ import {
   type Check,
   type Config,
   EDIT_SHOWS_CHANGED_FILES_ONLY,
-  editsBeforeRun,
+  editsAreDue,
   fromRoot,
   isInProjectOf,
   isSourceOf,
   type Report,
+  waitsForEdits,
 } from "../../domain/check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
 import type { RuleFailure } from "../../domain/violation.js"
@@ -19,6 +20,7 @@ import type {
   DirectoryLookup,
   EditScope,
   ExecutableLookup,
+  PendingEdit,
   PendingEdits,
   ProjectChange,
   ProjectLock,
@@ -139,6 +141,8 @@ function passedInLastBuild(
  * left to task end, which reports it, so it does not block every edit.
  * A check whose tool can check only some files runs on the changed ones, and a check whose report rates each file on
  * its own shows only their failures (`EDIT_SHOWS_CHANGED_FILES_ONLY`).
+ * A check with `every` or `lines` waits until its pending sources, or the lines written in them, add up to it.
+ * `linesWritten` gives the lines the edit wrote in each changed file; a file it leaves out wrote none.
  * Without the Maven Daemon a Maven check is too slow for every edit, so it waits for task end (decision 12).
  */
 export async function runEditChecks(
@@ -146,6 +150,7 @@ export async function runEditChecks(
   config: Config,
   changedFiles: string[],
   deps: CheckDeps,
+  linesWritten: ReadonlyMap<string, number> = new Map(),
 ): Promise<CheckOutcome[]> {
   const touched = config.checks.filter(
     (check) =>
@@ -165,8 +170,7 @@ export async function runEditChecks(
     const due = new Map<Check, string[]>()
     for (const check of checks) {
       const edited = changedFiles.filter((file) => isInProjectOf(check, file) && isSourceOf(check.report, file))
-      const every = editsBeforeRun(check)
-      if (every === 1) {
+      if (!waitsForEdits(check)) {
         due.set(check, edited)
         continue
       }
@@ -177,11 +181,12 @@ export async function runEditChecks(
         continue
       }
       // A file can stop being a source of the check, as when its `dir` or `report` changed since it was saved.
-      const sources = listed.filter((file) => isInProjectOf(check, file) && isSourceOf(check.report, file))
-      const pending = [...new Set([...sources, ...edited])]
+      const sources = listed.filter(({ file }) => isInProjectOf(check, file) && isSourceOf(check.report, file))
+      const pending = withEdits(sources, [...new Set(edited)], linesWritten)
+      const lines = pending.reduce((sum, edit) => sum + edit.lines, 0)
       // Unsaved, the files would be forgotten and the check might never run at edit: it runs now instead.
       const saved = deps.pending.save(projectDir, check.name, pending)
-      if (pending.length >= every || !saved) due.set(check, pending)
+      if (editsAreDue(check, pending.length, lines) || !saved) due.set(check, pending.map(({ file }) => file))
     }
     const outcomes = await runInOrder(projectDir, [...due.keys()], deps, (check) => due.get(check) ?? [])
     clearPassed(projectDir, outcomes, deps)
@@ -189,13 +194,20 @@ export async function runEditChecks(
   })
 }
 
+/** The pending edits with the edited files added, each once, and the lines written in them added to theirs. */
+function withEdits(pending: PendingEdit[], edited: string[], linesWritten: ReadonlyMap<string, number>): PendingEdit[] {
+  const lines = new Map(pending.map(({ file, lines }) => [file, lines]))
+  for (const file of edited) lines.set(file, (lines.get(file) ?? 0) + (linesWritten.get(file) ?? 0))
+  return [...lines].map(([file, lines]) => ({ file, lines }))
+}
+
 /**
- * Forgets the pending files of the checks with `every` that passed. A check that failed keeps them, so each next
+ * Forgets the pending files of the checks with `every` or `lines` that passed. A check that failed keeps them, so each next
  * edit of one of its sources runs it again on them all, until it passes. Called under the project lock.
  */
 function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {
   for (const { check, status } of outcomes) {
-    if (status !== "passed" || editsBeforeRun(check) === 1) continue
+    if (status !== "passed" || !waitsForEdits(check)) continue
     if ((deps.pending.list(projectDir, check.name)?.length ?? 0) > 0) deps.pending.save(projectDir, check.name, [])
   }
 }
