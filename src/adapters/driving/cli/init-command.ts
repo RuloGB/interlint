@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { AGENTS, type Agent, type InitDeps, initProject } from "../../../application/setup/init-project.js"
 import { AgentSetupError } from "../../../application/setup/ports.js"
-import { projectChecks, QUALITY_WHEN } from "../../../domain/check-plan.js"
+import { architectureCheck, projectChecks, QUALITY_EVERY, SLOW_CHECK_EVERY } from "../../../domain/check-plan.js"
 import { mavenCommand } from "../../../domain/maven-command.js"
 import {
   type ProjectFacts,
@@ -49,11 +49,13 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
   const { projects } = result
   const single = projects.length === 1 && projects[0]?.dir === undefined
   const kinds = editCheckKinds(projects.map(({ facts }) => facts))
-  const plural = !single || kinds.length > 1
-  const subject = `${listOf(kinds)} ${plural ? "checks run" : "check runs"}`
+  const groups = bySchedule(kinds)
+  const plural = (tools: string[]) => !single || tools.length > 1
+  const subject = (tools: string[]) => `the ${listOf(tools)} ${plural(tools) ? "checks run" : "check runs"}`
+  const all = kinds.map(({ tool }) => tool)
   const daemon = result.daemonOnPath
-    ? `on the PATH, so the ${subject} after each edit`
-    : `not on the PATH, so the ${subject} at task end; install mvnd to run ${plural ? "them" : "it"} after each edit`
+    ? `on the PATH, so ${groups.map(({ tools, every }) => `${subject(tools)} ${schedule(every)}`).join(", and ")}`
+    : `not on the PATH, so ${subject(all)} at task end; install mvnd to run ${plural(all) ? "them" : "it"} ${groups.length === 1 ? schedule(groups[0]?.every) : "after edits"}`
   const detected = single
     ? ["Detected:", ...detectedLines(projects[0]!.facts, "  ")]
     : [
@@ -81,12 +83,31 @@ function initOrUsageError(projectDir: string, agent: Agent | undefined, force: b
   }
 }
 
-/** What the edit checks `init` writes check, as the mvnd line names them. The architecture check runs at task end. */
-function editCheckKinds(projects: ProjectFacts[]): string[] {
-  const quality = QUALITY_PLUGINS.filter(
-    (plugin) => QUALITY_WHEN[plugin] === "edit" && projects.some((facts) => facts.qualityPlugins.includes(plugin)),
-  )
-  return quality.map((plugin) => QUALITY_TOOLS[plugin])
+interface EditCheckKind {
+  tool: string
+  every: number | undefined
+}
+
+/** What the edit checks `init` writes check, as the mvnd line names them, with their `every`. */
+function editCheckKinds(projects: ProjectFacts[]): EditCheckKind[] {
+  const architecture = projects.some((facts) => architectureCheck(facts) !== undefined)
+    ? [{ tool: "ArchUnit", every: SLOW_CHECK_EVERY }]
+    : []
+  const quality = QUALITY_PLUGINS.filter((plugin) => projects.some((facts) => facts.qualityPlugins.includes(plugin)))
+  return [...architecture, ...quality.map((plugin) => ({ tool: QUALITY_TOOLS[plugin], every: QUALITY_EVERY[plugin] }))]
+}
+
+/** The kinds grouped by `every`, those that run after each edit first. */
+function bySchedule(kinds: EditCheckKind[]): { tools: string[]; every: number | undefined }[] {
+  const groups = new Map<number | undefined, string[]>()
+  for (const { tool, every } of [...kinds].sort((a, b) => (a.every ?? 1) - (b.every ?? 1))) {
+    groups.set(every, [...(groups.get(every) ?? []), tool])
+  }
+  return [...groups].map(([every, tools]) => ({ tools, every }))
+}
+
+function schedule(every: number | undefined): string {
+  return every === undefined ? "after each edit" : `after every ${every} edited files`
 }
 
 /** `a`, `a and b`, `a, b and c`. */

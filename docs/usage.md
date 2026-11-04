@@ -28,7 +28,8 @@ checks:
   - name: architecture
     run: ./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip
     report: archunit
-    when: task-end
+    when: edit
+    every: 3
   - name: checkstyle
     run: ./mvnw -q checkstyle:check
     report: maven
@@ -36,11 +37,12 @@ checks:
   - name: pmd
     run: ./mvnw -q compile pmd:check -Dcheckstyle.skip
     report: maven
-    when: task-end
+    when: edit
+    every: 3
 ```
 
 - The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it.
-- `architecture` and `pmd` run at task end: ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds on every edit. `checkstyle` checks only the changed files, so it also runs after each edit when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `init` says which applies on yours. To check ArchUnit or PMD after each edit too, set their `when` to `edit`, or after every few edited files with [`every`](#every-n-edited-files).
+- Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after every 3 edited files, with [`every: 3`](#every-n-edited-files): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. `init` says which applies on yours. To run them after each edit, remove `every`; to wait for more files, raise it; to leave them to task end, set their `when` to `task-end`.
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
@@ -226,7 +228,8 @@ checks:
     dir: orders
     run: ./mvnw -q test -pl launcher -am -Dtest=OrdersArchitectureTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip
     report: archunit
-    when: task-end
+    when: edit
+    every: 3
   - name: orders/checkstyle
     dir: orders
     run: ./mvnw -q checkstyle:check@style

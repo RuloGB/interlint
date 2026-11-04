@@ -26,8 +26,8 @@ mvn verify run by the agent, left all the reports it writes and they list no fai
 integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn) and when: task-end, and a checkstyle check (report: maven, when: edit) and a
-pmd check (report: maven, when: task-end) for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
+Wrapper (or mvn), when: edit and every: 3, and a checkstyle check (report: maven, when: edit) and a
+pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
 the checks of each Maven project below it, with their dir. It never replaces a different
 interlint.yaml without --force.
 
