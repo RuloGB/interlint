@@ -168,6 +168,40 @@ checks:
     )
   })
 
+  it("reads how many edited files a check waits for", () => {
+    writeConfig(`
+checks:
+  - name: pmd
+    run: mvnd -q pmd:check
+    report: maven
+    when: edit
+    every: 5
+`)
+
+    expect(loadConfig(projectDir).checks[0]).toEqual({
+      name: "pmd",
+      run: "mvnd -q pmd:check",
+      report: "maven",
+      when: "edit",
+      every: 5,
+    })
+  })
+
+  it.each(["0", "-1", "2.5", '"5"', "five", "[]"])("rejects every: %s and says what it expects", (value) => {
+    writeConfig(`
+checks:
+  - name: pmd
+    run: mvnd -q pmd:check
+    report: maven
+    when: edit
+    every: ${value}
+`)
+
+    expect(configErrorOf(() => loadConfig(projectDir)).message).toMatch(
+      /^interlint\.yaml: checks\[0\]\.every must be a whole number of 1 or more \(got .+\)$/,
+    )
+  })
+
   it("rejects two checks with the same name", () => {
     writeConfig(`
 checks:
