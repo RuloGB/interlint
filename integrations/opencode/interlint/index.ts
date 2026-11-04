@@ -95,6 +95,19 @@ function passedLine(run: CheckRun): string | undefined {
   return run.output.split(/\r?\n/).find((line) => line.startsWith(PASSED_MARK))
 }
 
+/**
+ * The line that names the checks that failed after an edit, each once, for the user: the agent gets the failures in
+ * the tool result. Undefined when the checks passed or could not run.
+ */
+function failedLine(run: CheckRun): string | undefined {
+  if (!isReport(run)) return undefined
+  const names = run.output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith(REPORT_MARK) && line.includes(" · "))
+    .map((line) => line.slice(REPORT_MARK.length, line.indexOf(" · ")))
+  return `${REPORT_MARK}Interlint · checks failed after this edit: ${[...new Set(names)].join(", ")}`
+}
+
 /** Whether the CLI ran and found failures. cmd.exe also exits with 1 when it cannot find the CLI, so exit 1 alone does not mean violations. */
 function isReport(run: CheckRun): boolean {
   return run.exitCode === 1 && run.output.startsWith(REPORT_MARK)
@@ -545,12 +558,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
         else if (run.exitCode !== 0) console.error("[interlint] the edit checks could not run:", run.output)
-        const passed = passedLine(run)
-        // OpenCode Desktop shows only the diff of an edit, not its result: a message is what the user sees. Not awaited,
-        // so the agent does not wait for it, and it lands after the edit.
-        if (passed !== undefined) {
+        // OpenCode Desktop shows only the diff of an edit, not its result: a message is what the user sees, whether the
+        // checks passed or failed. Not awaited, so the agent does not wait for it, and it lands after the edit.
+        const line = passedLine(run) ?? failedLine(run)
+        if (line !== undefined) {
           ctx.session
-            .synthetic({ sessionID: event.sessionID, text: passed, description: passed, resume: false })
+            .synthetic({ sessionID: event.sessionID, text: line, description: line, resume: false })
             .catch((error) => console.error("[interlint]", error))
         }
       })

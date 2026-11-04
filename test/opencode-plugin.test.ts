@@ -847,6 +847,40 @@ describe("OpenCode plugin after an edit", () => {
     })
   })
 
+  it("tells the session which checks failed after the edit, without resuming it, since OpenCode Desktop does not show tool results", async () => {
+    const { ctx, sent, labels, afterTool } = fakeContext()
+    const failed: CheckRun = {
+      exitCode: 1,
+      output: [
+        "✗ architecture · ARCH-01: rule",
+        "",
+        "✗ architecture · ARCH-03: rule",
+        "",
+        "✗ orders/pmd · EmptyCatchBlock",
+        "",
+        "Fix these problems before continuing.",
+        "",
+      ].join("\n"),
+    }
+    await createInterlintPlugin(async () => failed).setup(ctx)
+
+    const event = await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
+
+    const line = "✗ Interlint · checks failed after this edit: architecture, orders/pmd"
+    expect(event).toMatchObject({ result: { content: [{ type: "text", text: "Edited the file" }, { type: "text" }] } })
+    expect(sent).toEqual([{ sessionID: "s1", text: line, resume: false }])
+    expect(labels).toEqual([line])
+  })
+
+  it("tells the session nothing when the edit checks could not run", async () => {
+    const { ctx, sent, afterTool } = fakeContext()
+    await createInterlintPlugin(async () => ({ exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" })).setup(ctx)
+
+    await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
+
+    expect(sent).toEqual([])
+  })
+
   it("tells the session which checks passed, without resuming it, since OpenCode Desktop does not show tool results", async () => {
     const { ctx, sent, labels, afterTool } = fakeContext()
     await createInterlintPlugin(async () => PASSED_NAMED).setup(ctx)
