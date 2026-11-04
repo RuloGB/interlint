@@ -63,7 +63,15 @@ Run the checks by hand:
 interlint check --when task-end
 ```
 
-It prints nothing and exits with 0 when every check passes. Otherwise it prints each violated rule, with the text of its `because()` and every violation with its source file and line:
+When every check passes it exits with 0 and prints one line with the checks that ran and how long each took:
+
+```text
+✓ Interlint · checks passed: checkstyle (1.2s), architecture (4.3s)
+```
+
+A check that passed on [the reports of the agent's own build](#reports-from-the-agents-own-build) shows `in the last build` instead. When no check runs, it prints nothing.
+
+When a check fails, it prints each violated rule, with the text of its `because()` and every violation with its source file and line:
 
 ```text
 ✗ architecture · ARCH-01: domain depends on nothing outside domain

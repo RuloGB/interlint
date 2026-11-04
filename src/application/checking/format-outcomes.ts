@@ -57,6 +57,19 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
 }
 
 /**
+ * Formats, in one line, the checks that ran and passed, so the user sees Interlint at work. Returns an empty string
+ * when no check ran or one did not pass: the failures say it then.
+ */
+export function formatPassed(outcomes: CheckOutcome[]): string {
+  if (outcomes.length === 0 || outcomes.some((outcome) => outcome.status !== "passed")) return ""
+  const checks = outcomes.map((outcome) => {
+    const took = outcome.status === "passed" && outcome.fromBuild ? "in the last build" : `${(outcome.durationMs / 1000).toFixed(1)}s`
+    return `${outcome.check.name} (${took})`
+  })
+  return `✓ Interlint · checks passed: ${checks.join(", ")}\n`
+}
+
+/**
  * Formats what the user, not the agent, has to do: refreeze each FreezingArchRule store written from broken classes.
  * Returns an empty string when there is nothing. The agent may still read it, so it says what the agent should do.
  */

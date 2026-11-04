@@ -16,7 +16,7 @@ One OpenCode server runs the sessions of every project you open in it. The plugi
 
 ## After each edit
 
-After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; the agent and its subagents add to the same count.
+After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. If the checks that ran pass, it sends the line that names them, such as `✓ Interlint · checks passed: checkstyle (1.2s)`, as a message in the session that does not make the agent continue, so you see in the chat that Interlint ran: OpenCode Desktop shows an edit's diff, not its result. An edit that runs no check, such as one to `README.md`, sends nothing. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; the agent and its subagents add to the same count.
 
 The agent waits for these checks, so they give up after 2 minutes. If they cannot run, the edit result stays as it was and the task-end check reports the problem.
 
@@ -26,7 +26,10 @@ The plugin runs `interlint check --when task-end --changed`: the checks of the p
 
 - After 3 failed attempts in a row it reports the failures and lets the task end.
 - If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
-- If the checks pass with a notice for you, such as a [FreezingArchRule store frozen from broken classes](usage.md#freezingarchrule-store-frozen-from-broken-classes), the plugin reports it without making the agent continue. When a check fails, the notice comes after the failures. The plugin copied by an older `interlint init` does not report it: run `interlint init --agent opencode` again to update it.
+- If the checks pass, the plugin sends the line that names them as a message in the session, without making the agent continue. When no project changed, no check runs and there is no message.
+- If the checks pass with a notice for you, such as a [FreezingArchRule store frozen from broken classes](usage.md#freezingarchrule-store-frozen-from-broken-classes), the plugin reports it without making the agent continue. When a check fails, the notice comes after the failures. The plugin copied by an older `interlint init` does not report it: run `interlint init --agent opencode` again to update it. The same goes for the line of the checks that passed.
+
+OpenCode Desktop shows a message the plugin sends by its first line, such as `Interlint: the task cannot end yet (attempt 1 of 3).` The agent gets the whole message.
 
 ## Subagents
 

@@ -45,6 +45,8 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 - **When Claude finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. Only the main agent runs it: a subagent ends with `SubagentStop`.
 - **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed with `Edit` or `Write`, so the failures go to the agent that wrote the code. A subagent that changed no file, such as a read-only reviewer, runs nothing. If a check fails, the subagent cannot stop and gets the failures to fix them, before the main agent gets its answer. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 
+When the checks that ran pass, `post-edit` and `stop` show you a message that names them, such as `✓ Interlint · checks passed: checkstyle (1.2s)`, so you see that Interlint ran (see [`interlint check`](usage.md#interlint-check)). Claude does not get it. An edit that runs no check, such as one to `README.md`, and a stop with no changed project show nothing. `subagent-stop` shows nothing when its checks pass: the main agent's `stop` shows them.
+
 A notice for you, such as a [FreezingArchRule store frozen from broken classes](usage.md#freezingarchrule-store-frozen-from-broken-classes), comes with `stop` and `subagent-stop`: as a message for you when the stop goes through, or after the failures, for Claude to pass on, when it blocks. `post-edit` leaves it out.
 
 A subagent running in the background may still be fixing its failures when the main agent finishes; then the main agent's `stop` sees them too. Two agents that change the same project share its failures: Interlint checks projects, not lines.
@@ -57,6 +59,6 @@ The count of blocks, per session and per subagent, and the files each subagent c
 
 | Exit code | Meaning |
 |---|---|
-| 0 | Nothing for the agent: the checks passed, or no check reads the edited file |
+| 0 | Nothing for the agent: the checks passed, or no check reads the edited file. A message for you, if any, is on stdout as `systemMessage` |
 | 2 | A check failed: the failures go to Claude on stderr |
 | 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |

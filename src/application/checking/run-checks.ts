@@ -28,7 +28,8 @@ import type {
 } from "./ports.js"
 
 export type CheckOutcome = (
-  | { check: Check; durationMs: number; status: "passed" }
+  /** `fromBuild` when it passed without running, on the reports of a build since the last change. */
+  | { check: Check; durationMs: number; status: "passed"; fromBuild?: true }
   | { check: Check; durationMs: number; status: "violations"; failures: RuleFailure[] }
   | { check: Check; durationMs: number; status: "failed"; command: string; exitCode: number; outputTail: string }
   | { check: Check; durationMs: number; status: "missing-dir" }
@@ -95,7 +96,7 @@ export async function runTaskEndChecks(
     const built = changedOnly ? checks.filter((check) => passedInLastBuild(projectDir, check, selected, deps)) : []
     const ran = await runInOrder(projectDir, checks.filter((check) => !built.includes(check)), deps)
     const outcomes = checks.map((check): CheckOutcome =>
-      built.includes(check) ? { check, durationMs: 0, status: "passed" } : ran.shift()!,
+      built.includes(check) ? { check, durationMs: 0, status: "passed", fromBuild: true } : ran.shift()!,
     )
     for (const { dir, seen } of selected) {
       const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)

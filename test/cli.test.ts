@@ -59,6 +59,12 @@ function writeConfig(...checks: { name: string; run: string; report?: string; wh
   )
 }
 
+/** The line `check` prints when the checks that ran all passed, whatever they took. */
+function passedLine(...names: string[]) {
+  const checks = names.map((name) => String.raw`${name} \(\d+\.\ds\)`).join(", ")
+  return expect.stringMatching(new RegExp(`^✓ Interlint · checks passed: ${checks}\n$`))
+}
+
 async function run(...args: string[]) {
   let stdout = ""
   let stderr = ""
@@ -71,10 +77,10 @@ async function run(...args: string[]) {
 }
 
 describe("interlint check --when task-end", () => {
-  it("prints nothing and exits 0 when every check passes", async () => {
+  it("names the checks that passed and exits 0 when every check passes", async () => {
     writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
 
-    expect(await run("check", "--when", "task-end")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await run("check", "--when", "task-end")).toEqual({ exitCode: 0, stdout: passedLine("architecture"), stderr: "" })
   })
 
   it("runs every check, including the edit ones", async () => {
@@ -213,13 +219,13 @@ process.exit(${options.exitCode})
   it("passes when Maven exits 0, even if the report lists what the build accepts", async () => {
     fakePmd({ violation: true, exitCode: 0 })
 
-    expect(await run("check")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await run("check")).toEqual({ exitCode: 0, stdout: passedLine("pmd"), stderr: "" })
   })
 
   it("passes when Maven exits 0 without writing a report, as when the build skips the plugin", async () => {
     fakePmd({ exitCode: 0, output: "[INFO] Skipping PMD execution" })
 
-    expect(await run("check")).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await run("check")).toEqual({ exitCode: 0, stdout: passedLine("pmd"), stderr: "" })
   })
 })
 
@@ -276,7 +282,7 @@ process.exit(${files.length > 0 ? 1 : 0})
   it("passes at edit when the failures are all in files the edit did not change", async () => {
     fakeQuality("compile pmd:check -Dcheckstyle.skip", [CUSTOMER])
 
-    expect(await run("check", "--when", "edit", "--file", ORDER)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await run("check", "--when", "edit", "--file", ORDER)).toEqual({ exitCode: 0, stdout: passedLine("pmd"), stderr: "" })
   })
 
   it("runs Checkstyle and PMD on nothing when the changed file is not a Java source", async () => {
@@ -400,7 +406,7 @@ describe("interlint check --when task-end --changed", () => {
 
     expect(await run("check", "--when", "task-end", "--changed", "--file", "orders/src/main/java/Order.java")).toEqual({
       exitCode: 0,
-      stdout: "",
+      stdout: passedLine("orders/checkstyle"),
       stderr: "",
     })
     expect([ran("orders"), ran("billing")]).toEqual([true, false])

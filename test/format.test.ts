@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Check } from "../src/domain/check.js"
-import { formatNotices, formatOutcomes } from "../src/application/checking/format-outcomes.js"
+import { formatNotices, formatOutcomes, formatPassed } from "../src/application/checking/format-outcomes.js"
 
 const architecture: Check = {
   name: "architecture",
@@ -227,5 +227,37 @@ describe("formatNotices", () => {
 
     expect(output.match(/orders\/archunit_store/g)).toHaveLength(1)
     expect(output).toContain("  Refreeze it from a clean build, in orders: mvn clean test -Darchunit.freeze.refreeze=true\n")
+  })
+})
+
+describe("formatPassed", () => {
+  const checkstyle: Check = { name: "checkstyle", run: "mvnd -q checkstyle:check", report: "maven", when: "edit" }
+
+  it("names each check that passed, with how long it took", () => {
+    expect(
+      formatPassed([
+        { check: checkstyle, status: "passed", durationMs: 1_234 },
+        { check: architecture, status: "passed", durationMs: 4_250 },
+      ]),
+    ).toBe("✓ Interlint · checks passed: checkstyle (1.2s), architecture (4.3s)\n")
+  })
+
+  it("says when a check passed in the last build instead of running", () => {
+    expect(formatPassed([{ check: architecture, status: "passed", durationMs: 0, fromBuild: true }])).toBe(
+      "✓ Interlint · checks passed: architecture (in the last build)\n",
+    )
+  })
+
+  it("prints nothing when no check ran", () => {
+    expect(formatPassed([])).toBe("")
+  })
+
+  it("prints nothing when a check did not pass", () => {
+    expect(
+      formatPassed([
+        { check: checkstyle, status: "passed", durationMs: 1_000 },
+        { check: architecture, status: "missing-dir", durationMs: 0 },
+      ]),
+    ).toBe("")
   })
 })
