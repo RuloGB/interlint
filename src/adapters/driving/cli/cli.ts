@@ -29,7 +29,8 @@ init writes an architecture check that runs the test classes with @ArchTest, wit
 Wrapper (or mvn), when: edit and every: 3, and a checkstyle check (report: maven, when: edit) and a
 pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
 the checks of each Maven project below it, with their dir. It never replaces a different
-interlint.yaml without --force.
+interlint.yaml without --force: without --agent it writes nothing, and with --agent it keeps that
+file and still writes the agent's files.
 
 A report: maven check fails only when Maven fails, and shows the most severe level in the
 Checkstyle and PMD reports, so nothing the project's build accepts is shown. At edit it shows

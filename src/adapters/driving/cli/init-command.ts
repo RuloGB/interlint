@@ -69,6 +69,10 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
       "",
       ...section("Wrote:", result.written),
       ...section("Unchanged:", result.unchanged),
+      ...section(
+        "Kept:",
+        result.kept.map((path) => `${path} (differs from what init would write; rerun with --force to replace it)`),
+      ),
     ].join("\n"),
   )
   return EXIT.passed

@@ -350,11 +350,29 @@ describe("interlint init --agent opencode", () => {
     expect(readFileSync(join(projectDir, PLUGIN_COPY), "utf8")).toBe(readFileSync(PLUGIN_SOURCE, "utf8"))
   })
 
-  it("does not copy the plugin when interlint.yaml cannot be written", async () => {
+  it("updates the plugin and keeps a different interlint.yaml", async () => {
+    writeFile("interlint.yaml", "# The team's own config\n")
+    writeFile(PLUGIN_COPY, "// An older Interlint plugin\n")
+
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "opencode")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(stdout).toContain(
+      "Wrote:\n  .opencode/plugins/interlint/index.ts\n\nKept:\n  interlint.yaml (differs from what init would write; rerun with --force to replace it)\n",
+    )
+    expect(readConfig()).toBe("# The team's own config\n")
+    expect(readFileSync(join(projectDir, PLUGIN_COPY), "utf8")).toBe(readFileSync(PLUGIN_SOURCE, "utf8"))
+  })
+
+  it("replaces a different interlint.yaml with --force", async () => {
     writeFile("interlint.yaml", "# The team's own config\n")
 
-    expect((await run("init", "--agent", "opencode")).exitCode).toBe(2)
-    expect(existsSync(join(projectDir, ".opencode"))).toBe(false)
+    const { exitCode, stdout } = await run("init", "--agent", "opencode", "--force")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Wrote:\n  interlint.yaml\n  .opencode/plugins/interlint/index.ts\n")
+    expect(stdout).not.toContain("Kept:")
+    expect(loadConfig(projectDir).checks).toHaveLength(1)
   })
 
   it("does not copy the plugin when there are no ArchUnit tests", async () => {
@@ -491,11 +509,17 @@ describe("interlint init --agent claude-code", () => {
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 
-  it("does not write the settings when interlint.yaml cannot be written", async () => {
+  it("writes the hooks and keeps a different interlint.yaml", async () => {
     writeFile("interlint.yaml", "# The team's own config\n")
 
-    expect((await run("init", "--agent", "claude-code")).exitCode).toBe(2)
-    expect(existsSync(join(projectDir, ".claude"))).toBe(false)
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "claude-code")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(stdout).toContain(
+      "Wrote:\n  .claude/settings.json\n\nKept:\n  interlint.yaml (differs from what init would write; rerun with --force to replace it)\n",
+    )
+    expect(readConfig()).toBe("# The team's own config\n")
+    expect(JSON.parse(readSettings()).hooks.Stop).toEqual([{ hooks: [STOP] }])
   })
 
   it("does not write the settings when there are no ArchUnit tests", async () => {
