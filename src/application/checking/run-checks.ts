@@ -169,7 +169,15 @@ export async function runEditChecks(
         due.set(check, edited)
         continue
       }
-      const pending = [...new Set([...deps.pending.list(projectDir, check.name), ...edited])]
+      const listed = deps.pending.list(projectDir, check.name)
+      // Unreadable, the files cannot be counted: the check runs now on the edited ones and leaves them as they are.
+      if (listed === undefined) {
+        due.set(check, edited)
+        continue
+      }
+      // A file can stop being a source of the check, as when its `dir` or `report` changed since it was saved.
+      const sources = listed.filter((file) => isInProjectOf(check, file) && isSourceOf(check.report, file))
+      const pending = [...new Set([...sources, ...edited])]
       // Unsaved, the files would be forgotten and the check might never run at edit: it runs now instead.
       const saved = deps.pending.save(projectDir, check.name, pending)
       if (pending.length >= every || !saved) due.set(check, pending)
@@ -187,7 +195,7 @@ export async function runEditChecks(
 function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {
   for (const { check, status } of outcomes) {
     if (status !== "passed" || editsBeforeRun(check) === 1) continue
-    if (deps.pending.list(projectDir, check.name).length > 0) deps.pending.save(projectDir, check.name, [])
+    if ((deps.pending.list(projectDir, check.name)?.length ?? 0) > 0) deps.pending.save(projectDir, check.name, [])
   }
 }
 

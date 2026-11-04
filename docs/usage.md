@@ -166,13 +166,14 @@ checks:
     every: 5
 ```
 
-- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, and it runs on all 5: Checkstyle checks those files, and the failures of any of them are shown, not only those of the last one. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
+- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, and it runs on all 5: the failures of any of them are shown, not only those of the last one, and a Checkstyle check with `every` checks those 5 files. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
+- A Maven check with `every` still needs `mvnd` to run after edits. Without it, edits do not count and the check runs at task end.
 - A file edited twice counts once. Files that are not sources of the check, such as `README.md`, do not count.
 - The count is kept per check, so for each project of a workspace, and is shared by the main agent and its subagents.
 - When the check fails, its files stay pending, so each next edit of one of its sources runs it again on them all, until it passes. Then it counts from zero.
 - At task end the check runs as usual, even before reaching `every`, since every edit marks its project as changed. When it passes there, its pending files are forgotten too.
 - `every` must be a whole number of 1 or more. Without it, or with `every: 1`, the check runs after each edit. It has no effect on a `task-end` check.
-- The pending files are kept in your user's state directory (`%LOCALAPPDATA%\interlint\pending` on Windows, `$XDG_STATE_HOME/interlint/pending` or `~/.local/state/interlint/pending` elsewhere), never in the project. When they cannot be saved, the check runs after that edit.
+- The pending files are kept in your user's state directory (`%LOCALAPPDATA%\interlint\pending` on Windows, `$XDG_STATE_HOME/interlint/pending` or `~/.local/state/interlint/pending` elsewhere), never in the project. When they cannot be read or saved, the check runs after that edit.
 
 ## At task end
 

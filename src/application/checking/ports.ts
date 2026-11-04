@@ -55,8 +55,11 @@ export interface ChangeTracker {
  * consecutive edits. It is read and changed only under the project lock, so two edits in a row lose or repeat none.
  */
 export interface PendingEdits {
-  /** The check's pending files, relative to the directory of `interlint.yaml`: none when none were saved. */
-  list(projectDir: string, check: string): string[]
+  /**
+   * The check's pending files, relative to the directory of `interlint.yaml`: none when none were saved, and
+   * `undefined` when they were saved but cannot be read now.
+   */
+  list(projectDir: string, check: string): string[] | undefined
   /** Replaces the check's pending files, and returns whether they were saved. */
   save(projectDir: string, check: string, files: string[]): boolean
 }

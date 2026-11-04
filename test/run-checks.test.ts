@@ -585,6 +585,28 @@ describe("an edit check with every", () => {
     expect(launched).toEqual([pmd.run])
   })
 
+  it("runs at once on the edited files when the pending files cannot be read, and leaves them as they were", async () => {
+    const { deps, launched, scoped } = pmdDeps(() => [])
+    const saved: string[][] = []
+    deps.pending = { list: () => undefined, save: (_dir, _check, files) => (saved.push(files), true) }
+
+    await editOneByOne(deps, [pmd], [a])
+
+    expect(launched).toEqual([pmd.run])
+    expect(scoped).toEqual([[a]])
+    expect(saved).toEqual([])
+  })
+
+  it("does not count pending files that are no longer sources of the check", async () => {
+    const { deps, launched, pending } = pmdDeps(() => [])
+    pending.save("/repo", "pmd", ["README.md", "other/pom.xml", b, c, d])
+
+    await editOneByOne(deps, [{ ...pmd, dir: undefined }], [e])
+
+    expect(launched).toEqual([])
+    expect(pending.list("/repo", "pmd")).toEqual([b, c, d, e])
+  })
+
   it("keeps a count per project of a workspace", async () => {
     const { deps, launched } = pmdDeps(() => [])
     const orders: Check = { ...pmd, name: "orders/pmd", dir: "orders", every: 2 }

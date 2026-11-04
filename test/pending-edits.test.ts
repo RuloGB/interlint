@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -58,6 +58,16 @@ describe("filePendingEdits", () => {
     writeFileSync(join(stateDir, record!), "{not json")
 
     expect(pending.list(projectDir, "pmd")).toEqual([])
+  })
+
+  it("says the files cannot be read when the record exists but is not readable", () => {
+    const pending = filePendingEdits(stateDir)
+    pending.save(projectDir, "pmd", ["src/A.java"])
+    const [record] = readdirSync(stateDir)
+    rmSync(join(stateDir, record!))
+    mkdirSync(join(stateDir, record!))
+
+    expect(pending.list(projectDir, "pmd")).toBeUndefined()
   })
 
   it("says the files were not saved when the state directory cannot be written", () => {
