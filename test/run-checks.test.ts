@@ -607,6 +607,17 @@ describe("an edit check with every", () => {
     expect(pending.list("/repo", "pmd")).toEqual([b, c, d, e])
   })
 
+  it("does not count pending sources outside the check's dir, as after its dir changed", async () => {
+    const { deps, launched, pending } = pmdDeps(() => [])
+    const orders: Check = { ...pmd, dir: "orders" }
+    pending.save("/repo", "pmd", [`billing/${a}`, `orders/${b}`, `orders/${c}`, `orders/${d}`])
+
+    await editOneByOne(deps, [orders], [`orders/${e}`])
+
+    expect(launched).toEqual([])
+    expect(pending.list("/repo", "pmd")).toEqual([`orders/${b}`, `orders/${c}`, `orders/${d}`, `orders/${e}`])
+  })
+
   it("keeps a count per project of a workspace", async () => {
     const { deps, launched } = pmdDeps(() => [])
     const orders: Check = { ...pmd, name: "orders/pmd", dir: "orders", every: 2 }
