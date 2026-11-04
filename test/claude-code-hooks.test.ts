@@ -97,15 +97,18 @@ function systemMessage(stdout: string): string {
 }
 
 describe("interlint hook claude-code post-edit", () => {
-  it("runs the edit checks for the edited file and blocks with the failures on stderr", async () => {
+  it("runs the edit checks for the edited file, gives Claude the failures and tells the user which checks failed", async () => {
     writeCheck("edit", VIOLATIONS_XML)
 
     const { exitCode, stdout, stderr } = await hook("post-edit", postToolUse(JAVA_FILE()))
 
-    expect(exitCode).toBe(2)
-    expect(stdout).toBe("")
-    expect(stderr).toMatch(/^Interlint: the checks fail after this edit\.\n\n✗ architecture · ARCH-01/)
-    expect(stderr).toContain("Fix these problems before continuing.")
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    const output = JSON.parse(stdout)
+    expect(output.decision).toBe("block")
+    expect(output.reason).toMatch(/^Interlint: the checks fail after this edit\.\n\n✗ architecture · ARCH-01/)
+    expect(output.reason).toContain("Fix these problems before continuing.")
+    expect(output.systemMessage).toBe("✗ Interlint · checks failed after this edit: architecture")
   })
 
   it("exits 0 and shows the user the checks that passed, without telling Claude", async () => {
@@ -161,7 +164,7 @@ describe("interlint hook claude-code post-edit", () => {
     vi.stubEnv("CLAUDE_PROJECT_DIR", "")
     writeCheck("edit", VIOLATIONS_XML)
 
-    expect((await hook("post-edit", postToolUse(JAVA_FILE()), stateDir)).exitCode).toBe(2)
+    expect(JSON.parse((await hook("post-edit", postToolUse(JAVA_FILE()), stateDir)).stdout).decision).toBe("block")
   })
 
   it("exits 1, which Claude Code does not treat as a block, when there is no interlint.yaml", async () => {
