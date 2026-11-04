@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto"
-import { realpathSync } from "node:fs"
+import { mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join, posix, resolve, win32 } from "node:path"
+import { dirname, join, posix, resolve, win32 } from "node:path"
+
+/** Writes a record whole, through a temporary file, so a concurrent reader never sees half of it. */
+export function writeWhole(file: string, content: string): boolean {
+  try {
+    // Only the user may read or change the records.
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    const draft = `${file}.${process.pid}.draft`
+    writeFileSync(draft, content)
+    renameSync(draft, file)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * The user's own directory for state that outlives a process. Not the system temp directory:

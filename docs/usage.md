@@ -40,7 +40,7 @@ checks:
 ```
 
 - The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it.
-- `architecture` and `pmd` run at task end: ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds on every edit. `checkstyle` checks only the changed files, so it also runs after each edit when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `init` says which applies on yours. To check ArchUnit or PMD after each edit too, set their `when` to `edit`.
+- `architecture` and `pmd` run at task end: ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds on every edit. `checkstyle` checks only the changed files, so it also runs after each edit when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `init` says which applies on yours. To check ArchUnit or PMD after each edit too, set their `when` to `edit`, or after every few edited files with [`every`](#every-n-edited-files).
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
@@ -148,6 +148,31 @@ interlint check --when edit --file src/main/java/shop/Order.java
 - Checkstyle also checks the whole project when the `run` sets `checkstyle.includes` itself or is more than one program (`&&`, `|`, `>`…), when a path is not plain ASCII, when a `pom.xml` of the project or `.mvn/maven.config` names `checkstyle.includes` (the `-D` would replace it, and the edit would check files the build never checks), or when the plugin's configuration in `pom.xml` sets `<includes>`, which Maven applies over `-D`.
 - When Maven fails, only the most severe level in the whole report is shown, as at task end, and then only in the changed files. So when PMD also fails in another file at a more severe priority, a failure in the changed file shows at task end, not after the edit.
 - Check runs on the same project never overlap: a second edit waits until the first one's checks finish.
+
+### Every N edited files
+
+A slow `edit` check, such as ArchUnit or PMD in a large project, can wait for several edited files with `every`:
+
+```yaml
+checks:
+  - name: checkstyle
+    run: ./mvnw -q checkstyle:check
+    report: maven
+    when: edit
+  - name: pmd
+    run: ./mvnw -q pmd:check
+    report: maven
+    when: edit
+    every: 5
+```
+
+- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, and it runs on all 5: Checkstyle checks those files, and the failures of any of them are shown, not only those of the last one. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
+- A file edited twice counts once. Files that are not sources of the check, such as `README.md`, do not count.
+- The count is kept per check, so for each project of a workspace, and is shared by the main agent and its subagents.
+- When the check fails, its files stay pending, so each next edit of one of its sources runs it again on them all, until it passes. Then it counts from zero.
+- At task end the check runs as usual, even before reaching `every`, since every edit marks its project as changed. When it passes there, its pending files are forgotten too.
+- `every` must be a whole number of 1 or more. Without it, or with `every: 1`, the check runs after each edit. It has no effect on a `task-end` check.
+- The pending files are kept in your user's state directory (`%LOCALAPPDATA%\interlint\pending` on Windows, `$XDG_STATE_HOME/interlint/pending` or `~/.local/state/interlint/pending` elsewhere), never in the project. When they cannot be saved, the check runs after that edit.
 
 ## At task end
 

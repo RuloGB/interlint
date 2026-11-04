@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto"
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
-import { dirname, join, relative, sep } from "node:path"
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join, relative, sep } from "node:path"
 import type { ChangeTracker } from "../../../application/checking/ports.js"
-import { projectKey, userStateDir } from "./user-state.js"
+import { projectKey, userStateDir, writeWhole } from "./user-state.js"
 
 /** Directories a build or a package manager rewrites on its own. A change there is not the agent's. */
 const IGNORED_DIRS = new Set(["target", "node_modules"])
@@ -23,18 +23,18 @@ export function fileChangeTracker(stateDir?: string): ChangeTracker {
       const { fingerprint: current, lastModifiedMs } = scan(projectDir)
       const record = read(recordOf(projectDir))
       if (record === undefined) {
-        return { changed: !save(recordOf(projectDir), current), record: current, fingerprint: current, lastModifiedMs }
+        return { changed: !writeWhole(recordOf(projectDir), current), record: current, fingerprint: current, lastModifiedMs }
       }
       return { changed: record.startsWith(TOUCHED) || record !== current, record, fingerprint: current, lastModifiedMs }
     },
     // The files as the checks saw them, not as they are after: a change made while the checks ran, by any
     // means, keeps the project changed. A check that writes outside build output only makes the next run repeat.
     accept(projectDir, seen) {
-      if (read(recordOf(projectDir)) === seen.record) save(recordOf(projectDir), seen.fingerprint)
+      if (read(recordOf(projectDir)) === seen.record) writeWhole(recordOf(projectDir), seen.fingerprint)
     },
     // Each touch is unique, so `accept` can tell a touch made while the checks ran from the one before them.
     touch(projectDir) {
-      save(recordOf(projectDir), `${TOUCHED} ${randomUUID()}`)
+      writeWhole(recordOf(projectDir), `${TOUCHED} ${randomUUID()}`)
     },
   }
 }
@@ -106,16 +106,3 @@ function read(file: string): string | undefined {
   }
 }
 
-/** Writes the record whole, through a temporary file, so a concurrent reader never sees half of it. */
-function save(file: string, content: string): boolean {
-  try {
-    // Only the user may read or change the records.
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-    const draft = `${file}.${process.pid}.draft`
-    writeFileSync(draft, content)
-    renameSync(draft, file)
-    return true
-  } catch {
-    return false
-  }
-}

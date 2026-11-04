@@ -1,4 +1,13 @@
-import { type Check, type Config, EDIT_SHOWS_CHANGED_FILES_ONLY, fromRoot, isInProjectOf, isSourceOf, type Report } from "../../domain/check.js"
+import {
+  type Check,
+  type Config,
+  EDIT_SHOWS_CHANGED_FILES_ONLY,
+  editsBeforeRun,
+  fromRoot,
+  isInProjectOf,
+  isSourceOf,
+  type Report,
+} from "../../domain/check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
 import type { RuleFailure } from "../../domain/violation.js"
 import type {
@@ -10,6 +19,7 @@ import type {
   DirectoryLookup,
   EditScope,
   ExecutableLookup,
+  PendingEdits,
   ProjectChange,
   ProjectLock,
   ReportReader,
@@ -41,6 +51,7 @@ export interface CheckDeps {
   /** For the report formats whose tool can check only some files, how to limit its command at edit. */
   editScopes: Partial<Record<Report, EditScope>>
   removeBrokenClasses: BrokenClassRemover
+  pending: PendingEdits
 }
 
 export interface TaskEndOptions {
@@ -90,6 +101,7 @@ export async function runTaskEndChecks(
       const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)
       if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir, seen)
     }
+    clearPassed(projectDir, outcomes, deps)
     return outcomes
   })
 }
@@ -148,7 +160,35 @@ export async function runEditChecks(
       (daemon || !usesMaven(check.run)),
   )
   if (checks.length === 0) return []
-  return deps.lock(projectDir, () => runInOrder(projectDir, checks, deps, changedFiles))
+  return deps.lock(projectDir, async () => {
+    const due = new Map<Check, string[]>()
+    for (const check of checks) {
+      const edited = changedFiles.filter((file) => isInProjectOf(check, file) && isSourceOf(check.report, file))
+      const every = editsBeforeRun(check)
+      if (every === 1) {
+        due.set(check, edited)
+        continue
+      }
+      const pending = [...new Set([...deps.pending.list(projectDir, check.name), ...edited])]
+      // Unsaved, the files would be forgotten and the check might never run at edit: it runs now instead.
+      const saved = deps.pending.save(projectDir, check.name, pending)
+      if (pending.length >= every || !saved) due.set(check, pending)
+    }
+    const outcomes = await runInOrder(projectDir, [...due.keys()], deps, (check) => due.get(check) ?? [])
+    clearPassed(projectDir, outcomes, deps)
+    return outcomes
+  })
+}
+
+/**
+ * Forgets the pending files of the checks with `every` that passed. A check that failed keeps them, so each next
+ * edit of one of its sources runs it again on them all, until it passes. Called under the project lock.
+ */
+function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {
+  for (const { check, status } of outcomes) {
+    if (status !== "passed" || editsBeforeRun(check) === 1) continue
+    if (deps.pending.list(projectDir, check.name).length > 0) deps.pending.save(projectDir, check.name, [])
+  }
 }
 
 /** The directory a check runs in: its `dir` inside the project, or the project itself. */
@@ -159,13 +199,13 @@ function checkDirOf(projectDir: string, check: Check): string {
 /**
  * Checks run one after another, under the project lock, because two builds must not share `target/` at the same time.
  * That holds across processes too: two edits in a row start two Interlint processes.
- * `changedFiles`, given at edit only, are the files the checks run for.
+ * `editedFiles`, given at edit only, gives for each check the files, among its sources, it runs for.
  */
 async function runInOrder(
   projectDir: string,
   checks: Check[],
   deps: CheckDeps,
-  changedFiles?: string[],
+  editedFiles?: (check: Check) => string[],
 ): Promise<CheckOutcome[]> {
   const daemon = checks.some((check) => usesMaven(check.run)) && deps.hasExecutable(MAVEN_DAEMON)
   const outcomes: CheckOutcome[] = []
@@ -175,7 +215,7 @@ async function runInOrder(
       continue
     }
     const command = daemon && usesMaven(check.run) ? withMavenDaemon(check.run) : check.run
-    const edited = changedFiles?.filter((file) => isInProjectOf(check, file) && isSourceOf(check.report, file))
+    const edited = editedFiles?.(check)
     if (edited === undefined) {
       outcomes.push(await runCheck(projectDir, check, command, deps))
       continue

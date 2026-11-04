@@ -88,7 +88,7 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
 ## Known limits
 
 - Only Maven projects.
-- PMD cannot be limited to one file from the command line, so `init` runs it at task end. With `when: edit` it checks the whole project after each edit and shows only the failures of the changed file.
+- PMD cannot be limited to one file from the command line, so `init` runs it at task end. With `when: edit` it checks the whole project after each edit and shows only the failures of the changed file. With [`every: 5`](docs/usage.md#every-n-edited-files) as well, it waits for 5 edited files and shows the failures of all of them.
 
 ## Documentation
 

@@ -16,7 +16,7 @@ One OpenCode server runs the sessions of every project you open in it. The plugi
 
 ## After each edit
 
-After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit.
+After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. A check with [`every`](usage.md#every-n-edited-files) runs only on the edit that brings it to that many edited files, on all of them; the agent and its subagents add to the same count.
 
 The agent waits for these checks, so they give up after 2 minutes. If they cannot run, the edit result stays as it was and the task-end check reports the problem.
 
