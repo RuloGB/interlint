@@ -43,7 +43,7 @@ checks:
 
 - The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it.
 - Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after every 3 edited files, with [`every: 3`](#every-n-edited-files): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. `init` says which applies on yours. To run them after each edit, remove `every`; to wait for more files, raise it; to leave them to task end, set their `when` to `task-end`.
-- It never replaces a different `interlint.yaml` unless you pass `--force`. Running it again on an unchanged project changes nothing.
+- It never replaces a different `interlint.yaml` unless you pass `--force`. Without `--agent` it then writes nothing and exits with 2. With `--agent` it keeps your `interlint.yaml`, lists it under `Kept:`, and still writes or updates the agent's files, so you can update them after editing the config. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle` and `pmd` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` compiles first because PMD resolves types from the compiled classes. See [Checkstyle and PMD](#checkstyle-and-pmd).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit or PMD run, and show Checkstyle's failures under their names. Without Checkstyle or PMD in the build, the `architecture` check has no `-D…skip`.
 - When the build runs a plugin's `check` goal in an `<execution>`, the check names that execution, as in `checkstyle:check@style`, so the configuration inside it applies: called plainly, Maven runs the goal with the plugin's defaults. An execution without `<id>` is `default`; one turned off with `<phase>none</phase>` is left out.
@@ -51,7 +51,7 @@ checks:
 - With no `@ArchTest` classes and neither plugin it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
-- At the end it prints what it detected and which files it wrote or left unchanged. `--cwd <dir>` runs it on another directory.
+- At the end it prints what it detected and which files it wrote, left unchanged or kept. `--cwd <dir>` runs it on another directory.
 
 The generated file is yours: edit it to change `when` or the command.
 

@@ -35,6 +35,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 
 - Other settings and hooks in the file stay as they are.
 - Running `init` again leaves the file unchanged, and replaces an older Interlint hook instead of adding a second one.
+- If you edited `interlint.yaml`, `init --agent claude-code` keeps it and still writes the hooks. Only `--force` replaces it.
 - If the file is not valid JSON, `init` writes nothing.
 
 `interlint` must be on the `PATH` that Claude Code runs hooks with.

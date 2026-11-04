@@ -8,7 +8,7 @@ Interlint works with OpenCode V2 through a plugin. Tested with OpenCode 2.1.4.
 interlint init --agent opencode
 ```
 
-Besides `interlint.yaml` (see [Using Interlint](usage.md)), this copies `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project, replacing an older copy. You can also copy it by hand. It does not touch `opencode.json(c)`: OpenCode loads that directory by itself on start.
+Besides `interlint.yaml` (see [Using Interlint](usage.md)), this copies `integrations/opencode/interlint/` to `.opencode/plugins/interlint/` in your project, replacing an older copy. If you edited `interlint.yaml`, it keeps it and still updates the plugin; only `--force` replaces it. You can also copy it by hand. It does not touch `opencode.json(c)`: OpenCode loads that directory by itself on start.
 
 `interlint` must be on the `PATH` of the OpenCode server.
 
