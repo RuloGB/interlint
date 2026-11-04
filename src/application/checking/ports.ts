@@ -50,18 +50,22 @@ export interface ChangeTracker {
   touch(projectDir: string): void
 }
 
+/** A source edited since its check last passed, relative to the directory of `interlint.yaml`, and the lines its edits wrote. */
+export interface PendingEdit {
+  file: string
+  lines: number
+}
+
 /**
- * Remembers, for each `edit` check with `every`, the sources edited since it last passed, across the processes of
- * consecutive edits. It is read and changed only under the project lock, so two edits in a row lose or repeat none.
+ * Remembers, for each `edit` check with `every` or `lines`, the sources edited since it last passed, across the
+ * processes of consecutive edits. It is read and changed only under the project lock, so two edits in a row lose or
+ * repeat none.
  */
 export interface PendingEdits {
-  /**
-   * The check's pending files, relative to the directory of `interlint.yaml`: none when none were saved, and
-   * `undefined` when they were saved but cannot be read now.
-   */
-  list(projectDir: string, check: string): string[] | undefined
+  /** The check's pending files: none when none were saved, and `undefined` when they were saved but cannot be read now. */
+  list(projectDir: string, check: string): PendingEdit[] | undefined
   /** Replaces the check's pending files, and returns whether they were saved. */
-  save(projectDir: string, check: string, files: string[]): boolean
+  save(projectDir: string, check: string, edits: PendingEdit[]): boolean
 }
 
 export interface ProjectChange {

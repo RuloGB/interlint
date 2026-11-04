@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import type { PendingEdits } from "../../../application/checking/ports.js"
+import type { PendingEdit, PendingEdits } from "../../../application/checking/ports.js"
 import { projectKey, userStateDir, writeWhole } from "./user-state.js"
 
 /**
- * Keeps the pending files of each check, as a JSON list in a file per project and check under `stateDir`. It lives in
- * the user's state directory, never in the project. A record that is not a list of paths holds no files.
+ * Keeps the pending files of each check, as a JSON list of `{ file, lines }` in a file per project and check under
+ * `stateDir`. It lives in the user's state directory, never in the project. A list of paths, as earlier versions
+ * saved it, holds files that wrote no lines; any other record holds no files.
  * Without `stateDir`, the user's state directory is looked up on each call, not once when it is made.
  */
 export function filePendingEdits(stateDir?: string): PendingEdits {
@@ -25,14 +26,25 @@ export function filePendingEdits(stateDir?: string): PendingEdits {
         return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : undefined
       }
       try {
-        const files: unknown = JSON.parse(text)
-        return Array.isArray(files) && files.every((file) => typeof file === "string") ? files : []
+        return parseRecord(JSON.parse(text))
       } catch {
         return []
       }
     },
-    save(projectDir, check, files) {
-      return writeWhole(recordOf(projectDir, check), JSON.stringify(files))
+    save(projectDir, check, edits) {
+      return writeWhole(recordOf(projectDir, check), JSON.stringify(edits))
     },
   }
+}
+
+function parseRecord(record: unknown): PendingEdit[] {
+  if (!Array.isArray(record)) return []
+  const edits = record.map((entry: unknown) => (typeof entry === "string" ? { file: entry, lines: 0 } : entry))
+  return edits.every(isPendingEdit) ? edits : []
+}
+
+function isPendingEdit(entry: unknown): entry is PendingEdit {
+  if (typeof entry !== "object" || entry === null) return false
+  const { file, lines } = entry as { file?: unknown; lines?: unknown }
+  return typeof file === "string" && typeof lines === "number" && Number.isInteger(lines) && lines >= 0
 }

@@ -3,7 +3,13 @@ import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { AGENTS, type Agent, type InitDeps, initProject } from "../../../application/setup/init-project.js"
 import { AgentSetupError } from "../../../application/setup/ports.js"
-import { architectureCheck, projectChecks, QUALITY_EVERY, SLOW_CHECK_EVERY } from "../../../domain/check-plan.js"
+import {
+  architectureCheck,
+  projectChecks,
+  QUALITY_EVERY,
+  SLOW_CHECK_EVERY,
+  SLOW_CHECK_LINES,
+} from "../../../domain/check-plan.js"
 import { mavenCommand } from "../../../domain/maven-command.js"
 import {
   type ProjectFacts,
@@ -111,7 +117,7 @@ function bySchedule(kinds: EditCheckKind[]): { tools: string[]; every: number | 
 }
 
 function schedule(every: number | undefined): string {
-  return every === undefined ? "after each edit" : `after every ${every} edited files`
+  return every === undefined ? "after each edit" : `after every ${every} edited files or ${SLOW_CHECK_LINES} written lines`
 }
 
 /** `a`, `a and b`, `a, b and c`. */

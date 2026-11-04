@@ -54,7 +54,8 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
       if (input.filePath === undefined) return HOOK_EXIT.pass
       const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
       // The notice waits for the stop: shown after every edit, it would repeat what the user already read.
-      const { report, passed, failed } = await afterEdit(projectDir, input, changed, deps)
+      const linesWritten = new Map(changed.map((file) => [file, input.linesWritten]))
+      const { report, passed, failed } = await afterEdit(projectDir, input, changed, deps, linesWritten)
       if (report !== "") {
         // The tool already ran: `block` adds the reason next to its result for Claude, and the user reads the message.
         io.stdout(`${JSON.stringify({ decision: "block", reason: editNote(report), systemMessage: failedLine(failed) })}\n`)

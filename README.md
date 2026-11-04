@@ -19,7 +19,7 @@ By then the agent's session is over, and someone has to fix the code by hand.
 
 ## What Interlint does
 
-- **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. ArchUnit and PMD, which are slower, run after every 3 edited files. This needs [`mvnd`](#install-mvnd-strongly-recommended).
+- **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. ArchUnit and PMD, which are slower, run after 5 edited files or 100 written lines, whichever comes first. This needs [`mvnd`](#install-mvnd-strongly-recommended).
 - **At task end,** every check runs for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
@@ -88,7 +88,7 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
 ## Known limits
 
 - Only Maven projects.
-- PMD cannot be limited to one file from the command line, so it checks the whole project each time it runs. `init` gives it [`every: 3`](docs/usage.md#every-n-edited-files): it waits for 3 edited files and shows the failures of all of them.
+- PMD cannot be limited to one file from the command line, so it checks the whole project each time it runs. `init` gives it [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines): it waits for 5 edited files or 100 written lines and shows the failures of all of them.
 
 ## Documentation
 

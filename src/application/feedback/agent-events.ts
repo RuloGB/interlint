@@ -9,13 +9,19 @@ export interface FeedbackDeps {
 }
 
 /**
- * After an agent changed files, given relative to the project: the edit checks' report, empty when they pass, and
- * their notice for the user.
+ * After an agent changed files, given relative to the project with the lines it wrote in each: the edit checks'
+ * report, empty when they pass, and their notice for the user.
  * A subagent's changes are also checked when it stops, and their failures go to it.
  */
-export async function afterEdit(projectDir: string, agent: AgentRef, files: string[], deps: FeedbackDeps): Promise<CheckResult> {
+export async function afterEdit(
+  projectDir: string,
+  agent: AgentRef,
+  files: string[],
+  deps: FeedbackDeps,
+  linesWritten?: ReadonlyMap<string, number>,
+): Promise<CheckResult> {
   deps.subagentFiles.record(agent, files)
-  return checkProject(projectDir, { when: "edit", files }, deps.checking)
+  return checkProject(projectDir, { when: "edit", files, linesWritten }, deps.checking)
 }
 
 /**

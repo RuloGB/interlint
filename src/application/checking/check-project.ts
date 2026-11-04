@@ -7,12 +7,13 @@ export interface CheckProjectDeps extends CheckDeps {
 }
 
 /**
- * At edit, the changed files the checks run for. At task end, `changedOnly` runs only the projects that changed since
- * their checks last passed, and `files`, when given, only the projects that hold one of them.
+ * At edit, the changed files the checks run for, and the lines the edit wrote in each of them: a file left out of
+ * `linesWritten` wrote none. At task end, `changedOnly` runs only the projects that changed since their checks last
+ * passed, and `files`, when given, only the projects that hold one of them.
  * Files are `/`-separated and relative to the project.
  */
 export type CheckRequest =
-  | { when: "edit"; files: string[] }
+  | { when: "edit"; files: string[]; linesWritten?: ReadonlyMap<string, number> }
   | { when: "task-end"; files?: string[]; changedOnly?: boolean }
 
 /**
@@ -33,7 +34,7 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
   const config = deps.loadConfig(projectDir)
   const outcomes =
     request.when === "edit"
-      ? await runEditChecks(projectDir, config, request.files, deps)
+      ? await runEditChecks(projectDir, config, request.files, deps, request.linesWritten)
       : await runTaskEndChecks(projectDir, config, deps, { changedOnly: request.changedOnly, files: request.files })
   const failed = [...new Set(outcomes.filter((outcome) => outcome.status !== "passed").map((outcome) => outcome.check.name))]
   return { report: formatOutcomes(outcomes), notice: formatNotices(outcomes), passed: formatPassed(outcomes), failed }
