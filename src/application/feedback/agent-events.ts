@@ -25,21 +25,29 @@ export async function afterEdit(projectDir: string, agent: AgentRef, files: stri
  */
 export async function subagentStop(projectDir: string, request: StopRequest, deps: FeedbackDeps): Promise<StopOutcome> {
   const files = deps.subagentFiles.list(request)
-  if (files.length === 0) return { decision: { action: "end" }, notice: "" }
-  const { report, notice } = await checkProject(projectDir, { when: "task-end", files, changedOnly: true }, deps.checking)
+  if (files.length === 0) return { decision: { action: "end" }, notice: "", passed: "" }
+  const { report, notice, passed } = await checkProject(
+    projectDir,
+    { when: "task-end", files, changedOnly: true },
+    deps.checking,
+  )
   const decision = decideStop(request, report, deps.stops)
   if (decision.action !== "block") deps.subagentFiles.forget(request)
-  return { decision, notice }
+  return { decision, notice, passed }
 }
 
 /** When the main agent stops: the checks of the projects it changed since their checks last passed. */
 export async function mainStop(projectDir: string, request: StopRequest, deps: FeedbackDeps): Promise<StopOutcome> {
-  const { report, notice } = await checkProject(projectDir, { when: "task-end", changedOnly: true }, deps.checking)
-  return { decision: decideStop(request, report, deps.stops), notice }
+  const { report, notice, passed } = await checkProject(projectDir, { when: "task-end", changedOnly: true }, deps.checking)
+  return { decision: decideStop(request, report, deps.stops), notice, passed }
 }
 
-/** What a stop does, and the checks' notice for the user, empty when there is none. */
+/**
+ * What a stop does, the checks' notice for the user, and the checks that passed when they all did. Each text is empty
+ * when there is none.
+ */
 export interface StopOutcome {
   decision: StopDecision
   notice: string
+  passed: string
 }

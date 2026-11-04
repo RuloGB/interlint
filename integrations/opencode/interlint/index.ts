@@ -58,6 +58,8 @@ const SESSION_DELETED = "session.deleted"
 const REPORT_MARK = "✗ "
 /** How the CLI starts a notice for the user, such as a FreezingArchRule store to refreeze, when no check failed. */
 const NOTICE_MARK = "ℹ Interlint · for the user:"
+/** How the CLI starts the line that names the checks that ran, when they all passed. */
+const PASSED_MARK = "✓ Interlint · "
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** The built-in tools that change files. */
@@ -75,6 +77,23 @@ export interface CheckRun {
 }
 
 export type Decision = { action: "none" } | { action: "continue"; text: string } | { action: "report"; text: string }
+
+/**
+ * The line that names the checks that passed, so the user sees Interlint ran. Undefined when none ran, or when an
+ * Interlint older than this plugin printed nothing.
+ */
+/**
+ * The `description` of a message the plugin sends: its first line. OpenCode Desktop shows a synthetic message in the
+ * chat by its description alone, so it must say what happened.
+ */
+function label(text: string): string {
+  return text.split(/\r?\n/).find((line) => line.trim() !== "")?.trim() ?? "Interlint"
+}
+
+function passedLine(run: CheckRun): string | undefined {
+  if (run.exitCode !== 0) return undefined
+  return run.output.split(/\r?\n/).find((line) => line.startsWith(PASSED_MARK))
+}
 
 /** Whether the CLI ran and found failures. cmd.exe also exits with 1 when it cannot find the CLI, so exit 1 alone does not mean violations. */
 function isReport(run: CheckRun): boolean {
@@ -104,8 +123,10 @@ export class TaskEndGate {
   decide(sessionID: string, run: CheckRun): Decision {
     if (run.exitCode === 0) {
       this.blocks.delete(sessionID)
-      // A notice is for the user: reported in the session without resuming the agent.
-      return run.output.startsWith(NOTICE_MARK) ? { action: "report", text: run.output } : { action: "none" }
+      // A notice is for the user, and so are the checks that passed: reported in the session without resuming the agent.
+      if (run.output.startsWith(NOTICE_MARK)) return { action: "report", text: run.output }
+      const passed = passedLine(run)
+      return passed === undefined ? { action: "none" } : { action: "report", text: passed }
     }
     if (!isReport(run)) {
       this.blocks.delete(sessionID)
@@ -398,7 +419,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
             await ctx.session.synthetic({
               sessionID,
               text: subagentBlockText(attempt, run.output),
-              description: "Interlint",
+              description: label(subagentBlockText(attempt, run.output)),
               resume: true,
             })
           } catch (error) {
@@ -413,7 +434,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const note = parentNote(sessionID, settled)
         const parent = await parentOf(sessionID)
         if (!note || parent === undefined) return
-        await ctx.session.synthetic({ sessionID: parent, text: note.text, description: "Interlint", resume: note.resume })
+        await ctx.session.synthetic({ sessionID: parent, text: note.text, description: label(note.text), resume: note.resume })
         // The parent resumes, and its own turn end runs its checks. If the message failed, the flush runs them.
         if (note.resume) undefer(parent)
       }
@@ -462,7 +483,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           await ctx.session.synthetic({
             sessionID,
             text: decision.text,
-            description: "Interlint",
+            description: label(decision.text),
             resume: decision.action === "continue",
           })
         } finally {
@@ -524,6 +545,14 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
         else if (run.exitCode !== 0) console.error("[interlint] the edit checks could not run:", run.output)
+        const passed = passedLine(run)
+        // OpenCode Desktop shows only the diff of an edit, not its result: a message is what the user sees. Not awaited,
+        // so the agent does not wait for it, and it lands after the edit.
+        if (passed !== undefined) {
+          ctx.session
+            .synthetic({ sessionID: event.sessionID, text: passed, description: passed, resume: false })
+            .catch((error) => console.error("[interlint]", error))
+        }
       })
 
       void (async () => {

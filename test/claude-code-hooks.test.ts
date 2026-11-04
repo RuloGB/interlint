@@ -88,6 +88,14 @@ async function hook(event: string, stdin: string, cwd = projectDir) {
 
 const JAVA_FILE = () => join(projectDir, "src", "main", "java", "shop", "Order.java")
 
+/** The message for the user when the checks that ran passed. */
+const PASSED_MESSAGE = /^✓ Interlint · checks passed: architecture \(\d+\.\ds\)$/
+
+/** What a hook that exits 0 tells the user, read from its JSON on stdout. */
+function systemMessage(stdout: string): string {
+  return JSON.parse(stdout).systemMessage
+}
+
 describe("interlint hook claude-code post-edit", () => {
   it("runs the edit checks for the edited file and blocks with the failures on stderr", async () => {
     writeCheck("edit", VIOLATIONS_XML)
@@ -100,10 +108,14 @@ describe("interlint hook claude-code post-edit", () => {
     expect(stderr).toContain("Fix these problems before continuing.")
   })
 
-  it("prints nothing and exits 0 when the checks pass", async () => {
+  it("exits 0 and shows the user the checks that passed, without telling Claude", async () => {
     writeCheck("edit", PASSING_XML)
 
-    expect(await hook("post-edit", postToolUse(JAVA_FILE()))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const { exitCode, stdout, stderr } = await hook("post-edit", postToolUse(JAVA_FILE()))
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    expect(systemMessage(stdout)).toMatch(PASSED_MESSAGE)
   })
 
   it("runs nothing for a file that no check reads", async () => {
@@ -201,11 +213,15 @@ describe("interlint hook claude-code stop", () => {
     expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
   })
 
-  it("runs every check, edit ones included, and exits 0 silently when they pass", async () => {
+  it("runs every check, edit ones included, and shows the user the checks that passed", async () => {
     writeCheck("edit", PASSING_XML)
     await agentEdits()
 
-    expect(await hook("stop", stopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const { exitCode, stdout, stderr } = await hook("stop", stopInput(false))
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    expect(systemMessage(stdout)).toMatch(PASSED_MESSAGE)
     expect(readFileSync(join(projectDir, "target", "ran"), "utf8")).toBe("")
   })
 
@@ -361,6 +377,13 @@ describe("interlint hook claude-code subagent-stop", () => {
     expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
   })
 
+  it("lets a subagent whose checks passed stop without a message: the main agent's stop shows them", async () => {
+    writeCheck("task-end", PASSING_XML)
+    await subagentEdits(JAVA_FILE())
+
+    expect(await hook("subagent-stop", subagentStopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
   it("runs nothing at the next stop of a subagent whose checks passed, until it changes a file again", async () => {
     writeCheck("task-end", PASSING_XML)
     await subagentEdits(JAVA_FILE())
@@ -453,6 +476,7 @@ describe("a FreezingArchRule store frozen from broken classes, in the Claude Cod
     expect(exitCode).toBe(0)
     expect(stderr).toBe("")
     expect(JSON.parse(stdout).systemMessage).toMatch(new RegExp(`^${NOTICE}\n`))
+    expect(JSON.parse(stdout).systemMessage).toMatch(/\n✓ Interlint · checks passed: architecture \(\d+\.\ds\)$/)
   })
 
   it("gives Claude the notice to pass on when the stop blocks for other failures", async () => {
@@ -483,10 +507,10 @@ describe("a FreezingArchRule store frozen from broken classes, in the Claude Cod
   it("keeps the notice out of the edit hook, which passes when every failure was frozen", async () => {
     writeCheck("edit", surefireReport(FROZEN_AGAIN))
 
-    expect(await hook("post-edit", postToolUse(join(projectDir, "src", "main", "java", "Order.java")))).toEqual({
-      exitCode: 0,
-      stdout: "",
-      stderr: "",
-    })
+    const { exitCode, stdout, stderr } = await hook("post-edit", postToolUse(join(projectDir, "src", "main", "java", "Order.java")))
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    expect(systemMessage(stdout)).toMatch(PASSED_MESSAGE)
   })
 })

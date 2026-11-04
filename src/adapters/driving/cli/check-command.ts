@@ -13,7 +13,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
-  const { report, notice } =
+  const { report, notice, passed } =
     when === "edit"
       ? await checkProject(projectDir, { when: "edit", files: projectFiles(io.cwd, projectDir, files) }, deps)
       : await checkProject(
@@ -26,8 +26,9 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
           },
           deps,
         )
-  // The notice comes after the report, so output that starts with a failure still means a failure.
-  const output = [report, notice].filter((text) => text !== "").join("\n")
+  // The notice comes after the report, so output that starts with a failure still means a failure. The checks that
+  // passed come last, so output that starts with a notice still means a notice.
+  const output = [report, notice, passed].filter((text) => text !== "").join("\n")
   if (output !== "") io.stdout(output)
   return report === "" ? EXIT.passed : EXIT.violations
 }

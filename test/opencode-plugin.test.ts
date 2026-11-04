@@ -18,6 +18,9 @@ import plugin, {
 
 const VIOLATIONS: CheckRun = { exitCode: 1, output: "✗ architecture · ARCH-01: rule\n\nFix these problems before continuing.\n" }
 const PASSED: CheckRun = { exitCode: 0, output: "" }
+const PASS_LINE = "✓ Interlint · checks passed: checkstyle (1.2s), architecture (4.3s)"
+/** Checks that ran and passed: the CLI names them. */
+const PASSED_NAMED: CheckRun = { exitCode: 0, output: `${PASS_LINE}\n` }
 
 describe("TaskEndGate", () => {
   it("lets the task end when the checks pass", () => {
@@ -52,6 +55,20 @@ describe("TaskEndGate", () => {
 
     expect(gate.decide("s1", { exitCode: 0, output: notice })).toEqual({ action: "report", text: notice })
     expect(gate.decide("s1", VIOLATIONS)).toMatchObject({ text: expect.stringContaining("attempt 1 of 3") })
+  })
+
+  it("reports, without resuming the agent, the checks that passed", () => {
+    expect(new TaskEndGate().decide("s1", PASSED_NAMED)).toEqual({ action: "report", text: PASS_LINE })
+    expect(new TaskEndGate().decide("s1", { exitCode: 0, output: `Picked up JAVA_TOOL_OPTIONS\n${PASS_LINE}\n` })).toEqual({
+      action: "report",
+      text: PASS_LINE,
+    })
+  })
+
+  it("reports a notice for the user whole, with the checks that passed after it", () => {
+    const output = `ℹ Interlint · for the user: the ArchUnit store archunit_store was frozen from broken compiled classes\n${PASS_LINE}\n`
+
+    expect(new TaskEndGate().decide("s1", { exitCode: 0, output })).toEqual({ action: "report", text: output })
   })
 
   it("ignores other output when the checks pass", () => {
@@ -144,6 +161,8 @@ function fakeContext(
   failingSynthetic: string[] = [],
 ) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
+  /** The `description` of each message sent: what OpenCode Desktop shows in the chat. */
+  const labels: (string | undefined)[] = []
   const heldLookups: (() => void)[] = []
   const release = () => heldLookups.shift()?.()
   const hooks = new Map<string, (event: ToolEvent) => Promise<void> | void>()
@@ -167,9 +186,10 @@ function fakeContext(
         const directory = session?.directory === undefined ? "/repo" : session.directory
         return { id: input.sessionID, parentID: session?.parentID, ...(directory === null ? {} : { location: { directory } }) }
       },
-      synthetic: async (input: { sessionID: string; text: string; resume?: boolean }) => {
+      synthetic: async (input: { sessionID: string; text: string; description?: string; resume?: boolean }) => {
         if (failingSynthetic.includes(input.sessionID)) throw new Error("synthetic failed")
         sent.push({ sessionID: input.sessionID, text: input.text, resume: input.resume })
+        labels.push(input.description)
       },
     },
     event: {
@@ -204,7 +224,7 @@ function fakeContext(
     await hooks.get("execute.after")?.(event)
     return event
   }
-  return { ctx, sent, done, emit, afterTool, release }
+  return { ctx, sent, labels, done, emit, afterTool, release }
 }
 
 interface ToolCall {
@@ -358,6 +378,16 @@ describe("OpenCode plugin", () => {
     expect(runs).toEqual([TASK_END])
   })
 
+  it("tells the session which checks passed at task end, without resuming it", async () => {
+    const { ctx, sent, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
+
+    await createInterlintPlugin(async () => PASSED_NAMED).setup(ctx)
+    await done
+    await settled()
+
+    expect(sent).toEqual([{ sessionID: "s1", text: PASS_LINE, resume: false }])
+  })
+
   it("resumes the session with the failures", async () => {
     const { ctx, sent, done } = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
 
@@ -366,6 +396,20 @@ describe("OpenCode plugin", () => {
     await settled()
 
     expect(sent).toEqual([{ sessionID: "s1", text: expect.stringContaining("ARCH-01: rule"), resume: true }])
+  })
+
+  it("labels each message with its first line, since OpenCode Desktop shows only the label in the chat", async () => {
+    const passing = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
+    await createInterlintPlugin(async () => PASSED_NAMED).setup(passing.ctx)
+    await passing.done
+    await settled()
+    const failing = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
+    await createInterlintPlugin(async () => VIOLATIONS).setup(failing.ctx)
+    await failing.done
+    await settled()
+
+    expect(passing.labels).toEqual([PASS_LINE])
+    expect(failing.labels).toEqual([`Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).`])
   })
 
   it("still runs the task-end checks when it cannot tell whether the session is a subagent", async () => {
@@ -775,6 +819,7 @@ describe("editNote", () => {
 
   it("adds nothing when the checks pass or cannot run", () => {
     expect(editNote(PASSED)).toBeUndefined()
+    expect(editNote(PASSED_NAMED)).toBeUndefined()
     expect(editNote({ exitCode: 2, output: "interlint: interlint.yaml not found in /repo\n" })).toBeUndefined()
     expect(editNote({ exitCode: 1, output: "'interlint' is not recognized as an internal or external command\n" })).toBeUndefined()
   })
@@ -802,13 +847,34 @@ describe("OpenCode plugin after an edit", () => {
     })
   })
 
-  it("leaves the tool result as it was when the checks pass", async () => {
-    const { ctx, afterTool } = fakeContext()
+  it("tells the session which checks passed, without resuming it, since OpenCode Desktop does not show tool results", async () => {
+    const { ctx, sent, labels, afterTool } = fakeContext()
+    await createInterlintPlugin(async () => PASSED_NAMED).setup(ctx)
+
+    const event = await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
+
+    expect(event).toMatchObject({ result: { content: [{ type: "text", text: "Edited the file" }] } })
+    expect(sent).toEqual([{ sessionID: "s1", text: PASS_LINE, resume: false }])
+    expect(labels).toEqual([PASS_LINE])
+  })
+
+  it("leaves the edit as it was when that message cannot be sent", async () => {
+    const { ctx, afterTool } = fakeContext([], {}, ["s1"])
+    await createInterlintPlugin(async () => PASSED_NAMED).setup(ctx)
+
+    const event = await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
+
+    expect(event).toMatchObject({ result: { content: [{ type: "text", text: "Edited the file" }] } })
+  })
+
+  it("leaves the tool result as it was and sends nothing when no check ran", async () => {
+    const { ctx, sent, afterTool } = fakeContext()
     await createInterlintPlugin(async () => PASSED).setup(ctx)
 
     const event = await afterTool("write", { path: "src/main/java/shop/Order.java", content: "" })
 
     expect(event).toMatchObject({ result: { content: [{ type: "text", text: "Edited the file" }] } })
+    expect(sent).toEqual([])
   })
 
   it("does not run checks for tools that change no file, or for failed edits", async () => {
