@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Check, Report } from "../src/domain/check.js"
 import { usesMaven, withMavenDaemon } from "../src/domain/maven-command.js"
-import type { ReportResult } from "../src/application/checking/ports.js"
+import type { PendingEdits, ReportResult } from "../src/application/checking/ports.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 
 const PASSING_READER = { snapshot: () => new Map(), read: () => ({ found: true, failures: [] }) }
@@ -25,8 +25,19 @@ function fakeDeps(options: { mvnd: boolean }) {
     hasDirectory: () => true,
     editScopes: {},
     removeBrokenClasses: () => [],
+    pending: memoryPending(),
   }
   return { deps, launched }
+}
+
+/** Pending edits kept in memory, as the state directory keeps them across processes. */
+function memoryPending(): PendingEdits & { saved: Map<string, string[]> } {
+  const saved = new Map<string, string[]>()
+  return {
+    saved,
+    list: (projectDir, check) => [...(saved.get(`${projectDir}|${check}`) ?? [])],
+    save: (projectDir, check, files) => (saved.set(`${projectDir}|${check}`, [...files]), true),
+  }
 }
 
 function config(...checks: Check[]) {
@@ -432,6 +443,254 @@ describe("an edit check whose tool can check only some files", () => {
     await runTaskEndChecks("/repo", config(quality), deps)
 
     expect(launched).toEqual(["./mvnw -q checkstyle:check"])
+  })
+})
+
+describe("an edit check with every", () => {
+  const pmd: Check = { name: "pmd", run: "mvnd -q pmd:check", report: "maven", when: "edit", every: 5 }
+  const checkstyle: Check = { name: "checkstyle", run: "mvnd -q checkstyle:check", report: "maven", when: "edit" }
+  const source = (name: string) => `src/main/java/shop/${name}.java`
+  const [a, b, c, d, e, f, g] = ["A", "B", "C", "D", "E", "F", "G"].map(source) as [string, string, string, string, string, string, string]
+
+  /** Deps whose PMD report holds one violation in each of `failing`, and whose run fails when there is any. */
+  function pmdDeps(failing: () => string[]) {
+    const { deps, launched } = fakeDeps({ mvnd: true })
+    const scoped: string[][] = []
+    deps.editScopes = { maven: (command, files) => (scoped.push(files), command) }
+    deps.run = async (command) => (launched.push(command), { exitCode: failing().length > 0 ? 1 : 0, output: "" })
+    deps.readers = {
+      ...deps.readers,
+      maven: {
+        ...PASSING_READER,
+        read: () => ({
+          found: true,
+          failures: failing().map((path) => ({ title: "PMD", violations: [{ text: `in ${path}`, path }] })),
+        }),
+      },
+    }
+    return { deps, launched, scoped, pending: deps.pending as ReturnType<typeof memoryPending> }
+  }
+
+  async function editOneByOne(deps: CheckDeps, checks: Check[], files: string[]) {
+    const outcomes = []
+    for (const file of files) outcomes.push(await runEditChecks("/repo", config(...checks), [file], deps))
+    return outcomes
+  }
+
+  it("does not run on the first 4 distinct sources and runs on the 5th", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+
+    const outcomes = await editOneByOne(deps, [pmd], [a, b, c, d, e])
+
+    expect(outcomes.map((ran) => ran.length)).toEqual([0, 0, 0, 0, 1])
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("runs on the 5th edit for all 5 files and shows the failures of each of them", async () => {
+    const { deps, scoped } = pmdDeps(() => [a, b, c, d, e, "src/main/java/shop/Other.java"])
+
+    const outcomes = await editOneByOne(deps, [pmd], [a, b, c, d, e])
+
+    expect(scoped).toEqual([[a, b, c, d, e]])
+    const fifth = outcomes[4]![0]!
+    expect(fifth.status).toBe("violations")
+    const paths = fifth.status === "violations" ? fifth.failures.flatMap((failure) => failure.violations.map((v) => v.path)) : []
+    expect(paths).toEqual([a, b, c, d, e])
+  })
+
+  it("counts a file edited twice once", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+
+    await editOneByOne(deps, [pmd], [a, b, a, c, b, d])
+    expect(launched).toEqual([])
+    await editOneByOne(deps, [pmd], [e])
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("does not count files that are not sources of the check", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+
+    await editOneByOne(deps, [pmd], [a, b, c, d, "README.md", "pom.xml"])
+    expect(launched).toEqual([])
+    await editOneByOne(deps, [pmd], [e])
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it.each([
+    ["without every", { ...pmd, every: undefined }],
+    ["with every: 1", { ...pmd, every: 1 }],
+  ])("runs on every edit %s, on the edited file only, and keeps no pending files", async (_, check) => {
+    const { deps, launched, scoped, pending } = pmdDeps(() => [])
+
+    await editOneByOne(deps, [check], [a, b])
+
+    expect(launched).toEqual([pmd.run, pmd.run])
+    expect(scoped).toEqual([[a], [b]])
+    expect(pending.saved.size).toBe(0)
+  })
+
+  it("leaves a check without every running on every edit next to one with it", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+
+    await editOneByOne(deps, [checkstyle, pmd], [a, b, c, d, e])
+
+    expect(launched).toEqual([...Array(4).fill(checkstyle.run), checkstyle.run, pmd.run])
+  })
+
+  it("starts counting again once the check passed", async () => {
+    const { deps, launched, pending } = pmdDeps(() => [])
+
+    await editOneByOne(deps, [pmd], [a, b, c, d, e, f])
+
+    expect(launched).toEqual([pmd.run])
+    expect(pending.list("/repo", "pmd")).toEqual([f])
+  })
+
+  it("keeps the files pending while the check fails, so each next edit runs it on them all", async () => {
+    let failing = [c]
+    const { deps, launched, scoped, pending } = pmdDeps(() => failing)
+
+    await editOneByOne(deps, [pmd], [a, b, c, d, e, f])
+    expect(launched).toEqual([pmd.run, pmd.run])
+    expect(scoped).toEqual([
+      [a, b, c, d, e],
+      [a, b, c, d, e, f],
+    ])
+
+    failing = []
+    await editOneByOne(deps, [pmd], [c])
+    expect(scoped.at(-1)).toEqual([a, b, c, d, e, f])
+    expect(pending.list("/repo", "pmd")).toEqual([])
+    await editOneByOne(deps, [pmd], [g])
+    expect(launched).toHaveLength(3)
+  })
+
+  it("keeps the files pending when the command fails without a report", async () => {
+    const { deps, pending } = pmdDeps(() => [])
+    deps.run = async () => ({ exitCode: 1, output: "BUILD FAILURE" })
+    deps.readers = { ...deps.readers, maven: { ...PASSING_READER, read: () => ({ found: false, failures: [] }) } }
+
+    const outcomes = await editOneByOne(deps, [pmd], [a, b, c, d, e])
+
+    expect(outcomes[4]![0]!.status).toBe("failed")
+    expect(pending.list("/repo", "pmd")).toEqual([a, b, c, d, e])
+  })
+
+  it("runs at once when the pending files cannot be saved", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+    deps.pending = { list: () => [], save: () => false }
+
+    await editOneByOne(deps, [pmd], [a])
+
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("runs at once on the edited files when the pending files cannot be read, and leaves them as they were", async () => {
+    const { deps, launched, scoped } = pmdDeps(() => [])
+    const saved: string[][] = []
+    deps.pending = { list: () => undefined, save: (_dir, _check, files) => (saved.push(files), true) }
+
+    await editOneByOne(deps, [pmd], [a])
+
+    expect(launched).toEqual([pmd.run])
+    expect(scoped).toEqual([[a]])
+    expect(saved).toEqual([])
+  })
+
+  it("does not count pending files that are no longer sources of the check", async () => {
+    const { deps, launched, pending } = pmdDeps(() => [])
+    pending.save("/repo", "pmd", ["README.md", "other/pom.xml", b, c, d])
+
+    await editOneByOne(deps, [{ ...pmd, dir: undefined }], [e])
+
+    expect(launched).toEqual([])
+    expect(pending.list("/repo", "pmd")).toEqual([b, c, d, e])
+  })
+
+  it("does not count pending sources outside the check's dir, as after its dir changed", async () => {
+    const { deps, launched, pending } = pmdDeps(() => [])
+    const orders: Check = { ...pmd, dir: "orders" }
+    pending.save("/repo", "pmd", [`billing/${a}`, `orders/${b}`, `orders/${c}`, `orders/${d}`])
+
+    await editOneByOne(deps, [orders], [`orders/${e}`])
+
+    expect(launched).toEqual([])
+    expect(pending.list("/repo", "pmd")).toEqual([`orders/${b}`, `orders/${c}`, `orders/${d}`, `orders/${e}`])
+  })
+
+  it("keeps a count per project of a workspace", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+    const orders: Check = { ...pmd, name: "orders/pmd", dir: "orders", every: 2 }
+    const billing: Check = { ...pmd, name: "billing/pmd", dir: "billing", every: 2 }
+
+    await editOneByOne(deps, [orders, billing], [`orders/${a}`, `billing/${a}`])
+    expect(launched).toEqual([])
+    await editOneByOne(deps, [orders, billing], [`orders/${b}`])
+    expect(launched).toEqual([pmd.run])
+  })
+
+  it("reads and saves the pending files only under the project lock, so two edits in a row lose or repeat none", async () => {
+    const { deps, launched } = pmdDeps(() => [])
+    const memory = memoryPending()
+    let locked = false
+    let queue = Promise.resolve()
+    deps.lock = <T>(_dir: string, work: () => Promise<T>) => {
+      const turn = queue.then(async () => {
+        locked = true
+        try {
+          return await work()
+        } finally {
+          locked = false
+        }
+      })
+      queue = turn.then(
+        () => {},
+        () => {},
+      )
+      return turn
+    }
+    const guard = <T>(action: () => T) => {
+      if (!locked) throw new Error("pending files used outside the project lock")
+      return action()
+    }
+    deps.pending = {
+      list: (dir, check) => guard(() => memory.list(dir, check)),
+      save: (dir, check, files) => guard(() => memory.save(dir, check, files)),
+    }
+    const two: Check = { ...pmd, every: 2 }
+
+    await Promise.all([a, b, c, d].map((file) => runEditChecks("/repo", config(two), [file], deps)))
+
+    expect(launched).toEqual([pmd.run, pmd.run])
+    expect(memory.list("/repo", "pmd")).toEqual([])
+  })
+})
+
+describe("task end with pending edits", () => {
+  const pmd: Check = { name: "pmd", run: "mvnd -q pmd:check", report: "maven", when: "edit", every: 5 }
+  const file = "src/main/java/shop/A.java"
+
+  it("runs the check of a project with pending edits before reaching every, and empties them when it passes", async () => {
+    const { deps, launched } = fakeDeps({ mvnd: true })
+    await runEditChecks("/repo", config(pmd), [file], deps)
+    expect(launched).toEqual([])
+
+    const outcomes = await runTaskEndChecks("/repo", config(pmd), deps, { changedOnly: true })
+
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["passed"])
+    expect(launched).toEqual([pmd.run])
+    expect(deps.pending.list("/repo", "pmd")).toEqual([])
+  })
+
+  it("keeps the pending edits when the check fails at task end", async () => {
+    const { deps } = fakeDeps({ mvnd: true })
+    await runEditChecks("/repo", config(pmd), [file], deps)
+    deps.run = async () => ({ exitCode: 1, output: "BUILD FAILURE" })
+    deps.readers = { ...deps.readers, maven: { ...PASSING_READER, read: () => ({ found: false, failures: [] }) } }
+
+    await runTaskEndChecks("/repo", config(pmd), deps, { changedOnly: true })
+
+    expect(deps.pending.list("/repo", "pmd")).toEqual([file])
   })
 })
 

@@ -50,6 +50,20 @@ export interface ChangeTracker {
   touch(projectDir: string): void
 }
 
+/**
+ * Remembers, for each `edit` check with `every`, the sources edited since it last passed, across the processes of
+ * consecutive edits. It is read and changed only under the project lock, so two edits in a row lose or repeat none.
+ */
+export interface PendingEdits {
+  /**
+   * The check's pending files, relative to the directory of `interlint.yaml`: none when none were saved, and
+   * `undefined` when they were saved but cannot be read now.
+   */
+  list(projectDir: string, check: string): string[] | undefined
+  /** Replaces the check's pending files, and returns whether they were saved. */
+  save(projectDir: string, check: string, files: string[]): boolean
+}
+
 export interface ProjectChange {
   changed: boolean
   /** What the tracker held for the project when it was looked up, so `accept` can tell an edit came since. */

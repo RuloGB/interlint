@@ -40,13 +40,25 @@ export function loadConfig(projectDir: string): Config {
 function parseCheck(entry: unknown, at: string): Check {
   if (!isRecord(entry)) throw invalid(`${at} must be a mapping with name, run, report and when`)
   const dir = optionalDir(entry, at)
+  const every = optionalEvery(entry, at)
   return {
     name: requireString(entry, "name", at),
     run: requireString(entry, "run", at),
     report: requireOneOf(entry, "report", REPORTS, at),
     when: requireOneOf(entry, "when", WHENS, at),
     ...(dir === undefined ? {} : { dir }),
+    ...(every === undefined ? {} : { every }),
   }
+}
+
+/** How many edited files the check waits for at edit: a whole number of 1 or more, as a YAML number. */
+function optionalEvery(entry: Record<string, unknown>, at: string): number | undefined {
+  const value = entry.every
+  if (value === undefined) return undefined
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw invalid(`${at}.every must be a whole number of 1 or more (got ${JSON.stringify(value)})`)
+  }
+  return value
 }
 
 /**

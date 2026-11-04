@@ -33,6 +33,16 @@ export interface Check {
    * project of a workspace. Absent, the check runs where `interlint.yaml` is.
    */
   dir?: string
+  /**
+   * At edit, how many distinct sources of the check must be edited before it runs, on all of them. Absent, it runs
+   * on every edit, as with 1. It has no effect at task end.
+   */
+  every?: number
+}
+
+/** How many distinct edited sources an `edit` check waits for before it runs. */
+export function editsBeforeRun(check: Check): number {
+  return check.every ?? 1
 }
 
 /** Whether `file`, relative to the directory of `interlint.yaml` and `/`-separated, is inside the check's project. */
