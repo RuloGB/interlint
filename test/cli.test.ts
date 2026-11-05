@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -595,6 +595,7 @@ describe("interlint usage", () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain("interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]")
     expect(stdout).toContain("interlint check --when edit --file <path>... [--cwd <dir>]")
+    expect(stdout).toContain("metrics: false in interlint.yaml keeps none.")
   })
 
   it("exits 2 for an unknown command", async () => {
@@ -643,5 +644,46 @@ describe("interlint check with a FreezingArchRule store frozen from broken class
     expect(stdout).toMatch(/^✗ architecture · ARCH-07: mappers\n\n {2}Method <com\.acme\.web\.OrderController\.list\(\)>/)
     expect(stdout).not.toContain("OrderMapper")
     expect(stdout).toContain(`Fix these problems before continuing.\n\n${NOTICE}\n`)
+  })
+})
+
+describe("interlint check metrics", () => {
+  /** Every metric line kept for the project, from any month. */
+  function metricLines(): Record<string, unknown>[] {
+    const dir = join(stateDir, "interlint", "metrics")
+    if (!existsSync(dir)) return []
+    return readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((path) => path.endsWith(".jsonl"))
+      .flatMap((path) => readFileSync(join(dir, path), "utf8").trimEnd().split("\n"))
+      .map((line) => JSON.parse(line))
+  }
+
+  it("keeps one line per check run by hand, without an agent, session or model", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: VIOLATIONS_XML, exitCode: 1 }) })
+
+    await run("check")
+
+    const [line, ...others] = metricLines()
+    expect(others).toEqual([])
+    expect(line).toMatchObject({ v: 1, when: "task-end", check: "architecture", report: "archunit", result: "violations" })
+    for (const field of ["agent", "session", "subagent", "agentType", "model", "provider"]) expect(line).not.toHaveProperty(field)
+  })
+
+  it("keeps nothing with metrics: false", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
+    writeFileSync(join(projectDir, "interlint.yaml"), `metrics: false\n${readFileSync(join(projectDir, "interlint.yaml"), "utf8")}`)
+
+    expect((await run("check")).exitCode).toBe(0)
+    expect(metricLines()).toEqual([])
+  })
+
+  it("prints the same and exits the same when the metrics cannot be written", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: VIOLATIONS_XML, exitCode: 1 }) })
+    const kept = await run("check")
+    rmSync(join(stateDir, "interlint", "metrics"), { recursive: true })
+    // A file where the metrics directory goes: nothing can be written under it.
+    writeFileSync(join(stateDir, "interlint", "metrics"), "")
+
+    expect(await run("check")).toEqual(kept)
   })
 })

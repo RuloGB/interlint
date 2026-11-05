@@ -10,7 +10,9 @@ import {
   waitsForEdits,
 } from "../../domain/check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
+import type { AgentContext } from "../../domain/metric.js"
 import type { RuleFailure } from "../../domain/violation.js"
+import { recordRun, type RunEntry } from "./check-metrics.js"
 import type {
   BrokenClassRemover,
   BrokenStore,
@@ -20,6 +22,7 @@ import type {
   DirectoryLookup,
   EditScope,
   ExecutableLookup,
+  MetricsSink,
   PendingEdit,
   PendingEdits,
   ProjectChange,
@@ -55,6 +58,7 @@ export interface CheckDeps {
   editScopes: Partial<Record<Report, EditScope>>
   removeBrokenClasses: BrokenClassRemover
   pending: PendingEdits
+  metrics: MetricsSink
 }
 
 export interface TaskEndOptions {
@@ -65,6 +69,8 @@ export interface TaskEndOptions {
    * so it gets the failures of its own projects only.
    */
   files?: string[]
+  /** Who runs the checks, for their metrics. */
+  agent?: AgentContext
 }
 
 /**
@@ -79,7 +85,7 @@ export async function runTaskEndChecks(
   projectDir: string,
   config: Config,
   deps: CheckDeps,
-  { changedOnly = false, files }: TaskEndOptions = {},
+  { changedOnly = false, files, agent }: TaskEndOptions = {},
 ): Promise<CheckOutcome[]> {
   return deps.lock(projectDir, async () => {
     const holds = (check: Check) => files === undefined || files.some((file) => isInProjectOf(check, file))
@@ -105,6 +111,14 @@ export async function runTaskEndChecks(
       if (ofProject.every((outcome) => outcome.status === "passed")) deps.changes.accept(dir, seen)
     }
     clearPassed(projectDir, outcomes, deps)
+    const unchanged = config.checks.filter((check) => present.includes(check) && !checks.includes(check))
+    const entries: RunEntry[] = [
+      ...checks.map((check, index): RunEntry =>
+        built.includes(check) ? { check, skipped: "build" } : { check, outcome: outcomes[index]! },
+      ),
+      ...unchanged.map((check): RunEntry => ({ check, skipped: "unchanged" })),
+    ]
+    recordRun(projectDir, config, "task-end", entries, agent, deps.metrics)
     return outcomes
   })
 }
@@ -144,6 +158,7 @@ function passedInLastBuild(
  * A check with `every` or `lines` waits until its pending sources, or the lines written in them, add up to it.
  * `linesWritten` gives the lines the edit wrote in each changed file; a file it leaves out wrote none.
  * Without the Maven Daemon a Maven check is too slow for every edit, so it waits for task end (decision 12).
+ * `agent` tells who runs the checks, for their metrics.
  */
 export async function runEditChecks(
   projectDir: string,
@@ -151,6 +166,7 @@ export async function runEditChecks(
   changedFiles: string[],
   deps: CheckDeps,
   linesWritten: ReadonlyMap<string, number> = new Map(),
+  agent?: AgentContext,
 ): Promise<CheckOutcome[]> {
   const touched = config.checks.filter(
     (check) =>
@@ -190,6 +206,12 @@ export async function runEditChecks(
     }
     const outcomes = await runInOrder(projectDir, [...due.keys()], deps, (check) => due.get(check) ?? [])
     clearPassed(projectDir, outcomes, deps)
+    const ran = [...due.keys()]
+    const entries = checks.map((check): RunEntry => {
+      const index = ran.indexOf(check)
+      return index < 0 ? { check, skipped: "pending" } : { check, outcome: outcomes[index]! }
+    })
+    recordRun(projectDir, config, "edit", entries, agent, deps.metrics)
     return outcomes
   })
 }

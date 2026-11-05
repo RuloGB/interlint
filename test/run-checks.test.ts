@@ -26,6 +26,7 @@ function fakeDeps(options: { mvnd: boolean }) {
     editScopes: {},
     removeBrokenClasses: () => [],
     pending: memoryPending(),
+    metrics: () => {},
   }
   return { deps, launched }
 }

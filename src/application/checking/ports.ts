@@ -1,5 +1,12 @@
 import type { Config, Report } from "../../domain/check.js"
+import type { CheckMetric } from "../../domain/metric.js"
 import type { RuleFailure } from "../../domain/violation.js"
+
+/**
+ * Keeps the metrics of one run of checks for the project, called under the project lock so two runs never mix their
+ * lines. A metric it cannot keep is lost: it never changes what the checks give.
+ */
+export type MetricsSink = (projectDir: string, metrics: CheckMetric[]) => void
 
 /** Reads the project's `interlint.yaml`. Throws `ConfigError` when it is missing or invalid. */
 export type ConfigSource = (projectDir: string) => Config

@@ -70,4 +70,6 @@ export function fromRoot(check: Check, path: string): string {
 
 export interface Config {
   checks: Check[]
+  /** `false` keeps no metrics of the runs. Absent, they are kept (decision 42). */
+  metrics?: boolean
 }

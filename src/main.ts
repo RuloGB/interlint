@@ -14,6 +14,7 @@ import { runCommand } from "./adapters/driven/process/command-runner.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
+import { fileMetrics } from "./adapters/driven/state/file-metrics.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
@@ -33,6 +34,7 @@ const checking: CheckProjectDeps = {
   editScopes: { maven: checkstyleOnFiles },
   removeBrokenClasses,
   pending: filePendingEdits(),
+  metrics: fileMetrics(),
 }
 
 const DEPS: CliDeps = {

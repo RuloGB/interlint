@@ -261,3 +261,32 @@ checks:
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
+
+## Metrics
+
+Every `interlint check`, and every check a hook or the OpenCode plugin runs, keeps one line per check in your user's state directory, never in the project:
+
+- Windows: `%LOCALAPPDATA%\interlint\metrics\<project key>\<YYYY-MM>.jsonl`
+- elsewhere: `$XDG_STATE_HOME/interlint/metrics/<project key>/<YYYY-MM>.jsonl`, or `~/.local/state/interlint/metrics/...`
+
+The project key is a short hash of the project's directory. There is one file per project and per month (UTC). Interlint only adds lines and never removes a file: delete old months yourself if you want.
+
+Each line is a JSON object:
+
+```json
+{"v":1,"at":"2026-11-05T10:20:30.000Z","interlint":"1.9.0","projectKey":"3f2a9c1d0b7e4a65","project":"shop","when":"edit","check":"pmd","report":"maven","result":"violations","durationMs":2140,"violations":[{"rule":"EmptyCatchBlock","type":"pmd","file":"src/main/java/shop/Order.java"}],"agent":"claude-code","session":"9bab2274-…","model":"claude-opus-5-5"}
+```
+
+- `v` is the version of the line format. `project` is the folder name of the project, not its path.
+- `when` is `edit` or `task-end`. `report` is the check's `report`.
+- `result` is `passed`, `violations`, `failed` (the command failed without a report that explains it), `missing-dir`, `broken-build` or `skipped`. A skipped check has `skipped`: `pending` (it waits for more edits, see [Every N files or lines](#every-n-files-or-lines)), `unchanged` (its project did not change since its checks passed, with `--changed`) or `build` (it passed on the reports of the agent's own build).
+- `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle` or `pmd`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
+- `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
+
+The lines are plain text: you can read them with any tool, and they never leave your machine. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
+
+To keep no metrics, add this to `interlint.yaml`:
+
+```yaml
+metrics: false
+```

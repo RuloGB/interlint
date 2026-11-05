@@ -115,6 +115,36 @@ checks:
     )
   })
 
+  it("keeps metrics: false, and leaves metrics out when the key is absent", () => {
+    const check = `
+checks:
+  - name: architecture
+    run: ./mvnw test
+    report: archunit
+    when: edit
+`
+    writeConfig(`metrics: false${check}`)
+    expect(loadConfig(projectDir).metrics).toBe(false)
+
+    writeConfig(check)
+    expect("metrics" in loadConfig(projectDir)).toBe(false)
+  })
+
+  it("fails when metrics is not true or false", () => {
+    writeConfig(`
+metrics: no-thanks
+checks:
+  - name: architecture
+    run: ./mvnw test
+    report: archunit
+    when: edit
+`)
+
+    expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
+      'interlint.yaml: metrics must be true or false (got "no-thanks")',
+    )
+  })
+
   it("fails when checks is missing or empty", () => {
     writeConfig("checks: []")
 

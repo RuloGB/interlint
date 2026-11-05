@@ -39,6 +39,10 @@ only the failures of the changed files, and a run with checkstyle:check gets
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
 
+Every check that runs or is skipped keeps one metrics line, with no code or message, in the
+user's state directory (interlint/metrics under %LOCALAPPDATA% on Windows, $XDG_STATE_HOME or
+~/.local/state elsewhere). metrics: false in interlint.yaml keeps none.
+
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
 
 A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 a check failed

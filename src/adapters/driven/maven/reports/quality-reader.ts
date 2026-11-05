@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, isAbsolute, join, relative, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
-import type { RuleFailure, Violation } from "../../../../domain/violation.js"
+import type { RuleFailure, RuleType, Violation } from "../../../../domain/violation.js"
 import { moduleDirs } from "../modules.js"
 
 const CHECKSTYLE_REPORT = join("target", "checkstyle-result.xml")
@@ -42,6 +42,7 @@ interface ReportFile {
 /** A rule broken at one place, with how severe the tool rates it: the lower, the more severe. */
 interface Finding {
   rule: string
+  type: RuleType
   rank: number
   violation: Violation
 }
@@ -140,6 +141,7 @@ function checkstyleFindings(xml: string, projectDir: string): Finding[] {
       .filter((error) => CHECKSTYLE_SEVERITIES.includes(error.severity ?? "error"))
       .map((error) => ({
         rule: checkstyleRule(error.source),
+        type: "checkstyle" as const,
         rank: CHECKSTYLE_SEVERITIES.indexOf(error.severity ?? "error"),
         violation: violationAt(projectDir, file.name, error.line, error.message ?? ""),
       })),
@@ -157,6 +159,7 @@ function pmdFindings(xml: string, projectDir: string): Finding[] {
   return files.flatMap((file) =>
     (file.violation ?? []).map((violation) => ({
       rule: violation.rule ?? "PMD",
+      type: "pmd" as const,
       rank: Number(violation.priority) || LOWEST_PMD_PRIORITY,
       violation: violationAt(projectDir, file.name, violation.beginline, (violation["#text"] ?? "").trim()),
     })),
@@ -185,14 +188,14 @@ function violationAt(projectDir: string, name: string | undefined, line: string 
 function mostSevere(findings: Finding[]): RuleFailure[] {
   let top = Number.POSITIVE_INFINITY
   for (const finding of findings) top = Math.min(top, finding.rank)
-  const byRule = new Map<string, Violation[]>()
+  const byRule = new Map<string, RuleFailure>()
   for (const finding of findings) {
     if (finding.rank !== top) continue
-    const violations = byRule.get(finding.rule)
-    if (violations) violations.push(finding.violation)
-    else byRule.set(finding.rule, [finding.violation])
+    const failure = byRule.get(finding.rule)
+    if (failure) failure.violations.push(finding.violation)
+    else byRule.set(finding.rule, { title: finding.rule, type: finding.type, violations: [finding.violation] })
   }
-  return [...byRule].map(([title, violations]) => ({ title, violations }))
+  return [...byRule.values()]
 }
 
 function reportFiles(projectDir: string): string[] {
