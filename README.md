@@ -19,7 +19,7 @@ By then the agent's session is over, and someone has to fix the code by hand.
 
 ## What Interlint does
 
-- **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. ArchUnit and PMD, which are slower, run after 5 edited files or 100 written lines, whichever comes first. This needs [`mvnd`](#install-mvnd-strongly-recommended).
+- **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. ArchUnit and PMD, which are slower, run after 5 edited files or 100 written lines, whichever comes first. You can change when each check runs in `interlint.yaml`: see [Make it fit your team](#make-it-fit-your-team). This needs [`mvnd`](#install-mvnd-strongly-recommended).
 - **At task end,** every check runs for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
