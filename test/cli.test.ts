@@ -687,3 +687,56 @@ describe("interlint check metrics", () => {
     expect(await run("check")).toEqual(kept)
   })
 })
+
+describe("interlint check --agent-context", () => {
+  /** Every metric line kept for the project. */
+  function metricLines(): Record<string, unknown>[] {
+    const dir = join(stateDir, "interlint", "metrics")
+    if (!existsSync(dir)) return []
+    return readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((path) => path.endsWith(".jsonl"))
+      .flatMap((path) => readFileSync(join(dir, path), "utf8").trimEnd().split("\n"))
+      .map((line) => JSON.parse(line))
+  }
+
+  async function runWithStdin(stdin: string, ...args: string[]) {
+    let stdout = ""
+    let stderr = ""
+    const exitCode = await main(args, {
+      cwd: projectDir,
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+      stdin: async () => stdin,
+    })
+    return { exitCode, stdout, stderr }
+  }
+
+  const CONTEXT = { agent: "opencode", session: "ses_1", subagent: true, agentType: "explore", model: "gpt-4.1", provider: "openai" }
+
+  it("keeps the agent's context read as JSON on stdin", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: PASSING_XML, exitCode: 0 }) })
+
+    await runWithStdin(JSON.stringify(CONTEXT), "check", "--agent-context")
+
+    expect(metricLines()[0]).toMatchObject(CONTEXT)
+  })
+
+  it("leaves out the fields that are not what it expects, and runs the same with a context it cannot read", async () => {
+    writeConfig({ name: "architecture", run: fakeCheck("arch", { report: VIOLATIONS_XML, exitCode: 1 }) })
+    const plain = await run("check")
+
+    const odd = await runWithStdin(JSON.stringify({ agent: "opencode", session: 7, subagent: "yes", extra: "x" }), "check", "--agent-context")
+    const broken = await runWithStdin("not json", "check", "--agent-context")
+
+    expect(odd).toEqual(plain)
+    expect(broken).toEqual(plain)
+    const [, second, third] = metricLines()
+    expect(Object.keys(second ?? {})).toContain("agent")
+    for (const field of ["session", "subagent", "extra"]) expect(second).not.toHaveProperty(field)
+    expect(third).not.toHaveProperty("agent")
+  })
+
+  it("does not show the option in the usage", async () => {
+    expect((await run("--help")).stdout).not.toContain("agent-context")
+  })
+})

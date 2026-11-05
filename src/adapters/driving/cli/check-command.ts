@@ -1,6 +1,7 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { type CheckProjectDeps, checkProject } from "../../../application/checking/check-project.js"
+import type { AgentContext } from "../../../domain/metric.js"
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 import { projectFiles } from "./project-paths.js"
 
@@ -14,6 +15,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
   const lines = parseLines(values.lines, files.length, when)
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
+  const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
   const { report, notice, passed } =
     when === "edit"
       ? await checkProject(
@@ -22,6 +24,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
             when: "edit",
             files: projectFiles(io.cwd, projectDir, files),
             linesWritten: linesByFile(io.cwd, projectDir, files, lines),
+            agent,
           },
           deps,
         )
@@ -32,6 +35,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
             // Files given but all outside the project hold no project, so nothing runs for them.
             files: files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined,
             changedOnly: values.changed === true,
+            agent,
           },
           deps,
         )
@@ -68,6 +72,31 @@ function linesByFile(cwd: string, projectDir: string, files: string[], lines: nu
   return written
 }
 
+const CONTEXT_FIELDS = ["agent", "session", "agentType", "model", "provider"] as const
+
+/**
+ * The agent's context, as the OpenCode plugin writes it on stdin with `--agent-context`, for the metrics only
+ * (decision 34). The option is internal and left out of the usage. What is not a field it expects is left out, and a
+ * context it cannot read is none: the checks run the same either way.
+ */
+function agentContextOf(text: string): AgentContext | undefined {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof value !== "object" || value === null) return undefined
+  const fields = value as Record<string, unknown>
+  const context: AgentContext = {}
+  for (const field of CONTEXT_FIELDS) {
+    const given = fields[field]
+    if (typeof given === "string" && given !== "") context[field] = given
+  }
+  if (fields.subagent === true) context.subagent = true
+  return context
+}
+
 function parseCheckArgs(args: string[]) {
   try {
     return parseArgs({
@@ -78,6 +107,7 @@ function parseCheckArgs(args: string[]) {
         file: { type: "string", multiple: true },
         lines: { type: "string", multiple: true },
         changed: { type: "boolean" },
+        "agent-context": { type: "boolean" },
       },
       strict: true,
       allowPositionals: false,

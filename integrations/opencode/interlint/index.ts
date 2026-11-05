@@ -293,6 +293,27 @@ function withNote(result: ToolResult | undefined, text: string): ToolResult {
   }
 }
 
+/** What OpenCode gives a `model.request` session hook: the session, why it asks, and the model it asks. */
+interface ModelRequest {
+  readonly sessionID: string
+  /** `primary` for the agent's own turns; others, such as `title`, ask another model for OpenCode itself. */
+  readonly kind?: string
+  readonly model?: { id?: unknown; providerID?: unknown }
+}
+
+/**
+ * Who runs the checks, for Interlint's metrics: written as JSON on the stdin of `interlint check --agent-context`
+ * (decision 34). A field OpenCode does not give is left out.
+ */
+export interface AgentContext {
+  agent: "opencode"
+  session: string
+  subagent?: true
+  agentType?: string
+  model?: string
+  provider?: string
+}
+
 /** The part of the OpenCode V2 plugin context this adapter uses. */
 interface PluginContext {
   location: { directory: string }
@@ -302,7 +323,15 @@ interface PluginContext {
      * A forked session has no `parentID`: only the sessions a subagent runs in have one. `location` is where the
      * session runs, which may be another project open in the same OpenCode.
      */
-    get(input: { sessionID: string }): Promise<{ parentID?: string; location?: { directory?: unknown } }>
+    get(input: { sessionID: string }): Promise<{
+      parentID?: string
+      location?: { directory?: unknown }
+      /** The kind of agent, such as `explore` in a subagent. */
+      agent?: unknown
+      model?: { id?: unknown; providerID?: unknown }
+    }>
+    /** Absent on an OpenCode without session hooks: the metrics then ask `get` for the model. */
+    hook?(name: "model.request", callback: (event: ModelRequest) => void): Promise<{ dispose(): Promise<void> }>
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
   event: {
@@ -316,7 +345,13 @@ interface PluginContext {
   }
 }
 
-export type RunChecks = (directory: string, command: string, timeoutMs: number, args?: string[]) => Promise<CheckRun>
+export type RunChecks = (
+  directory: string,
+  command: string,
+  timeoutMs: number,
+  args?: string[],
+  context?: AgentContext,
+) => Promise<CheckRun>
 
 /** The fix loop of a subagent. `awaited` is set when the parent's `subagent` tool waits for it to tell what happened. */
 interface Settling {
@@ -340,8 +375,10 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const controller = new AbortController()
       /** The files each session changed with an edit tool since its own task-end checks last passed. */
       const written = new Map<string, Set<string>>()
-      /** What each session is to this plugin: its parent, and whether it runs in this plugin's project. */
-      const lookups = new Map<string, { parent: string | undefined; ours: boolean }>()
+      /** What each session is to this plugin: its parent, whether it runs in this plugin's project, and its agent. */
+      const lookups = new Map<string, { parent: string | undefined; ours: boolean; agent?: string }>()
+      /** The model of each session's last own request, for the metrics. */
+      const models = new Map<string, { model?: string; provider?: string }>()
       const settling = new Map<string, Settling>()
       /** The sessions Interlint resumed, waiting for the end of the turn that resume started. */
       const resumed = new Map<string, { started: boolean; resolve: (end: TurnEnd) => void }>()
@@ -354,12 +391,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const known = lookups.get(sessionID)
         if (known) return known
         try {
-          const { parentID, location } = await ctx.session.get({ sessionID })
+          const { parentID, location, agent } = await ctx.session.get({ sessionID })
           const parent = typeof parentID === "string" ? parentID : undefined
           // OpenCode runs the sessions of every open project in one server, and gives each plugin all their events.
           const where = location?.directory
           const ours = typeof where !== "string" || isWithin(where, directory)
-          const session = { parent, ours }
+          const session = { parent, ours, ...(typeof agent === "string" && agent !== "" ? { agent } : {}) }
           lookups.set(sessionID, session)
           return session
         } catch (error) {
@@ -370,6 +407,41 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       }
 
       const parentOf = async (sessionID: string) => (await lookup(sessionID)).parent
+
+      /**
+       * Who runs the checks of a session, for the metrics. The model is the one of the session's last own request,
+       * or, before any, the one the session gives now: a model switched later is not cached here. A session whose
+       * lookup failed is not looked up again for this: it gets the session alone.
+       */
+      const contextOf = async (sessionID: string): Promise<AgentContext> => {
+        const known = lookups.get(sessionID)
+        if (known === undefined) return { agent: "opencode", session: sessionID }
+        const { parent, agent } = known
+        let model = models.get(sessionID)
+        if (model === undefined) {
+          try {
+            model = modelOf((await ctx.session.get({ sessionID })).model)
+          } catch {
+            model = {}
+          }
+        }
+        return {
+          agent: "opencode",
+          session: sessionID,
+          ...(parent === undefined ? {} : { subagent: true as const, ...(agent === undefined ? {} : { agentType: agent }) }),
+          ...model,
+        }
+      }
+
+      // Only the agent's own requests: OpenCode also asks other models, such as one that writes the session's title.
+      const modelHook = await ctx.session
+        .hook?.("model.request", (event) => {
+          if (event.kind === "primary") models.set(event.sessionID, modelOf(event.model))
+        })
+        .catch((error: unknown) => {
+          console.error("[interlint] could not follow the session's model", error)
+          return undefined
+        })
       /** Whether the session runs in this plugin's project, so its changes are this project's to check. */
       const isOurs = async (sessionID: string) => (await lookup(sessionID)).ours
 
@@ -461,7 +533,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           const files = [...(written.get(sessionID) ?? [])]
           if (files.length === 0) return { kind: "clean" }
           const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
-          const run = await runChecks(directory, command, timeoutMs, args)
+          const run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
           if (run.exitCode === 0) {
             written.delete(sessionID)
             return attempt === 1 ? { kind: "clean" } : { kind: "fixed" }
@@ -533,7 +605,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (!undefer(sessionID)) return
         running.add(sessionID)
         try {
-          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS))
+          const context = await contextOf(sessionID)
+          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
           if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,
@@ -597,7 +670,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         record(event.sessionID, files)
         const lines = linesWritten(event.tool, event.input)
         const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file, "--lines", `${lines.get(file) ?? 0}`])]
-        const run = await runChecks(directory, command, editTimeoutMs, args)
+        const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(event.sessionID))
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
         else if (run.exitCode !== 0) console.error("[interlint] the edit checks could not run:", run.output)
@@ -616,6 +689,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           const sessionID = event.data?.sessionID
           if (!sessionID) continue
           if (event.type === SESSION_DELETED) {
+            models.delete(sessionID)
             onDeleted(sessionID).catch((error) => console.error("[interlint]", error))
             continue
           }
@@ -645,6 +719,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         controller.abort()
         for (const timer of deferTimers.values()) clearTimeout(timer)
         void afterTool.dispose()
+        void modelHook?.dispose()
       }
     },
   }
@@ -673,12 +748,26 @@ function realDirectory(dir: string): string {
   }
 }
 
-/** Runs the Interlint CLI. Through the shell, so Windows finds `interlint.cmd`. */
+/** A model as OpenCode gives it, as the metrics keep it: its ID and provider, without its variant (decision 35). */
+function modelOf(model: { id?: unknown; providerID?: unknown } | undefined): { model?: string; provider?: string } {
+  const id = model?.id
+  const provider = model?.providerID
+  return {
+    ...(typeof id === "string" && id !== "" ? { model: id } : {}),
+    ...(typeof provider === "string" && provider !== "" ? { provider } : {}),
+  }
+}
+
+/**
+ * Runs the Interlint CLI. Through the shell, so Windows finds `interlint.cmd`. With a context, it adds
+ * `--agent-context` and writes the context on its stdin, for the metrics.
+ */
 export function runInterlint(
   directory: string,
   command: string,
   timeoutMs: number,
   args: string[] = TASK_END_ARGS,
+  context?: AgentContext,
 ): Promise<CheckRun> {
   return new Promise((resolve) => {
     let output = ""
@@ -699,7 +788,8 @@ export function runInterlint(
     }
 
     // Arguments with other characters than these are quoted. File paths get here only if SHELL_SAFE_PATH accepts them.
-    const line = [command, ...args.map((arg) => (/^[\w./:=-]+$/.test(arg) ? arg : `"${arg}"`))].join(" ")
+    const all = context === undefined ? args : [...args, "--agent-context"]
+    const line = [command, ...all.map((arg) => (/^[\w./:=-]+$/.test(arg) ? arg : `"${arg}"`))].join(" ")
     const child = spawn(line, {
       cwd: directory,
       shell: true,
@@ -714,6 +804,9 @@ export function runInterlint(
       await killTree(child.pid)
       resolve({ exitCode: 2, output: `The checks did not finish within ${timeoutMs / 1000} s.\n` })
     }, timeoutMs)
+    // A CLI that stopped before reading stdin closes the pipe: the checks' result does not depend on it.
+    child.stdin.on("error", () => {})
+    child.stdin.end(context === undefined ? "" : JSON.stringify(context))
     child.stdout.on("data", append)
     child.stderr.on("data", append)
     child.on("error", (error) => finish({ exitCode: 2, output: `${output}${error.message}\n` }))

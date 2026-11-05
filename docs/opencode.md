@@ -43,3 +43,7 @@ The failures go to the agent that wrote the code. The agent that delegated the w
 - Neither wait lasts more than 30 minutes. A subagent whose fix turn has not ended by then counts as stopped, and the main agent's checks run without waiting for it any longer. A subagent whose session is deleted stops at once.
 
 Two agents that change the same project share its failures: Interlint checks projects, not lines.
+
+## Metrics
+
+Each check the plugin runs is kept in your [metrics](usage.md#metrics) with `agent: "opencode"`, the session, and the model and `provider` of the session's last request to its model. Requests OpenCode makes for itself, such as the one that writes the session's title, do not count. Before the first request, or on an OpenCode that does not give plugins its requests, the plugin asks the session for its model. A subagent's checks also get `subagent: true` and its type, such as `explore`. The plugin gives the CLI this context as JSON on stdin, with an option the usage does not show. The plugin copied by an older `interlint init` gives none: run `interlint init --agent opencode` again to update it.
