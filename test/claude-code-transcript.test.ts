@@ -42,6 +42,12 @@ describe("transcriptModel", () => {
     expect(transcriptModel({ path })).toBe("claude-haiku-5-5")
   })
 
+  it("stops looking 8 MB before the end, where the answers are too old to tell", () => {
+    const path = transcript("s.jsonl", assistant("claude-haiku-5-5"), user("x".repeat(9 * 1024 * 1024)))
+
+    expect(transcriptModel({ path })).toBeUndefined()
+  })
+
   it("ignores a last line that is still being written", () => {
     const path = join(dir, "s.jsonl")
     writeFileSync(path, `${assistant("claude-opus-5-5")}\n{"type":"assistant","message":{"mod`)

@@ -587,6 +587,17 @@ describe("the metrics of the Claude Code hooks", () => {
     expect(metricLines().at(-1)).toMatchObject({ when: "task-end", result: "violations", agent: "claude-code", session: "session-1" })
   })
 
+  it("keeps a subagent's context when it stops", async () => {
+    writeCheck("task-end", PASSING_XML)
+    const transcript_path = writeTranscript("claude-opus-5-5", { id: "a1", model: "claude-haiku-5-5" })
+    await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path, agent_id: "a1", agent_type: "Explore" }))
+
+    const stop = JSON.stringify({ session_id: "session-1", cwd: projectDir, hook_event_name: "SubagentStop", stop_hook_active: false, agent_id: "a1", agent_type: "Explore", transcript_path })
+    await hook("subagent-stop", stop)
+
+    expect(metricLines().at(-1)).toMatchObject({ when: "task-end", subagent: true, agentType: "Explore", model: "claude-haiku-5-5" })
+  })
+
   it("keeps the line without a model, and answers the same, when the transcript cannot be read", async () => {
     writeCheck("edit", VIOLATIONS_XML)
     const read = await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path: writeTranscript("claude-opus-5-5") }))

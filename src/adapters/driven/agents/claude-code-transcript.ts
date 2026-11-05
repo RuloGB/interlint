@@ -36,10 +36,11 @@ function lastModel(fd: number, size: number): string | undefined {
     const block = Buffer.alloc(end - start)
     readSync(fd, block, 0, block.length, start)
     const bytes = Buffer.concat([block, rest])
-    // Split on the newline byte, so a character split between two blocks is decoded whole.
+    // Split on the newline byte, so a character split between two blocks is decoded whole. `rest` holds no newline,
+    // so only the new block is searched: a line longer than many blocks is not scanned again on each one.
     const lines: Buffer[] = []
     let lineEnd = bytes.length
-    for (let at = bytes.length - 1; at >= 0; at--) {
+    for (let at = block.length - 1; at >= 0; at--) {
       if (bytes[at] !== 0x0a) continue
       lines.push(bytes.subarray(at + 1, lineEnd))
       lineEnd = at
