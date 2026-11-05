@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { claudeCodeSettingsFiles } from "./adapters/driven/agents/claude-code-settings.js"
+import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript.js"
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
@@ -39,7 +40,7 @@ const checking: CheckProjectDeps = {
 
 const DEPS: CliDeps = {
   checking,
-  feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter },
+  feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter, transcriptModel },
   setup: {
     scan: scanMavenProjects,
     files: diskProjectFiles,

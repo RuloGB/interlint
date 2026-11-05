@@ -54,6 +54,8 @@ A subagent running in the background may still be fixing its failures when the m
 
 The count of blocks, per session and per subagent, and the files each subagent changed are kept in your user's state directory; the files of a subagent that never stopped are forgotten after a week: `%LOCALAPPDATA%\interlint` on Windows, `$XDG_STATE_HOME/interlint` or `~/.local/state/interlint` elsewhere. A relative `LOCALAPPDATA` or `XDG_STATE_HOME` is ignored.
 
+Each check the hooks run is kept in your [metrics](usage.md#metrics) with `agent: "claude-code"`, the session, and the model of Claude's last answer, read from the end of the session's transcript. In a subagent, it is the subagent's own model, from its transcript, with `subagent: true` and its type, such as `Explore`. When the transcript cannot be read, as when Claude Code changes its format, the model is left out and the checks run the same.
+
 ## `interlint hook claude-code`
 
 `interlint hook claude-code post-edit|stop|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`CLAUDE_PROJECT_DIR`). It exits with Claude Code's codes instead of the ones of `interlint check`:
