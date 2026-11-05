@@ -76,6 +76,43 @@ Requires Node 22 or later and a Maven project with ArchUnit tests, or with Check
 
 `mvnd` keeps Maven running between checks, which makes a check after each edit fast enough, and every check at task end faster. Install it following the instructions in [its repository](https://github.com/apache/maven-mvnd). Interlint finds it on its own: there is nothing to change in `interlint.yaml`.
 
+## Make it fit your team
+
+`interlint.yaml` decides what Interlint does. `init` writes a starting point; the file is yours to edit, and you commit it so the whole team gets the same behavior.
+
+Each check says when it runs:
+
+| Field | What it does |
+|---|---|
+| `when: edit` | Runs after edits, and again at task end. |
+| `when: task-end` | Runs only at task end. |
+| `every: <n>` | With `when: edit`, waits until `n` distinct source files were edited. |
+| `lines: <n>` | With `when: edit`, waits until `n` lines were written in its sources. |
+
+With both `every` and `lines`, the check runs at whichever comes first. With neither, it runs after each edit. Whatever the setting, every check still runs at task end for the projects the agent changed, so nothing is left unchecked.
+
+For example, to run ArchUnit only once the agent has written 200 lines, whatever the number of files, and leave it to task end otherwise:
+
+```yaml
+checks:
+  - name: architecture
+    run: ./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip
+    report: archunit
+    when: edit
+    lines: 200
+```
+
+Some common choices:
+
+- **Small edits wait for task end:** keep only `lines`, as above. A log line in three files does not run the check; a new feature does.
+- **Many files, any size:** keep only `every`.
+- **Fast feedback on every edit:** remove `every` and `lines`.
+- **Only at the end:** set `when: task-end`.
+
+Only added or changed lines count, not removed ones. When a check fails after an edit, it runs again after each next edit of its sources until it passes, then counts from zero. Maven checks need [`mvnd`](#install-mvnd-strongly-recommended) to run after edits. `init` never overwrites your edited `interlint.yaml` unless you pass `--force`.
+
+See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full rules, and [Using Interlint](docs/usage.md) for every field, such as `run`, `report` and `dir`.
+
 ## Supported today
 
 | | |
