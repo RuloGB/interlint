@@ -434,14 +434,15 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       }
 
       // Only the agent's own requests: OpenCode also asks other models, such as one that writes the session's title.
-      const modelHook = await ctx.session
-        .hook?.("model.request", (event) => {
+      // A hook that fails, at once or later, only leaves the metrics to ask the session: the checks still run.
+      let modelHook: { dispose(): Promise<void> } | undefined
+      try {
+        modelHook = await ctx.session.hook?.("model.request", (event) => {
           if (event.kind === "primary") models.set(event.sessionID, modelOf(event.model))
         })
-        .catch((error: unknown) => {
-          console.error("[interlint] could not follow the session's model", error)
-          return undefined
-        })
+      } catch (error) {
+        console.error("[interlint] could not follow the session's model", error)
+      }
       /** Whether the session runs in this plugin's project, so its changes are this project's to check. */
       const isOurs = async (sessionID: string) => (await lookup(sessionID)).ours
 

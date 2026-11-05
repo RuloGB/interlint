@@ -29,28 +29,24 @@ export const transcriptModel: TranscriptModel = ({ path, agentId }) => {
 
 function lastModel(fd: number, size: number): string | undefined {
   let end = size
-  // The bytes of the line that starts before the block read, kept until its start is read.
-  let rest = Buffer.alloc(0)
+  // The pieces, in file order, of the line that starts before the block read, kept until its start is read. Joined
+  // only then, so a line longer than many blocks is neither searched nor copied again on each one.
+  let rest: Buffer[] = []
   while (end > 0 && size - end < MAX_BYTES) {
     const start = Math.max(0, end - BLOCK_BYTES)
     const block = Buffer.alloc(end - start)
     readSync(fd, block, 0, block.length, start)
-    const bytes = Buffer.concat([block, rest])
-    // Split on the newline byte, so a character split between two blocks is decoded whole. `rest` holds no newline,
-    // so only the new block is searched: a line longer than many blocks is not scanned again on each one.
-    const lines: Buffer[] = []
-    let lineEnd = bytes.length
+    // Split on the newline byte, so a character split between two blocks is decoded whole.
+    let lineEnd = block.length
     for (let at = block.length - 1; at >= 0; at--) {
-      if (bytes[at] !== 0x0a) continue
-      lines.push(bytes.subarray(at + 1, lineEnd))
+      if (block[at] !== 0x0a) continue
+      const model = modelOf(Buffer.concat([block.subarray(at + 1, lineEnd), ...rest]).toString("utf8"))
+      if (model !== undefined) return model
+      rest = []
       lineEnd = at
     }
-    rest = bytes.subarray(0, lineEnd)
-    if (start === 0) lines.push(rest)
-    for (const line of lines) {
-      const model = modelOf(line.toString("utf8"))
-      if (model !== undefined) return model
-    }
+    rest.unshift(block.subarray(0, lineEnd))
+    if (start === 0) return modelOf(Buffer.concat(rest).toString("utf8"))
     end = start
   }
   return undefined

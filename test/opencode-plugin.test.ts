@@ -1103,6 +1103,24 @@ describe("the agent's context for the metrics", () => {
     expect(contexts[0]?.context).toMatchObject({ model: "claude-sonnet-5-5", provider: "anthropic" })
   })
 
+  it("still runs the checks when the session hook throws as the plugin starts", async () => {
+    const runs: unknown[] = []
+    const { ctx, afterTool } = fakeContext()
+    Object.assign(ctx.session, {
+      hook: () => {
+        throw new Error("no such hook")
+      },
+    })
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, _args, context) => {
+      runs.push(context)
+      return PASSED
+    }).setup(ctx)
+
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(runs).toEqual([{ agent: "opencode", session: "s1" }])
+  })
+
   it("still runs the checks, without a model, on an OpenCode that has no session hooks", async () => {
     const runs: unknown[] = []
     const { ctx, afterTool } = fakeContext()
