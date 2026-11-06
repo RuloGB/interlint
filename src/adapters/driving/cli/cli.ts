@@ -1,10 +1,12 @@
 import type { CheckProjectDeps } from "../../../application/checking/check-project.js"
 import type { FeedbackDeps } from "../../../application/feedback/agent-events.js"
+import type { MetricsDeps } from "../../../application/metrics/show-metrics.js"
 import type { InitDeps } from "../../../application/setup/init-project.js"
 import { hook } from "../claude-code/hook-command.js"
 import { check } from "./check-command.js"
 import { EXIT, type Io, reportError, UsageError } from "./cli-io.js"
 import { init } from "./init-command.js"
+import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
   interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
@@ -13,6 +15,10 @@ const USAGE = `Usage:
                                                                Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
   interlint hook claude-code post-edit|stop|subagent-stop      Claude Code hook: reads the hook's JSON on stdin
+  interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|opencode] [--cwd <dir>]
+                                                               Sum up the metrics of the checks
+  interlint metrics report [--out <path>] [--force] [same options as metrics]
+                                                               Write the full metrics report in Markdown
 
 A check with dir runs in that directory (one Maven project of a workspace). An edit check runs
 only when a changed file inside its project is one of its sources (*.java for report: archunit
@@ -43,6 +49,13 @@ Every check that runs or is skipped keeps one metrics line, with no code or mess
 user's state directory (interlint/metrics under %LOCALAPPDATA% on Windows, $XDG_STATE_HOME or
 ~/.local/state elsewhere). metrics: false in interlint.yaml keeps none.
 
+interlint metrics sums up the metrics of the project in --cwd (or the current directory), or of
+every project with --all: checks run, violations by type, the top rules, violations per check run
+by model and by agent, sessions, task-end blocks and time spent on checks. A violation counts in
+every run that shows it. --since keeps the events from that day on (UTC) and --agent those of one
+agent. metrics report writes all of it, with tables, to interlint-metrics.md in the project, or
+to --out; it never replaces an existing file without --force.
+
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
 
 A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 a check failed
@@ -57,6 +70,7 @@ export interface CliDeps {
   checking: CheckProjectDeps
   feedback: FeedbackDeps
   setup: InitDeps
+  metrics: MetricsDeps
 }
 
 export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<number> {
@@ -69,6 +83,7 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
     if (command === "check") return await check(rest, io, deps.checking)
     if (command === "init") return init(rest, io, deps.setup)
     if (command === "hook") return await hook(rest, io, deps.feedback)
+    if (command === "metrics") return metrics(rest, io, deps.metrics)
     throw new UsageError(`unknown command "${command}"\n\n${USAGE}`)
   } catch (error) {
     reportError(error, io)

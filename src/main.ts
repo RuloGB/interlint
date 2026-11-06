@@ -6,6 +6,7 @@ import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
+import { diskReportFile } from "./adapters/driven/fs/report-file.js"
 import { removeBrokenClasses } from "./adapters/driven/maven/broken-classes.js"
 import { checkstyleOnFiles } from "./adapters/driven/maven/checkstyle-scope.js"
 import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
@@ -15,7 +16,7 @@ import { runCommand } from "./adapters/driven/process/command-runner.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
-import { fileMetrics } from "./adapters/driven/state/file-metrics.js"
+import { fileMetrics, fileMetricsSource } from "./adapters/driven/state/file-metrics.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
@@ -48,6 +49,7 @@ const DEPS: CliDeps = {
     agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles },
     hasExecutable: lookupExecutable,
   },
+  metrics: { source: fileMetricsSource(), reportFile: diskReportFile, now: () => new Date() },
 }
 
 export { EXIT, type Io } from "./adapters/driving/cli/cli-io.js"
