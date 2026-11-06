@@ -34,7 +34,10 @@ export function loadConfig(projectDir: string): Config {
 
   const parsed = checks.map((entry, index) => parseCheck(entry, `checks[${index}]`))
   assertUniqueNames(parsed)
-  return { checks: parsed }
+  const metrics = (raw as Record<string, unknown>).metrics
+  if (metrics === undefined) return { checks: parsed }
+  if (typeof metrics !== "boolean") throw invalid(`metrics must be true or false (got ${JSON.stringify(metrics)})`)
+  return { checks: parsed, metrics }
 }
 
 function parseCheck(entry: unknown, at: string): Check {

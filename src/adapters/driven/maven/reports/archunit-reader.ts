@@ -228,7 +228,7 @@ export function parseSurefireXml(xml: string): RuleFailure[] {
 function toRuleFailure(testName: string, message: string): RuleFailure {
   const [firstLine = "", ...rest] = message.split(/\r?\n/)
   const header = HEADER.exec(firstLine)
-  if (!header) return { title: `${testName}: ${firstLine}`, violations: [] }
+  if (!header) return { title: `${testName}: ${firstLine}`, type: "architecture", violations: [] }
 
   const rule = header[1] ?? ""
   const becauseAt = rule.lastIndexOf(BECAUSE)
@@ -237,6 +237,7 @@ function toRuleFailure(testName: string, message: string): RuleFailure {
 
   return {
     title,
+    type: "architecture",
     violations: rest.filter((line) => line.trim() !== "").map(toViolation),
   }
 }

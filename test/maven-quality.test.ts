@@ -66,6 +66,7 @@ describe("parseCheckstyleXml", () => {
     expect(parseCheckstyleXml(xml, PROJECT)).toEqual([
       {
         title: "LineLength",
+        type: "checkstyle",
         violations: [
           {
             text: "Line is longer than 80 characters (found 87).",
@@ -83,6 +84,7 @@ describe("parseCheckstyleXml", () => {
       },
       {
         title: "JavadocVariable",
+        type: "checkstyle",
         violations: [
           { text: "Missing a Javadoc comment.", file: "Order.java", line: 11, path: "src/main/java/shop/Order.java" },
         ],
@@ -141,6 +143,7 @@ describe("parsePmdXml", () => {
     expect(parsePmdXml(xml, PROJECT)).toEqual([
       {
         title: "EmptyCatchBlock",
+        type: "pmd",
         violations: [
           { text: "Avoid empty catch blocks", file: "Order.java", line: 11, path: "src/main/java/shop/Order.java" },
           { text: "Avoid empty catch blocks", file: "Customer.java", line: 20, path: "src/main/java/shop/Customer.java" },
@@ -148,6 +151,7 @@ describe("parsePmdXml", () => {
       },
       {
         title: "UnconditionalIfStatement",
+        type: "pmd",
         violations: [
           {
             text: "Do not use if statements that are always true or always false",
@@ -215,6 +219,7 @@ describe("readQualityReports", () => {
     expect(result.failures).toEqual([
       {
         title: "LineLength",
+        type: "checkstyle",
         violations: [{ text: "Too long.", file: "Order.java", line: 8, path: "src/main/java/shop/Order.java" }],
       },
     ])
@@ -248,6 +253,7 @@ describe("readQualityReports", () => {
     expect(readQualityReports(projectDir, before, BOTH_FAILED).failures).toEqual([
       {
         title: "EmptyCatchBlock",
+        type: "pmd",
         violations: [
           {
             text: "Avoid empty catch blocks",
@@ -379,6 +385,7 @@ describe("readFreshQualityReports", () => {
     expect(readFreshQualityReports(projectDir, PMD, SINCE_MS)?.failures).toEqual([
       {
         title: "UnusedLocalVariable",
+        type: "pmd",
         violations: [{ text: "Avoid unused local variables", file: "Order.java", line: 4, path: "src/main/java/shop/Order.java" }],
       },
     ])

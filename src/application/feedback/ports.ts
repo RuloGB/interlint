@@ -17,6 +17,12 @@ export interface SubagentFiles {
   forget(agent: AgentRef): void
 }
 
+/**
+ * The model of the last answer in a Claude Code session's transcript, or in the transcript of its subagent `agentId`.
+ * None when it cannot be read.
+ */
+export type TranscriptModel = (transcript: { path: string; agentId?: string }) => string | undefined
+
 /** Counts the stops blocked in a row, per session and per subagent. */
 export interface StopCounter {
   /** 0 when nothing was counted. */

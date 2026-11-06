@@ -112,7 +112,7 @@ describe("parseSurefireXml", () => {
 </testcase>`)
 
     expect(parseSurefireXml(xml)).toEqual([
-      { title: "loadsClasses: Could not import classes", violations: [] },
+      { title: "loadsClasses: Could not import classes", type: "architecture", violations: [] },
     ])
   })
 
@@ -359,7 +359,7 @@ describe("a FreezingArchRule store written from broken classes", () => {
       suite('<testcase name="totals" classname="OrderTest"><failure message="expected: &lt;3&gt; but was: &lt;2&gt;"/></testcase>'),
     )
 
-    expect(readArchUnitReport(projectDir, before).failures).toEqual([{ title: "totals: expected: <3> but was: <2>", violations: [] }])
+    expect(readArchUnitReport(projectDir, before).failures).toEqual([{ title: "totals: expected: <3> but was: <2>", type: "architecture", violations: [] }])
   })
 
   it("is not reported when its violations name every type in full", () => {

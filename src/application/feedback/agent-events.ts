@@ -1,11 +1,13 @@
+import type { AgentContext } from "../../domain/metric.js"
 import { type CheckProjectDeps, type CheckResult, checkProject } from "../checking/check-project.js"
-import type { AgentRef, StopCounter, SubagentFiles } from "./ports.js"
+import type { AgentRef, StopCounter, SubagentFiles, TranscriptModel } from "./ports.js"
 import { decideStop, type StopDecision, type StopRequest } from "./stop-policy.js"
 
 export interface FeedbackDeps {
   checking: CheckProjectDeps
   subagentFiles: SubagentFiles
   stops: StopCounter
+  transcriptModel: TranscriptModel
 }
 
 /**
@@ -19,9 +21,10 @@ export async function afterEdit(
   files: string[],
   deps: FeedbackDeps,
   linesWritten?: ReadonlyMap<string, number>,
+  context?: AgentContext,
 ): Promise<CheckResult> {
   deps.subagentFiles.record(agent, files)
-  return checkProject(projectDir, { when: "edit", files, linesWritten }, deps.checking)
+  return checkProject(projectDir, { when: "edit", files, linesWritten, agent: context }, deps.checking)
 }
 
 /**
@@ -29,12 +32,17 @@ export async function afterEdit(
  * such as a read-only reviewer, has nothing of its own to fix. Unless the stop is blocked, its files are forgotten:
  * they passed, or after the last attempt the main agent's stop, which checks every changed project, gets them.
  */
-export async function subagentStop(projectDir: string, request: StopRequest, deps: FeedbackDeps): Promise<StopOutcome> {
+export async function subagentStop(
+  projectDir: string,
+  request: StopRequest,
+  deps: FeedbackDeps,
+  context?: AgentContext,
+): Promise<StopOutcome> {
   const files = deps.subagentFiles.list(request)
   if (files.length === 0) return { decision: { action: "end" }, notice: "", passed: "" }
   const { report, notice, passed } = await checkProject(
     projectDir,
-    { when: "task-end", files, changedOnly: true },
+    { when: "task-end", files, changedOnly: true, agent: context },
     deps.checking,
   )
   const decision = decideStop(request, report, deps.stops)
@@ -43,8 +51,17 @@ export async function subagentStop(projectDir: string, request: StopRequest, dep
 }
 
 /** When the main agent stops: the checks of the projects it changed since their checks last passed. */
-export async function mainStop(projectDir: string, request: StopRequest, deps: FeedbackDeps): Promise<StopOutcome> {
-  const { report, notice, passed } = await checkProject(projectDir, { when: "task-end", changedOnly: true }, deps.checking)
+export async function mainStop(
+  projectDir: string,
+  request: StopRequest,
+  deps: FeedbackDeps,
+  context?: AgentContext,
+): Promise<StopOutcome> {
+  const { report, notice, passed } = await checkProject(
+    projectDir,
+    { when: "task-end", changedOnly: true, agent: context },
+    deps.checking,
+  )
   return { decision: decideStop(request, report, deps.stops), notice, passed }
 }
 

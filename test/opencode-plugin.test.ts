@@ -158,7 +158,17 @@ type PluginEvent = { type: string; data?: { sessionID?: string } }
  */
 function fakeContext(
   events: PluginEvent[] = [],
-  sessions: Record<string, { parentID?: string; failedLookups?: number; directory?: string | null; held?: boolean }> = {},
+  sessions: Record<
+    string,
+    {
+      parentID?: string
+      failedLookups?: number
+      directory?: string | null
+      held?: boolean
+      agent?: string
+      model?: { id: string; providerID: string; variant?: string }
+    }
+  > = {},
   failingSynthetic: string[] = [],
 ) {
   const sent: { sessionID: string; text: string; resume?: boolean }[] = []
@@ -185,7 +195,13 @@ function fakeContext(
           throw new Error("Session lookup failed")
         }
         const directory = session?.directory === undefined ? "/repo" : session.directory
-        return { id: input.sessionID, parentID: session?.parentID, ...(directory === null ? {} : { location: { directory } }) }
+        return {
+          id: input.sessionID,
+          parentID: session?.parentID,
+          agent: session?.agent,
+          model: session?.model,
+          ...(directory === null ? {} : { location: { directory } }),
+        }
       },
       synthetic: async (input: { sessionID: string; text: string; description?: string; resume?: boolean }) => {
         if (failingSynthetic.includes(input.sessionID)) throw new Error("synthetic failed")
@@ -1026,5 +1042,122 @@ describe("runInterlint arguments", () => {
     const run = await runInterlint(scratch, "node argv.mjs", 10_000, ["check", "--when", "edit", "--file", "src/Mi Pedido/Ñandú.java"])
 
     expect(JSON.parse(run.output)).toEqual(["check", "--when", "edit", "--file", "src/Mi Pedido/Ñandú.java"])
+  })
+})
+
+describe("the agent's context for the metrics", () => {
+  type ModelRequest = { sessionID: string; kind: string; agent?: string; model: { id: string; providerID: string; variant?: string } }
+
+  /** Fake checks that record the context of each run, and a `model.request` hook the test can fire. */
+  function recording(ctx: ReturnType<typeof fakeContext>["ctx"]) {
+    const contexts: { args: string[]; context: unknown }[] = []
+    let request: ((event: ModelRequest) => void) | undefined
+    Object.assign(ctx.session, {
+      hook: async (name: string, callback: (event: ModelRequest) => void) => {
+        if (name === "model.request") request = callback
+        return { dispose: async () => {} }
+      },
+    })
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = [], context) => {
+      contexts.push({ args, context })
+      return PASSED
+    }
+    return { contexts, run, modelRequest: (event: ModelRequest) => request?.(event) }
+  }
+
+  it("gives an edit's checks the session and the model of its last request, leaving out the title's", async () => {
+    const { ctx, afterTool } = fakeContext()
+    const { contexts, run, modelRequest } = recording(ctx)
+    await createInterlintPlugin(run).setup(ctx)
+
+    modelRequest({ sessionID: "s1", kind: "primary", model: { id: "gpt-4.1", providerID: "openai", variant: "default" } })
+    modelRequest({ sessionID: "s1", kind: "title", model: { id: "gpt-6-luna", providerID: "openai" } })
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(contexts[0]?.context).toEqual({ agent: "opencode", session: "s1", model: "gpt-4.1", provider: "openai" })
+  })
+
+  it("gives a subagent's checks its type and its own model", async () => {
+    const { ctx, afterTool, emit } = fakeContext([], { writer: { parentID: "s1", agent: "explore" } })
+    const { contexts, run, modelRequest } = recording(ctx)
+    await createInterlintPlugin(run).setup(ctx)
+
+    modelRequest({ sessionID: "writer", kind: "primary", model: { id: "gpt-4.1-mini", providerID: "openai" } })
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+    await settled()
+    await settled()
+
+    const expected = { agent: "opencode", session: "writer", subagent: true, agentType: "explore", model: "gpt-4.1-mini", provider: "openai" }
+    expect(contexts.map(({ context }) => context)).toEqual([expected, expected])
+    expect(contexts[1]?.args[2]).toBe("task-end")
+  })
+
+  it("asks the session for its model when no request gave it", async () => {
+    const { ctx, afterTool } = fakeContext([], { s1: { model: { id: "claude-sonnet-5-5", providerID: "anthropic" } } })
+    const { contexts, run } = recording(ctx)
+    await createInterlintPlugin(run).setup(ctx)
+
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(contexts[0]?.context).toMatchObject({ model: "claude-sonnet-5-5", provider: "anthropic" })
+  })
+
+  it("still runs the checks when the session hook throws as the plugin starts", async () => {
+    const runs: unknown[] = []
+    const { ctx, afterTool } = fakeContext()
+    Object.assign(ctx.session, {
+      hook: () => {
+        throw new Error("no such hook")
+      },
+    })
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, _args, context) => {
+      runs.push(context)
+      return PASSED
+    }).setup(ctx)
+
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(runs).toEqual([{ agent: "opencode", session: "s1" }])
+  })
+
+  it("still runs the checks, without a model, on an OpenCode that has no session hooks", async () => {
+    const runs: unknown[] = []
+    const { ctx, afterTool } = fakeContext()
+    await createInterlintPlugin(async (_directory, _command, _timeoutMs, _args, context) => {
+      runs.push(context)
+      return PASSED
+    }).setup(ctx)
+
+    await afterTool("edit", { path: "src/main/java/shop/Order.java" })
+
+    expect(runs).toEqual([{ agent: "opencode", session: "s1" }])
+  })
+})
+
+describe("runInterlint with the agent's context", () => {
+  let scratch: string
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "interlint-plugin-"))
+  })
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it("adds --agent-context and writes the context as JSON on stdin", async () => {
+    writeFileSync(
+      join(scratch, "argv.mjs"),
+      `let input = ""
+process.stdin.on("data", (chunk) => (input += chunk))
+process.stdin.on("end", () => console.log(JSON.stringify({ args: process.argv.slice(2), input })))
+`,
+    )
+    const context = { agent: "opencode" as const, session: "ses_1", model: "gpt-4.1", provider: "openai" }
+
+    const run = await runInterlint(scratch, "node argv.mjs", 10_000, ["check", "--when", "task-end"], context)
+
+    expect(JSON.parse(run.output)).toEqual({ args: ["check", "--when", "task-end", "--agent-context"], input: JSON.stringify(context) })
   })
 })

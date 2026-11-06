@@ -534,3 +534,77 @@ describe("a FreezingArchRule store frozen from broken classes, in the Claude Cod
     expect(systemMessage(stdout)).toMatch(PASSED_MESSAGE)
   })
 })
+
+describe("the metrics of the Claude Code hooks", () => {
+  /** Every metric line kept, from any project and month. */
+  function metricLines(): Record<string, unknown>[] {
+    const dir = join(stateDir, "interlint", "metrics")
+    if (!existsSync(dir)) return []
+    return readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((path) => path.endsWith(".jsonl"))
+      .flatMap((path) => readFileSync(join(dir, path), "utf8").trimEnd().split("\n"))
+      .map((line) => JSON.parse(line))
+  }
+
+  /** A session transcript whose last answer came from `model`, with a subagent transcript when `subagent` is given. */
+  function writeTranscript(model: string, subagent?: { id: string; model: string }): string {
+    const path = join(tempDir, "session-1.jsonl")
+    writeFileSync(path, `${JSON.stringify({ type: "assistant", message: { model } })}\n`)
+    if (subagent !== undefined) {
+      mkdirSync(join(tempDir, "session-1", "subagents"), { recursive: true })
+      const line = JSON.stringify({ type: "assistant", message: { model: subagent.model } })
+      writeFileSync(join(tempDir, "session-1", "subagents", `agent-${subagent.id}.jsonl`), `${line}\n`)
+    }
+    return path
+  }
+
+  it("keeps the agent, session and model of an edit", async () => {
+    writeCheck("edit", PASSING_XML)
+
+    await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path: writeTranscript("claude-opus-5-5") }))
+
+    const [line] = metricLines()
+    expect(line).toMatchObject({ when: "edit", check: "architecture", agent: "claude-code", session: "session-1", model: "claude-opus-5-5" })
+    expect(line).not.toHaveProperty("subagent")
+    expect(line).not.toHaveProperty("provider")
+  })
+
+  it("keeps a subagent's type and the model of its own transcript", async () => {
+    writeCheck("edit", PASSING_XML)
+    const transcript_path = writeTranscript("claude-opus-5-5", { id: "a1", model: "claude-haiku-5-5" })
+
+    await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path, agent_id: "a1", agent_type: "Explore" }))
+
+    expect(metricLines()[0]).toMatchObject({ subagent: true, agentType: "Explore", model: "claude-haiku-5-5" })
+  })
+
+  it("keeps the agent and session of a stop", async () => {
+    writeCheck("task-end", VIOLATIONS_XML)
+    await hook("post-edit", postToolUse(JAVA_FILE()))
+
+    await hook("stop", stopInput(false))
+
+    expect(metricLines().at(-1)).toMatchObject({ when: "task-end", result: "violations", agent: "claude-code", session: "session-1" })
+  })
+
+  it("keeps a subagent's context when it stops", async () => {
+    writeCheck("task-end", PASSING_XML)
+    const transcript_path = writeTranscript("claude-opus-5-5", { id: "a1", model: "claude-haiku-5-5" })
+    await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path, agent_id: "a1", agent_type: "Explore" }))
+
+    const stop = JSON.stringify({ session_id: "session-1", cwd: projectDir, hook_event_name: "SubagentStop", stop_hook_active: false, agent_id: "a1", agent_type: "Explore", transcript_path })
+    await hook("subagent-stop", stop)
+
+    expect(metricLines().at(-1)).toMatchObject({ when: "task-end", subagent: true, agentType: "Explore", model: "claude-haiku-5-5" })
+  })
+
+  it("keeps the line without a model, and answers the same, when the transcript cannot be read", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+    const read = await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path: writeTranscript("claude-opus-5-5") }))
+    const unread = await hook("post-edit", postToolUse(JAVA_FILE(), { transcript_path: join(tempDir, "gone.jsonl") }))
+
+    expect(unread).toEqual(read)
+    expect(metricLines()[1]).toMatchObject({ agent: "claude-code", session: "session-1" })
+    expect(metricLines()[1]).not.toHaveProperty("model")
+  })
+})
