@@ -111,9 +111,42 @@ Some common choices:
 
 Only added or changed lines count, not removed ones. When a check fails after an edit, it runs again after each next edit of its sources until it passes, then counts from zero. Maven checks need [`mvnd`](#install-mvnd-strongly-recommended) to run after edits. `init` never overwrites your edited `interlint.yaml` unless you pass `--force`.
 
-To see which rules your agents break most, and with which models, run `interlint metrics`, or `interlint metrics report` for a Markdown report. See [Metrics](docs/usage.md#metrics).
-
 See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full rules, and [Using Interlint](docs/usage.md) for every field, such as `run`, `report` and `dir`.
+
+## Metrics
+
+Interlint records every check it runs, so you can see which rules your agents break most, and with which models.
+
+```bash
+interlint metrics
+```
+
+```text
+Interlint metrics · shop · 2026-11-05 to 2026-11-06
+
+Checks run: 4 (1 skipped) · violations: 24
+By type: checkstyle 21 · pmd 2 · architecture 1
+Top rules:
+  6  checkstyle  LineLength
+  5  checkstyle  MissingJavadocMethod
+  4  checkstyle  EmptyCatchBlock
+
+By model (violations per check run):
+  claude-opus-5-5   7.33  (3 checks, 1 session)
+  unknown           2.00  (1 check, 0 sessions)
+
+Task-end blocks: 1, 1 fixed later in the session
+Time spent on checks: 20.0s
+```
+
+- **Violations per check run, by model and by agent,** so a model you use more does not look worse just for that.
+- **Task-end blocks** show how often the agent tried to finish with a broken rule, and how often it fixed it in the same session.
+- `interlint metrics report` writes the full report in Markdown to `interlint-metrics.md`, ready to share or paste into a pull request.
+- `--all`, `--since <YYYY-MM-DD>` and `--agent` narrow or widen what it reads.
+
+Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`.
+
+See [Metrics](docs/usage.md#metrics) for where they are kept, the line format and every option.
 
 ## Supported today
 
