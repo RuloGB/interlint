@@ -290,3 +290,63 @@ To keep no metrics, add this to `interlint.yaml`:
 ```yaml
 metrics: false
 ```
+
+### `interlint metrics`
+
+```bash
+interlint metrics
+```
+
+Sums up the metrics of the project in the current directory, or in `--cwd <dir>`, in a few lines:
+
+```text
+Interlint metrics · shop · 2026-11-05 to 2026-11-06
+
+Checks run: 4 (1 skipped) · violations: 24
+By type: checkstyle 21 · pmd 2 · architecture 1
+Top rules:
+  6  checkstyle  LineLength
+  5  checkstyle  MissingJavadocMethod
+  4  checkstyle  EmptyCatchBlock
+  3  checkstyle  MagicNumber
+  2  checkstyle  FinalClass
+
+By model (violations per check run):
+  claude-opus-5-5   7.33  (3 checks, 1 session)
+  unknown           2.00  (1 check, 0 sessions)
+By agent (violations per check run):
+  claude-code   7.33  (3 checks, 1 session)
+  manual        2.00  (1 check, 0 sessions)
+
+Sessions: 1, 3.0 checks run on average, 3 at most
+Task-end blocks: 1, 1 fixed later in the session
+Time spent on checks: 20.0s
+```
+
+- **Checks run** leaves out skipped checks, shown in brackets.
+- **Violations** count once in every run that shows them: a violation the agent leaves unfixed through three edits counts three times. It is how often the agent was told about it.
+- **By model** and **by agent** compare violations per check run, not totals, because a model used more has more violations. Each line says how many checks and sessions are behind it. `unknown` is a check whose agent did not give the model; `manual` is a check run by hand.
+- A **task-end block** is a task end in an agent's session where a check did not pass. It is fixed when a later task end of the same session passes. When Claude Code already let the task end after 3 blocks, a fourth failure still counts as a block.
+
+Options, for both `interlint metrics` and `interlint metrics report`:
+
+| Option | What it does |
+|---|---|
+| `--all` | Every project of the user, not only the current one |
+| `--since <YYYY-MM-DD>` | Only the events from that day on, in UTC |
+| `--agent claude-code\|opencode` | Only the events of that agent |
+| `--cwd <dir>` | The project to read, instead of the current directory |
+
+Without metrics, it says so and where they are kept, and exits with 0. A line of a metrics file that is not an event, such as one edited by hand, is skipped, and the output says how many were.
+
+### `interlint metrics report`
+
+```bash
+interlint metrics report
+```
+
+Writes the full report in Markdown to `interlint-metrics.md` in the project, ready to keep, share or paste into a pull request. It has the totals, violations by type, the top 20 rules, tables by model and by agent, a table of sessions, task-end blocks and their fix rate by model, the time spent on each check at edit and at task end, and the checks and violations week by week.
+
+- `--out <path>` writes it elsewhere, from the current directory.
+- It never replaces an existing file: it exits with 2 unless you pass `--force`.
+- Without metrics, it writes nothing.

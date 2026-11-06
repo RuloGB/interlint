@@ -111,6 +111,8 @@ Some common choices:
 
 Only added or changed lines count, not removed ones. When a check fails after an edit, it runs again after each next edit of its sources until it passes, then counts from zero. Maven checks need [`mvnd`](#install-mvnd-strongly-recommended) to run after edits. `init` never overwrites your edited `interlint.yaml` unless you pass `--force`.
 
+To see which rules your agents break most, and with which models, run `interlint metrics`, or `interlint metrics report` for a Markdown report. See [Metrics](docs/usage.md#metrics).
+
 See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full rules, and [Using Interlint](docs/usage.md) for every field, such as `run`, `report` and `dir`.
 
 ## Supported today
@@ -129,7 +131,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 ## Documentation
 
-- [Using Interlint](docs/usage.md): `init`, `interlint.yaml`, `check` and exit codes.
+- [Using Interlint](docs/usage.md): `init`, `interlint.yaml`, `check`, `metrics` and exit codes.
 - [OpenCode](docs/opencode.md): the plugin, what it does after edits and at turn end, and subagents.
 - [Claude Code](docs/claude-code.md): the hooks, their exit codes, the retry limit and subagents.
 - [Development](docs/development.md): building, testing and packing Interlint.
