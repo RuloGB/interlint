@@ -1,4 +1,4 @@
-import type { Report, When } from "./check.js"
+import { REPORTS, type Report, type When, WHENS } from "./check.js"
 import type { RuleType } from "./violation.js"
 
 /**
@@ -47,4 +47,86 @@ export interface CheckMetric extends AgentContext {
   durationMs: number
   /** Present only when `result` is `violations`. */
   violations?: ViolationMetric[]
+}
+
+/** The version of the metrics line format. A reader of older lines tells them apart by it. */
+export const METRICS_FORMAT_VERSION = 1
+
+/** One line of the metrics files: a check's metric with when, where and by which Interlint it was kept. */
+export interface MetricEvent extends CheckMetric {
+  v: number
+  /** ISO 8601 in UTC. Every line of one run of `interlint check` has the same. */
+  at: string
+  interlint: string
+  projectKey: string
+  /** The project's folder name, never its path (decision 40). */
+  project: string
+}
+
+const RESULTS: readonly MetricResult[] = ["passed", "violations", "failed", "missing-dir", "broken-build", "skipped"]
+const SKIP_REASONS: readonly SkipReason[] = ["pending", "unchanged", "build"]
+const RULE_TYPES: readonly RuleType[] = ["architecture", "checkstyle", "pmd"]
+const AGENT_FIELDS = ["agent", "session", "agentType", "model", "provider"] as const
+
+/**
+ * The event a parsed metrics line holds, or `undefined` when it is not one, such as a line edited by hand or written
+ * by a format this version does not know. Fields it does not know are left out.
+ */
+export function metricEventOf(value: unknown): MetricEvent | undefined {
+  if (!isRecord(value)) return undefined
+  const { v, at, interlint, projectKey, project, when, check, report, result, skipped, durationMs } = value
+  if (v !== METRICS_FORMAT_VERSION) return undefined
+  if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined
+  if (!isText(interlint) || !isText(projectKey) || !isText(project) || !isText(check)) return undefined
+  if (!isOneOf(when, WHENS) || !isOneOf(report, REPORTS) || !isOneOf(result, RESULTS)) return undefined
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return undefined
+  const event: MetricEvent = { v, at, interlint, projectKey, project, when, check, report, result, durationMs }
+  if (skipped !== undefined) {
+    if (!isOneOf(skipped, SKIP_REASONS)) return undefined
+    event.skipped = skipped
+  }
+  if (value.violations !== undefined) {
+    const violations = violationsOf(value.violations)
+    if (violations === undefined) return undefined
+    event.violations = violations
+  }
+  for (const field of AGENT_FIELDS) {
+    const given = value[field]
+    if (given === undefined) continue
+    if (!isText(given)) return undefined
+    event[field] = given
+  }
+  if (value.subagent === true) event.subagent = true
+  return event
+}
+
+function violationsOf(value: unknown): ViolationMetric[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const violations: ViolationMetric[] = []
+  for (const item of value) {
+    if (!isRecord(item) || !isText(item.rule)) return undefined
+    const violation: ViolationMetric = { rule: item.rule }
+    if (item.type !== undefined) {
+      if (!isOneOf(item.type, RULE_TYPES)) return undefined
+      violation.type = item.type
+    }
+    if (item.file !== undefined) {
+      if (!isText(item.file)) return undefined
+      violation.file = item.file
+    }
+    violations.push(violation)
+  }
+  return violations
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === "string" && value !== ""
+}
+
+function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
+  return typeof value === "string" && (values as readonly string[]).includes(value)
 }
