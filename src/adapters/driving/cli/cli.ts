@@ -9,6 +9,7 @@ import { init } from "./init-command.js"
 import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
+  interlint --version                                          Print the installed version of Interlint
   interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
                                                                Detect the project's checks and write interlint.yaml
   interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
@@ -71,6 +72,8 @@ export interface CliDeps {
   feedback: FeedbackDeps
   setup: InitDeps
   metrics: MetricsDeps
+  /** The installed version of Interlint. */
+  version: () => string
 }
 
 export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<number> {
@@ -78,6 +81,10 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
     const [command, ...rest] = args
     if (command === undefined || command === "--help" || command === "-h") {
       io.stdout(USAGE)
+      return EXIT.passed
+    }
+    if (command === "--version" || command === "-v") {
+      io.stdout(`${deps.version()}\n`)
       return EXIT.passed
     }
     if (command === "check") return await check(rest, io, deps.checking)
