@@ -740,3 +740,15 @@ describe("interlint check --agent-context", () => {
     expect((await run("--help")).stdout).not.toContain("agent-context")
   })
 })
+
+describe("interlint --version", () => {
+  const { version } = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")) as { version: string }
+
+  it.each(["--version", "-v"])("%s prints the installed version and exits 0", async (flag) => {
+    expect(await run(flag)).toEqual({ exitCode: 0, stdout: `${version}\n`, stderr: "" })
+  })
+
+  it("is listed in the usage", async () => {
+    expect((await run("--help")).stdout).toContain("interlint --version")
+  })
+})

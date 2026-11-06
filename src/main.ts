@@ -17,6 +17,7 @@ import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
 import { fileMetrics, fileMetricsSource } from "./adapters/driven/state/file-metrics.js"
+import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
@@ -50,6 +51,7 @@ const DEPS: CliDeps = {
     hasExecutable: lookupExecutable,
   },
   metrics: { source: fileMetricsSource(), reportFile: diskReportFile, now: () => new Date() },
+  version: interlintVersion,
 }
 
 export { EXIT, type Io } from "./adapters/driving/cli/cli-io.js"

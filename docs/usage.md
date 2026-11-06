@@ -12,6 +12,12 @@ npm install -g interlint
 
 `interlint` is then on your `PATH`, where the OpenCode plugin and the Claude Code hooks look for it. To run a build of this repository instead, see [Development](development.md).
 
+To see which version is installed:
+
+```bash
+interlint --version
+```
+
 ## `interlint init`
 
 Run it in the root of your Maven project, or of a workspace that holds several (see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces)), with the agent you use (`opencode` or `claude-code`):
