@@ -51,6 +51,12 @@ describe("reading a metrics line", () => {
     })
   })
 
+  it("gives a date written another way in UTC, as Interlint writes it, so it sorts and filters with the rest", () => {
+    const edited = metricEventOf({ ...JSON.parse(V1_LINE), at: "2026-11-05T01:00:00+02:00" })
+
+    expect(edited?.at).toBe("2026-11-04T23:00:00.000Z")
+  })
+
   it.each([
     ["not an object", 3],
     ["an unknown format version", { ...JSON.parse(V1_LINE), v: 2 }],

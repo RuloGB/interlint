@@ -80,7 +80,8 @@ export function metricEventOf(value: unknown): MetricEvent | undefined {
   if (!isText(interlint) || !isText(projectKey) || !isText(project) || !isText(check)) return undefined
   if (!isOneOf(when, WHENS) || !isOneOf(report, REPORTS) || !isOneOf(result, RESULTS)) return undefined
   if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return undefined
-  const event: MetricEvent = { v, at, interlint, projectKey, project, when, check, report, result, durationMs }
+  // In UTC as Interlint writes it, so a date edited by hand sorts and filters with the rest.
+  const event: MetricEvent = { v, at: new Date(at).toISOString(), interlint, projectKey, project, when, check, report, result, durationMs }
   if (skipped !== undefined) {
     if (!isOneOf(skipped, SKIP_REASONS)) return undefined
     event.skipped = skipped
