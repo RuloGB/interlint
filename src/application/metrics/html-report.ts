@@ -1,5 +1,6 @@
 import type { MetricsSummary } from "../../domain/metric-summary.js"
 import { skippedLines } from "./format-metrics.js"
+import { INTERLINT_LOGO } from "./logo.js"
 import { type Report, reportOf } from "./report.js"
 import { escapeXml as escape, svg } from "./svg.js"
 
@@ -35,7 +36,7 @@ function header(report: Report): string {
     `<span>Generated on ${escape(report.generated)}</span>`,
   ]
   return `<header>
-<p class="brand">Interlint</p>
+<div class="brand">${INTERLINT_LOGO}</div>
 <h1>Metrics report</h1>
 <p class="facts">${facts.join("")}</p>
 <div class="headline">
@@ -62,12 +63,13 @@ ${note === undefined ? "" : `<p class="note">${escape(note)}</p>`}
 </section>`
 }
 
-const STYLE = `:root { color-scheme: light; --ink: #111827; --muted: #6b7280; --line: #e5e7eb; --accent: #2563eb; --soft: #f3f4f6; }
+const STYLE = `:root { color-scheme: light; --ink: #111827; --muted: #6b7280; --line: #e5e7eb; --accent: #059669; --soft: #f3f4f6; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #fff; color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
 header { border-bottom: 3px solid var(--accent); padding-bottom: 20px; margin-bottom: 8px; }
-.brand { margin: 0; color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+.brand { margin: 0 0 16px; }
+.brand svg { width: auto; height: 40px; }
 h1 { margin: 4px 0 8px; font-size: 28px; }
 .facts { margin: 0 0 20px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }

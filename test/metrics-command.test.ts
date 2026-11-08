@@ -360,7 +360,8 @@ describe("interlint metrics report --format html", () => {
     for (const heading of ["Totals", "Violations by type", "Top 20 rules", "By model", "By agent", "Sessions", "Task-end blocks", "Time spent on checks", "Over time"]) {
       expect(html).toContain(`<h2>${heading}</h2>`)
     }
-    expect(html.match(/<svg /g)).toHaveLength(6)
+    // Six charts and the logo.
+    expect(html.match(/<svg /g)).toHaveLength(7)
     expect(html).toContain("<title>Failed checks by model</title>")
     expect(html).toContain("claude-opus-5-5 (3 checks, 1 session) · 2 (67%)")
     expect(html).toContain("unknown (1 check, 0 sessions) · 1 (33%)")
@@ -369,6 +370,18 @@ describe("interlint metrics report --format html", () => {
     expect(html).toContain("<strong>1 of 1</strong><span>Task-end blocks fixed</span>")
     expect(html).toContain("@media print")
     expect(html).not.toMatch(/<script|<link|src="http/)
+  })
+
+  it("shows the Interlint logo, the same as assets/logo/interlint-logo-light.svg, above the title", async () => {
+    keepSession()
+
+    await run("report", "--format", "html")
+
+    const html = readFileSync(join(projectDir, "interlint-metrics.html"), "utf8")
+    const logo = readFileSync(join(import.meta.dirname, "..", "assets", "logo", "interlint-logo-light.svg"), "utf8").trim()
+    const at = html.indexOf(logo.replaceAll("\r\n", "\n"))
+    expect(at).toBeGreaterThan(html.indexOf("<header>"))
+    expect(at).toBeLessThan(html.indexOf("<h1>"))
   })
 
   it("escapes what the metrics hold, such as a rule name with markup", async () => {
