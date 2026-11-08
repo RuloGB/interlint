@@ -310,7 +310,26 @@ describe("jacocoReader.recheck", () => {
     execAt("core/target/jacoco.exec", SINCE_MS + 1000)
     execAt("app/target/jacoco.exec", SINCE_MS + 2000)
 
-    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBe("./mvnw jacoco:check@check -fae")
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBe(
+      "./mvnw jacoco:check@check -fae -Djacoco.append=false -Dcheckstyle.skip",
+    )
+  })
+
+  it("keeps every argument of the command but its lifecycle phases, so profiles and properties still apply", () => {
+    execAt("target/jacoco.exec", SINCE_MS + 1000)
+
+    expect(jacocoReader.recheck?.(projectDir, "mvn -Pci clean verify jacoco:check -Dcoverage.min=0.9 -pl core", SINCE_MS)).toBe(
+      "mvn -Pci jacoco:check -Dcoverage.min=0.9 -pl core",
+    )
+  })
+
+  it("gives nothing when a module with tests has no coverage data, as when the build skipped it", () => {
+    writeFile("core/pom.xml", "<project/>")
+    writeFile("app/pom.xml", "<project/>")
+    writeFile("app/src/test/java/app/GreeterTest.java", "class GreeterTest {}")
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000)
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
   })
 
   it("gives nothing when a module's data is older than the last change, as when its tests were skipped", () => {

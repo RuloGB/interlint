@@ -19,7 +19,20 @@ const ALL_MET = "All coverage checks have been met."
 /** Colors a terminal-aware Maven may add to its output. */
 const ANSI_ESCAPE = /\u001b\[[0-9;]*m/g
 /** A `jacoco:check` goal of a command, plain or naming an execution, as a word of it. */
-const CHECK_GOAL = /(?:^|\s)(jacoco:check(?:@\S+)?)(?=\s|$)/g
+const CHECK_GOAL = /(?:^|\s)jacoco:check(?:@\S+)?(?=\s|$)/
+/** The phases of Maven's default and clean lifecycles, which a recheck leaves out so no test runs. */
+const LIFECYCLE_PHASES = new Set(
+  [
+    "pre-clean clean post-clean validate initialize generate-sources process-sources generate-resources",
+    "process-resources compile process-classes generate-test-sources process-test-sources generate-test-resources",
+    "process-test-resources test-compile process-test-classes test prepare-package package pre-integration-test",
+    "integration-test post-integration-test verify install deploy",
+  ]
+    .join(" ")
+    .split(" "),
+)
+/** Where a module keeps its tests: one with them and without coverage data was not tested. */
+const TEST_SOURCES = join("src", "test", "java")
 /** Where `prepare-agent` writes a module's coverage data by default. */
 const EXEC_FILE = join("target", "jacoco.exec")
 /** Where Surefire writes a module's test results, one `TEST-*.xml` per test class. */
@@ -105,21 +118,25 @@ function sourceOf(projectDir: string, modules: string[], className: string): Pic
 }
 
 /**
- * The command's `jacoco:check` goals alone, with no lifecycle phase, so they check the coverage data a build already
- * left instead of running the tests: when every module that has data wrote it after `sinceMs`, and all its tests ran
- * since and passed. A module whose tests did not run since, as with `-DskipTests`, keeps older data. A failing test
- * still writes the data, and the full check shows Maven's output for it. Then there is nothing to recheck.
+ * The command without its lifecycle phases, so its `jacoco:check` goals check the coverage data a build already left
+ * instead of running the tests. Its other arguments stay, so its profiles and properties still apply. Given when every
+ * module with tests has data, written after `sinceMs`, and all its tests ran since and passed. A module whose tests
+ * did not run since, as with `-DskipTests`, keeps older data or none. A failing test still writes the data, and the
+ * full check shows Maven's output for it. Then there is nothing to recheck.
  */
 export function jacocoRecheck(projectDir: string, command: string, sinceMs: number): string | undefined {
-  const goals = [...command.matchAll(CHECK_GOAL)].map((match) => match[1])
-  const executable = command.trimStart().split(/\s+/)[0]
-  if (goals.length === 0 || executable === undefined) return undefined
-  const execs = moduleDirs(projectDir)
-    .map((dir) => join(dir, EXEC_FILE))
-    .filter((path) => existsSync(path))
+  if (!CHECK_GOAL.test(command)) return undefined
+  const modules = moduleDirs(projectDir)
+  const withTests = modules.filter((dir) => existsSync(join(dir, TEST_SOURCES)))
+  if (!withTests.every((dir) => existsSync(join(dir, EXEC_FILE)))) return undefined
+  const execs = modules.map((dir) => join(dir, EXEC_FILE)).filter((path) => existsSync(path))
   if (execs.length === 0 || !execs.every((path) => statSync(path).mtimeMs > sinceMs)) return undefined
   if (!execs.every((path) => testsPassedSince(dirname(dirname(path)), sinceMs))) return undefined
-  return `${executable} ${goals.join(" ")} -fae`
+  return command
+    .trim()
+    .split(/\s+/)
+    .filter((word) => !LIFECYCLE_PHASES.has(word))
+    .join(" ")
 }
 
 /**
