@@ -1,4 +1,7 @@
 import type { MetricsSummary, Tally } from "../../domain/metric-summary.js"
+import { duration, plural, ratio, sum } from "./figures.js"
+import { mermaid } from "./mermaid.js"
+import { reportOf } from "./report.js"
 
 /** The note on the lines that are not events, or nothing when every line was one. */
 export function skippedLines(unreadable: number): string {
@@ -39,68 +42,22 @@ export function formatSummary(summary: MetricsSummary, unreadable: number, filte
   return lines.join("\n")
 }
 
-/** The full report in Markdown: to keep, share or paste into a pull request. */
+/** The full report in Markdown, with Mermaid charts: to keep, share or paste into a pull request. */
 export function formatReport(summary: MetricsSummary, unreadable: number, filters: string[], generated: Date): string {
-  const sessions = summary.sessions
+  const report = reportOf(summary, skippedLines(unreadable), filters, generated)
   const sections = [
     `# Interlint metrics\n\n${[
-      `- Projects: ${summary.projects.map(cell).join(", ")}`,
-      `- Period: ${summary.from} to ${summary.to} (UTC)`,
+      `- Projects: ${report.projects.map(cell).join(", ")}`,
+      `- Period: ${report.from} to ${report.to} (UTC)`,
       ...(filters.length > 0 ? [`- Filtered by ${filters.map((filter) => `\`${filter}\``).join(", ")}`] : []),
-      `- Generated on ${generated.toISOString().slice(0, 10)}`,
+      `- Generated on ${report.generated}`,
     ].join("\n")}`,
-    section(
-      "Totals",
-      table(
-        ["Checks run", "Skipped", "Violations", "Sessions", "Task-end blocks", "Fixed", "Time spent on checks"],
-        [[summary.checksRun, summary.skipped, summary.violations, sessions.length, summary.blocks, summary.fixed, duration(summary.waitMs)]],
-      ),
-      "A violation counts once in every run that shows it. Skipped checks are not counted as run.",
-    ),
-    section("Violations by type", table(["Type", "Violations"], summary.byType.map(({ type, violations }) => [type, violations]))),
-    section(
-      "Top 20 rules",
-      table(["Violations", "Type", "Rule"], summary.rules.slice(0, 20).map(({ violations, type, rule }) => [violations, type, rule])),
-    ),
-    section("By model", tallyTable("Model", summary.byModel), NORMALIZED),
-    section("By agent", tallyTable("Agent", summary.byAgent), NORMALIZED),
-    section(
-      "Sessions",
-      table(
-        ["Session", "Agent", "Model", "Checks run", "Violations", "Blocks", "Fixed", "Ended green"],
-        sessions.map((s) => [s.session, s.agent, s.model, s.checks, s.violations, s.blocks, s.fixed, green(s.endedGreen)]),
-      ),
-      sessions.length === 0
-        ? "No checks ran in an agent's session."
-        : `${ratio(sum(sessions.map((s) => s.checks)), sessions.length, 1)} checks run per session on average, ${Math.max(...sessions.map((s) => s.checks))} at most.`,
-    ),
-    section(
-      "Task-end blocks",
-      table(
-        ["Model", "Blocks", "Fixed", "Fix rate"],
-        summary.blocksByModel.map(({ name, blocks, fixed }) => [name, blocks, fixed, `${Math.round((fixed / blocks) * 100)}%`]),
-      ),
-      "A block is a task end in an agent's session where a check did not pass. It is fixed when a later task end of the same session passes.",
-    ),
-    section(
-      "Time spent on checks",
-      table(
-        ["Check", "Moment", "Runs", "Total", "Average"],
-        summary.waitByCheck.map(({ check, when, runs, totalMs }) => [check, when, runs, duration(totalMs), duration(totalMs / runs)]),
-      ),
-    ),
-    section(
-      "Over time",
-      table(["Week of", "Checks run", "Violations"], summary.byWeek.map(({ week, checks, violations }) => [week, checks, violations])),
-      "Weeks start on Monday, in UTC.",
+    ...report.sections.map(({ title, charts, table: { headers, rows }, note }) =>
+      [`## ${title}`, ...charts.map(mermaid), table(headers, rows), ...(note === undefined ? [] : [note])].join("\n\n"),
     ),
   ]
-  const notes = skippedLines(unreadable)
-  return `${sections.join("\n\n")}\n${notes === "" ? "" : `\n${notes}\n`}`
+  return `${sections.join("\n\n")}\n${report.notes === "" ? "" : `\n${report.notes}\n`}`
 }
-
-const NORMALIZED =
-  "Compare by violations per check run: a model used more has more violations. Sessions and checks run say how much is behind each figure."
 
 function heading(summary: MetricsSummary): string {
   const projects = summary.projects.length === 1 ? summary.projects[0] : `${summary.projects.length} projects`
@@ -115,22 +72,11 @@ function tallyLines(tallies: Tally[]): string[] {
   )
 }
 
-function tallyTable(label: string, tallies: Tally[]): string {
-  return table(
-    [label, "Sessions", "Checks run", "Violations", "Violations per check run"],
-    tallies.map((tally) => [tally.name, tally.sessions, tally.checks, tally.violations, ratio(tally.violations, tally.checks, 2)]),
-  )
-}
-
 function sessionsLine(summary: MetricsSummary): string {
   const { sessions } = summary
   if (sessions.length === 0) return "Sessions: none, the checks ran by hand"
   const checks = sessions.map((session) => session.checks)
   return `Sessions: ${sessions.length}, ${ratio(sum(checks), sessions.length, 1)} checks run on average, ${Math.max(...checks)} at most`
-}
-
-function section(title: string, body: string, note?: string): string {
-  return [`## ${title}`, body, ...(note === undefined ? [] : [note])].join("\n\n")
 }
 
 function table(headers: string[], rows: (string | number)[][]): string {
@@ -142,29 +88,4 @@ function table(headers: string[], rows: (string | number)[][]): string {
 /** A table cell: a `|` or a line break in a rule name would break the table. */
 function cell(text: string): string {
   return text.replaceAll("|", "\\|").replace(/\r?\n/g, " ")
-}
-
-function green(ended: boolean | undefined): string {
-  return ended === undefined ? "no task end" : ended ? "yes" : "no"
-}
-
-function ratio(part: number, whole: number, digits: number): string {
-  return whole === 0 ? "-" : (part / whole).toFixed(digits)
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`
-}
-
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0)
-}
-
-/** A duration as people read it: `4.5s`, `2m 5s`, `1h 3m`. */
-export function duration(ms: number): string {
-  const seconds = ms / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const whole = Math.round(seconds)
-  if (whole < 3600) return `${Math.floor(whole / 60)}m ${whole % 60}s`
-  return `${Math.floor(whole / 3600)}h ${Math.floor((whole % 3600) / 60)}m`
 }

@@ -122,6 +122,23 @@ describe("the summary of the metrics", () => {
     ])
   })
 
+  it("counts the checks of each model that ran and did not pass, in the order of the models", () => {
+    const summary = summarize([
+      event({ model: "big", result: "violations", violations: violations(["R", "pmd"]) }),
+      event({ model: "big", result: "broken-build" }),
+      event({ model: "big" }),
+      event({ model: "big", result: "skipped", skipped: "pending" }),
+      event({ model: "small" }),
+      event({ result: "failed" }),
+    ])
+
+    expect(summary.failedByModel).toEqual([
+      { name: "big", failed: 2 },
+      { name: "small", failed: 0 },
+      { name: "unknown", failed: 1 },
+    ])
+  })
+
   it("counts a failed task end of an agent's session as a block, fixed when a later task end passes", () => {
     const run = (at: string, session: string, result: MetricEvent["result"]) =>
       event({ at, when: "task-end", agent: "claude-code", session, model: "m", result })

@@ -197,6 +197,89 @@ describe("interlint metrics report", () => {
     expect(report).toContain("| 2026-11-02 | 4 | 24 |")
   })
 
+  it("draws Mermaid charts that GitHub shows: types, rules, failed checks and violations per check by model, time and weeks", async () => {
+    keepSession()
+
+    await run("report")
+
+    const report = readFileSync(join(projectDir, "interlint-metrics.md"), "utf8")
+    expect(report).toContain(
+      [
+        "## Violations by type",
+        "",
+        "```mermaid",
+        "xychart-beta",
+        '    title "Violations by type"',
+        '    x-axis ["checkstyle", "pmd", "architecture"]',
+        '    y-axis "Violations"',
+        "    bar [21, 2, 1]",
+        "```",
+        "",
+        "| Type | Violations |",
+      ].join("\n"),
+    )
+    expect(report).toContain(
+      [
+        "```mermaid",
+        "xychart-beta horizontal",
+        '    title "Top 10 rules"',
+        '    x-axis ["LineLength", "MissingJavadocMethod", "EmptyCatchBlock", "MagicNumber", "FinalClass", "UnusedPrivateField", "NeedBraces", "ARCH-01"]',
+        '    y-axis "Violations"',
+        "    bar [6, 5, 4, 3, 2, 2, 1, 1]",
+        "```",
+      ].join("\n"),
+    )
+    expect(report).toContain(
+      [
+        "## By model",
+        "",
+        "```mermaid",
+        "pie showData",
+        "    title Failed checks by model",
+        '    "claude-opus-5-5 (3 checks, 1 session)" : 2',
+        '    "unknown (1 check, 0 sessions)" : 1',
+        "```",
+        "",
+        "```mermaid",
+        "xychart-beta",
+        '    title "Violations per check run by model"',
+        '    x-axis ["claude-opus-5-5", "unknown"]',
+        '    y-axis "Violations per check run"',
+        "    bar [7.33, 2]",
+        "```",
+      ].join("\n"),
+    )
+    expect(report).toContain(
+      [
+        '    title "Time spent on checks (seconds)"',
+        '    x-axis ["architecture task-end", "checkstyle edit", "pmd task-end"]',
+        '    y-axis "Seconds"',
+        "    bar [17.5, 1.5, 1]",
+      ].join("\n"),
+    )
+    expect(report).toContain(
+      [
+        '    title "Checks run (bars) and violations (line) per week"',
+        '    x-axis ["2026-11-02"]',
+        '    y-axis "Checks and violations"',
+        "    bar [4]",
+        "    line [24]",
+      ].join("\n"),
+    )
+  })
+
+  it("draws no chart that would be empty", async () => {
+    keep("2026-11-05T10:00:00.000Z", [{ when: "edit", check: "pmd", report: "maven", result: "passed", durationMs: 1000 }])
+
+    await run("report")
+
+    const report = readFileSync(join(projectDir, "interlint-metrics.md"), "utf8")
+    expect(report).not.toContain('title "Violations by type"')
+    expect(report).not.toContain('title "Top 10 rules"')
+    expect(report).not.toContain("pie showData")
+    expect(report).toContain('title "Time spent on checks (seconds)"')
+  })
+
   it("writes to the path --out gives, from the current directory", async () => {
     keepSession()
 
