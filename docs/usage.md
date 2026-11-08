@@ -289,7 +289,7 @@ Each line is a JSON object:
 - `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle` or `pmd`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
 - `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
 
-The lines are plain text: you can read them with any tool, and they never leave your machine. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
+The lines are plain text: you can read them with any tool, and they never leave your machine. Interlint has no telemetry, no account and no server, and makes no network calls: `interlint metrics` and `interlint metrics report` read these files on your machine, and the HTML and PDF reports load nothing from the internet. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
 
 To keep no metrics, add this to `interlint.yaml`:
 

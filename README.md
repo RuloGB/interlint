@@ -148,7 +148,7 @@ The PDF is printed with the Chrome, Edge or Chromium you already have, so Interl
 
 For a quick look in the terminal, run `interlint metrics`. Both commands read the current project, or every project with `--all`, and take `--since <YYYY-MM-DD>` and `--agent`.
 
-Interlint records every check it runs. Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`. See [Metrics](docs/usage.md#metrics) for every option.
+**Your data never leaves your machine.** Interlint has no telemetry, no account and no server, and it makes no network calls. Metrics are plain files in your user's state directory, never in the project, and the report is built from them on your machine. They keep only what the report needs: the check, its result and time, the rule, type and file of each violation, and the agent, model and session that ran it. Never your code, the violation messages or anything personal. To keep none, set `metrics: false` in `interlint.yaml`. See [Metrics](docs/usage.md#metrics) for every option.
 
 ## Supported today
 
