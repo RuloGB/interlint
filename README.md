@@ -4,7 +4,7 @@
 
 Interlint runs the checks your project **already has**, such as ArchUnit, inside the agent's session. When the agent breaks a rule, it hears about it right away and fixes it in the same session, not in CI and not by hand.
 
-**Works with [Claude Code](docs/claude-code.md) and [OpenCode](docs/opencode.md)**, on Maven projects that use ArchUnit, Checkstyle or PMD.
+**Works with [Claude Code](docs/claude-code.md) and [OpenCode](docs/opencode.md)**, on Maven projects that use ArchUnit, Checkstyle, PMD or JaCoCo coverage rules.
 
 > **Status:** 1.12.0. Stable for Maven projects, including multi-module projects and workspaces of several projects.
 
@@ -13,14 +13,14 @@ Interlint runs the checks your project **already has**, such as ArchUnit, inside
 Your code rules live in two places that never meet:
 
 - **As text in `AGENTS.md`.** The agent may forget it, and nobody enforces it.
-- **As checks** (ArchUnit tests, Checkstyle, PMD). The agent only hears about them when someone builds or CI fails.
+- **As checks** (ArchUnit tests, Checkstyle, PMD, JaCoCo coverage rules). The agent only hears about them when someone builds or CI fails.
 
 By then the agent's session is over, and someone has to fix the code by hand.
 
 ## What Interlint does
 
 - **After each edit,** Checkstyle checks the changed files and any violation goes straight back to the agent. ArchUnit and PMD, which are slower, run after 5 edited files or 100 written lines, whichever comes first. You can change when each check runs in `interlint.yaml`: see [Make it fit your team](#make-it-fit-your-team). This needs [`mvnd`](#install-mvnd-strongly-recommended).
-- **At task end,** every check runs for the projects the agent changed. If a rule is broken, the agent cannot finish until everything is green.
+- **At task end,** every check runs for the projects the agent changed, including the [JaCoCo coverage rules](docs/usage.md#jacoco-coverage) of your `pom.xml`. If a rule is broken, the agent cannot finish until everything is green.
 
 This is what the agent sees when it puts infrastructure code in the domain:
 
@@ -40,13 +40,13 @@ The agent reads the rule, removes the dependency and carries on.
 - **No new rules to write.** Interlint has no rules and no analysis engine of its own. Your existing checks stay the single source of truth.
 - **Deterministic.** Your own build decides, not a prompt the agent may ignore.
 - **Feedback when it is cheap.** The agent fixes the violation while it still has the context, before it builds on top of it.
-- **One command to set up.** `interlint init` finds your ArchUnit tests and your Checkstyle and PMD plugins, and wires your agent.
+- **One command to set up.** `interlint init` finds your ArchUnit tests, your Checkstyle and PMD plugins and your JaCoCo `check` goal, and wires your agent.
 - **No endless loops.** After 3 failed attempts in a row, Interlint lets the task end and shows you what is still failing.
 - **Know your agents.** A [metrics report](#metrics-report) shows which models follow your rules best, and which rules your agents break most.
 
 ## Quick start
 
-Requires Node 22 or later and a Maven project with ArchUnit tests, or with Checkstyle or PMD in its `pom.xml`.
+Requires Node 22 or later and a Maven project with ArchUnit tests, or with Checkstyle, PMD or a JaCoCo `check` goal in its `pom.xml`.
 
 1. Install the CLI:
 
@@ -139,7 +139,7 @@ interlint metrics report --format pdf    # a PDF to send
 The report has:
 
 - **The models side by side.** A pie of the failed checks by model, each with the checks and sessions behind it, and bars of violations per check run. The pie shows who fails most in total; the bars are the fair comparison, since a model you use more fails more often.
-- **The rules your agents break most,** by type (ArchUnit, Checkstyle, PMD) and one by one.
+- **The rules your agents break most,** by type (ArchUnit, Checkstyle, PMD, coverage) and one by one.
 - **Task-end blocks:** how often each model tried to finish with a broken rule, and how often it fixed it in the same session.
 - **The time your checks take,** at edit and at task end.
 - **Week by week:** checks run and violations, to see whether your rules and prompts are working.
@@ -155,7 +155,7 @@ For a quick look in the terminal, run `interlint metrics`. Both commands read th
 | | |
 |---|---|
 | Agents | Claude Code, OpenCode V2 |
-| Checks | ArchUnit, Checkstyle, PMD |
+| Checks | ArchUnit, Checkstyle, PMD, JaCoCo coverage rules (at task end) |
 | Build | Maven, with or without the Maven Wrapper; `mvnd` for checks after each edit |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven projects (other projects in it are ignored) |
 

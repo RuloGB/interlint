@@ -14,7 +14,7 @@ function fakeDeps(options: { mvnd: boolean }) {
       launched.push(command)
       return { exitCode: 0, output: "" }
     },
-    readers: { archunit: PASSING_READER, maven: PASSING_READER },
+    readers: { archunit: PASSING_READER, maven: PASSING_READER, jacoco: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
     changes: {
@@ -310,7 +310,7 @@ describe("the reports a build already left", () => {
   const failure = { title: "ARCH-01: rule", violations: [{ text: "Order calls OrderEntity" }] }
   const store = { path: "archunit_store", typesWithoutPackage: ["Order"], hidden: 1 }
 
-  function reusingDeps(fresh: { archunit?: ReportResult; maven?: ReportResult }) {
+  function reusingDeps(fresh: Partial<Record<Report, ReportResult>>) {
     const { deps, launched } = fakeDeps({ mvnd: false })
     const accepted: string[] = []
     const asked: [string, string, number][] = []
@@ -326,6 +326,7 @@ describe("the reports a build already left", () => {
     deps.readers = {
       archunit: { ...PASSING_READER, readFresh: readFresh("archunit") },
       maven: { ...PASSING_READER, alsoListsAccepted: true, readFresh: readFresh("maven") },
+      jacoco: PASSING_READER,
     }
     return { deps, launched, accepted, asked }
   }
@@ -389,7 +390,7 @@ describe("a report that also lists what the build accepted", () => {
     const { deps } = fakeDeps({ mvnd: false })
     const reader = { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure] }) }
     deps.run = async () => ({ exitCode, output: "" })
-    deps.readers = { archunit: reader, maven: { ...reader, alsoListsAccepted: true } }
+    deps.readers = { archunit: reader, maven: { ...reader, alsoListsAccepted: true }, jacoco: reader }
     return deps
   }
 

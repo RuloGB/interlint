@@ -65,7 +65,7 @@ export interface MetricEvent extends CheckMetric {
 
 const RESULTS: readonly MetricResult[] = ["passed", "violations", "failed", "missing-dir", "broken-build", "skipped"]
 const SKIP_REASONS: readonly SkipReason[] = ["pending", "unchanged", "build"]
-const RULE_TYPES: readonly RuleType[] = ["architecture", "checkstyle", "pmd"]
+const RULE_TYPES: readonly RuleType[] = ["architecture", "checkstyle", "pmd", "coverage"]
 const AGENT_FIELDS = ["agent", "session", "agentType", "model", "provider"] as const
 
 /**

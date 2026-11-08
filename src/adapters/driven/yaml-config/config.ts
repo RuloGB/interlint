@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { parse, stringify } from "yaml"
 import { ConfigError } from "../../../application/checking/ports.js"
 import type { ConfigFile } from "../../../application/setup/ports.js"
-import { type Check, type Config, REPORTS, WHENS } from "../../../domain/check.js"
+import { type Check, type Config, REPORTS, TASK_END_ONLY, WHENS } from "../../../domain/check.js"
 
 export const CONFIG_FILE = "interlint.yaml"
 
@@ -45,11 +45,19 @@ function parseCheck(entry: unknown, at: string): Check {
   const dir = optionalDir(entry, at)
   const every = optionalCount(entry, "every", at)
   const lines = optionalCount(entry, "lines", at)
+  const name = requireString(entry, "name", at)
+  const run = requireString(entry, "run", at)
+  const report = requireOneOf(entry, "report", REPORTS, at)
+  const when = requireOneOf(entry, "when", WHENS, at)
+  const taskEndOnly = TASK_END_ONLY[report]
+  if (when !== "task-end" && taskEndOnly !== undefined) {
+    throw invalid(`${at}.when must be task-end with report ${report}, since ${taskEndOnly} (got "${when}")`)
+  }
   return {
-    name: requireString(entry, "name", at),
-    run: requireString(entry, "run", at),
-    report: requireOneOf(entry, "report", REPORTS, at),
-    when: requireOneOf(entry, "when", WHENS, at),
+    name,
+    run,
+    report,
+    when,
     ...(dir === undefined ? {} : { dir }),
     ...(every === undefined ? {} : { every }),
     ...(lines === undefined ? {} : { lines }),

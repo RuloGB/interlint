@@ -11,6 +11,7 @@ import { removeBrokenClasses } from "./adapters/driven/maven/broken-classes.js"
 import { checkstyleOnFiles } from "./adapters/driven/maven/checkstyle-scope.js"
 import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
 import { archUnitReader } from "./adapters/driven/maven/reports/archunit-reader.js"
+import { jacocoReader } from "./adapters/driven/maven/reports/jacoco-reader.js"
 import { mavenQualityReader } from "./adapters/driven/maven/reports/quality-reader.js"
 import { runCommand } from "./adapters/driven/process/command-runner.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
@@ -30,7 +31,7 @@ import type { CheckProjectDeps } from "./application/checking/check-project.js"
 const checking: CheckProjectDeps = {
   loadConfig,
   run: runCommand,
-  readers: { archunit: archUnitReader, maven: mavenQualityReader },
+  readers: { archunit: archUnitReader, maven: mavenQualityReader, jacoco: jacocoReader },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
   changes: fileChangeTracker(),
