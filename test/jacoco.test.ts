@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -282,5 +282,93 @@ describe("loadConfig with report: jacoco", () => {
     expect(() => loadConfig(projectDir)).toThrow(
       'interlint.yaml: checks[0].when must be task-end with report jacoco, since coverage needs the whole test suite (got "edit")',
     )
+  })
+})
+
+describe("jacocoReader.recheck", () => {
+  const SINCE_MS = Date.parse("2026-11-08T10:00:00Z")
+  const command = "./mvnw test jacoco:check@check -fae -Djacoco.append=false -Dcheckstyle.skip"
+
+  function execAt(path: string, ms: number) {
+    writeFile(path, "exec")
+    utimesSync(join(projectDir, path), new Date(ms), new Date(ms))
+  }
+
+  it("runs only the check goals when every module's coverage data was written after the last change", () => {
+    writeFile("core/pom.xml", "<project/>")
+    writeFile("app/pom.xml", "<project/>")
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000)
+    execAt("app/target/jacoco.exec", SINCE_MS + 2000)
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBe("./mvnw jacoco:check@check -fae")
+  })
+
+  it("gives nothing when a module's data is older than the last change, as when its tests were skipped", () => {
+    writeFile("core/pom.xml", "<project/>")
+    writeFile("app/pom.xml", "<project/>")
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000)
+    execAt("app/target/jacoco.exec", SINCE_MS - 1000)
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
+  })
+
+  it("gives nothing without coverage data, as after clean with -DskipTests", () => {
+    writeFile("core/pom.xml", "<project/>")
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
+  })
+
+  it("gives nothing for a command without a jacoco:check goal", () => {
+    execAt("target/jacoco.exec", SINCE_MS + 1000)
+
+    expect(jacocoReader.recheck?.(projectDir, "./mvnw verify", SINCE_MS)).toBeUndefined()
+  })
+})
+
+describe("a coverage check at task end after the agent's own build", () => {
+  const RECHECK = "./mvnw jacoco:check@check -fae"
+
+  /** Answers the recheck and the full check apart, and offers the recheck for fresh coverage data. */
+  function reusing(recheckResult: { exitCode: number; output: string } | undefined) {
+    const { deps, launched } = depsAnswering({ exitCode: 0, output: output(ALL_MET) })
+    deps.run = async (command) => {
+      launched.push(command)
+      return command === RECHECK && recheckResult ? recheckResult : { exitCode: 0, output: output(ALL_MET) }
+    }
+    deps.readers = { ...deps.readers, jacoco: { ...jacocoReader, recheck: () => (recheckResult ? RECHECK : undefined) } }
+    return { deps, launched }
+  }
+
+  it("passes in the last build, without running the tests, when the agent's coverage data meets every rule", async () => {
+    const { deps, launched } = reusing({ exitCode: 0, output: output(ALL_MET) })
+
+    const outcomes = await runTaskEndChecks(projectDir, { checks: [coverage] }, deps, { changedOnly: true })
+
+    expect(launched).toEqual([RECHECK])
+    expect(outcomes).toEqual([{ check: coverage, durationMs: expect.any(Number), status: "passed", fromBuild: true }])
+  })
+
+  it("runs the check when the agent's coverage data breaks a rule", async () => {
+    const { deps, launched } = reusing({ exitCode: 1, output: output(BUNDLE_LINE, JACOCO_FAILED) })
+
+    await runTaskEndChecks(projectDir, { checks: [coverage] }, deps, { changedOnly: true })
+
+    expect(launched).toEqual([RECHECK, coverage.run])
+  })
+
+  it("runs the check when there is no fresh coverage data to recheck", async () => {
+    const { deps, launched } = reusing(undefined)
+
+    await runTaskEndChecks(projectDir, { checks: [coverage] }, deps, { changedOnly: true })
+
+    expect(launched).toEqual([coverage.run])
+  })
+
+  it("never rechecks without --changed, as when the user runs the checks", async () => {
+    const { deps, launched } = reusing({ exitCode: 0, output: output(ALL_MET) })
+
+    await runTaskEndChecks(projectDir, { checks: [coverage] }, deps)
+
+    expect(launched).toEqual([coverage.run])
   })
 })

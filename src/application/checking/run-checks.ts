@@ -101,10 +101,16 @@ export async function runTaskEndChecks(
       (check) => holds(check) && (!present.includes(check) || dirs.includes(checkDirOf(projectDir, check))),
     )
     // Decided before any check runs, since a check writes the reports of others, such as when it compiles.
-    const built = changedOnly ? checks.filter((check) => passedInLastBuild(projectDir, check, selected, deps)) : []
+    const fresh = changedOnly ? checks.filter((check) => passedInLastBuild(projectDir, check, selected, deps)) : []
+    const rechecked = changedOnly
+      ? await passedOnRecheck(projectDir, checks.filter((check) => !fresh.includes(check)), selected, deps)
+      : new Map<Check, number>()
+    const built = [...fresh, ...rechecked.keys()]
     const ran = await runInOrder(projectDir, checks.filter((check) => !built.includes(check)), deps)
     const outcomes = checks.map((check): CheckOutcome =>
-      built.includes(check) ? { check, durationMs: 0, status: "passed", fromBuild: true } : ran.shift()!,
+      built.includes(check)
+        ? { check, durationMs: rechecked.get(check) ?? 0, status: "passed", fromBuild: true }
+        : ran.shift()!,
     )
     for (const { dir, seen } of selected) {
       const ofProject = outcomes.filter((outcome) => checkDirOf(projectDir, outcome.check) === dir)
@@ -146,6 +152,35 @@ function passedInLastBuild(
     result.brokenStores === undefined &&
     result.otherFailure !== true
   )
+}
+
+/**
+ * The checks whose tool writes no report but can check again what a build since the project's last change left, such
+ * as the coverage data of `mvn verify` run by the agent, and passed that way, with how long it took. A check whose
+ * recheck fails, or that has nothing fresh to recheck, runs as usual.
+ */
+async function passedOnRecheck(
+  projectDir: string,
+  checks: Check[],
+  projects: { dir: string; seen: ProjectChange }[],
+  deps: CheckDeps,
+): Promise<Map<Check, number>> {
+  const passed = new Map<Check, number>()
+  for (const check of checks) {
+    const dir = checkDirOf(projectDir, check)
+    const project = projects.find((candidate) => candidate.dir === dir)
+    const reader = deps.readers[check.report]
+    const recheck = project === undefined ? undefined : reader.recheck?.(dir, check.run, project.seen.lastModifiedMs)
+    if (recheck === undefined) continue
+    const command = usesMaven(recheck) && deps.hasExecutable(MAVEN_DAEMON) ? withMavenDaemon(recheck) : recheck
+    const startedAt = performance.now()
+    const { exitCode, output } = await deps.run(command, dir)
+    const { found, failures, otherFailure } = reader.read(dir, new Map(), output)
+    if (exitCode === 0 && found && failures.length === 0 && otherFailure !== true) {
+      passed.set(check, Math.round(performance.now() - startedAt))
+    }
+  }
+  return passed
 }
 
 /**

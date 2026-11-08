@@ -131,6 +131,12 @@ export interface ReportReader {
    */
   readFresh?(projectDir: string, command: string, sinceMs: number): ReportResult | undefined
   /**
+   * For a tool that writes its result to no report: a command that checks again what a build already left, such as
+   * the coverage data of a build the agent ran itself, when all of it was written after `sinceMs`. It is faster than
+   * `command`, since it runs no tests. Otherwise nothing.
+   */
+  recheck?(projectDir: string, command: string, sinceMs: number): string | undefined
+  /**
    * Whether the report also lists what the build accepted, such as warnings under the project's threshold.
    * The exit code then decides: its failures count only when the command failed, and a zero exit passes even
    * without a report.

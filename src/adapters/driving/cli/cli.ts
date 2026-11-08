@@ -46,7 +46,8 @@ Checkstyle and PMD reports, so nothing the project's build accepts is shown. At 
 only the failures of the changed files, and a run with checkstyle:check gets
 -Dcheckstyle.includes so Checkstyle checks only those files; PMD checks the whole project.
 A report: jacoco check reads the coverage rules jacoco:check prints as broken; it runs only at
-task end, without -q, which hides them.
+task end, without -q, which hides them. With --changed, when every module's target/jacoco.exec
+is newer than the last change, only its jacoco:check goals run, on that data, without the tests.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
 

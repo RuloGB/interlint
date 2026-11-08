@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import type { ReportReader, ReportResult } from "../../../../application/checking/ports.js"
 import type { RuleFailure, Violation } from "../../../../domain/violation.js"
@@ -18,6 +18,10 @@ const JACOCO_CHECK_GOAL = /^org\.jacoco:jacoco-maven-plugin:[^:\s]+:check$/
 const ALL_MET = "All coverage checks have been met."
 /** Colors a terminal-aware Maven may add to its output. */
 const ANSI_ESCAPE = /\u001b\[[0-9;]*m/g
+/** A `jacoco:check` goal of a command, plain or naming an execution, as a word of it. */
+const CHECK_GOAL = /(?:^|\s)(jacoco:check(?:@\S+)?)(?=\s|$)/g
+/** Where `prepare-agent` writes a module's coverage data by default. */
+const EXEC_FILE = join("target", "jacoco.exec")
 /** Where Maven keeps a module's main sources, where a class rule's class is looked for. */
 const MAIN_SOURCES = join("src", "main", "java")
 
@@ -97,10 +101,24 @@ function sourceOf(projectDir: string, modules: string[], className: string): Pic
 }
 
 /**
- * JaCoCo writes its rules only to the console, so nothing is snapshot before a run. With no report file of its own,
- * a build the agent ran leaves nothing to read, and the check runs at task end.
+ * The command's `jacoco:check` goals alone, with no lifecycle phase, so they check the coverage data a build already
+ * left instead of running the tests: when every module that has data wrote it after `sinceMs`. A module whose tests
+ * did not run since, as with `-DskipTests`, keeps older data, and then there is nothing to recheck.
  */
+export function jacocoRecheck(projectDir: string, command: string, sinceMs: number): string | undefined {
+  const goals = [...command.matchAll(CHECK_GOAL)].map((match) => match[1])
+  const executable = command.trimStart().split(/\s+/)[0]
+  if (goals.length === 0 || executable === undefined) return undefined
+  const execs = moduleDirs(projectDir)
+    .map((dir) => join(dir, EXEC_FILE))
+    .filter((path) => existsSync(path))
+  if (execs.length === 0 || !execs.every((path) => statSync(path).mtimeMs > sinceMs)) return undefined
+  return `${executable} ${goals.join(" ")} -fae`
+}
+
+/** JaCoCo writes its rules only to the console, so nothing is snapshot before a run. */
 export const jacocoReader: ReportReader = {
   snapshot: () => new Map(),
   read: (projectDir, _before, output) => readJacocoOutput(projectDir, output),
+  recheck: jacocoRecheck,
 }
