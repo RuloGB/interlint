@@ -18,6 +18,14 @@ export interface MetricsSource {
   location(scope: MetricsScope): string
 }
 
+export type PrintResult = { printed: true } | { printed: false; reason: string }
+
+/** Turns the HTML report into a PDF file. */
+export interface PdfPrinter {
+  /** Writes nothing when it cannot print, and says why, such as when no browser is installed. */
+  print(html: string, path: string): PrintResult
+}
+
 /** The file a report is written to. */
 export interface ReportFile {
   exists(path: string): boolean

@@ -42,6 +42,7 @@ The agent reads the rule, removes the dependency and carries on.
 - **Feedback when it is cheap.** The agent fixes the violation while it still has the context, before it builds on top of it.
 - **One command to set up.** `interlint init` finds your ArchUnit tests and your Checkstyle and PMD plugins, and wires your agent.
 - **No endless loops.** After 3 failed attempts in a row, Interlint lets the task end and shows you what is still failing.
+- **Know your agents.** A [metrics report](#metrics-report) shows which models follow your rules best, and which rules your agents break most.
 
 ## Quick start
 
@@ -113,40 +114,41 @@ Only added or changed lines count, not removed ones. When a check fails after an
 
 See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full rules, and [Using Interlint](docs/usage.md) for every field, such as `run`, `report` and `dir`.
 
-## Metrics
+## Metrics report
 
-Interlint records every check it runs, so you can see which rules your agents break most, and with which models.
+Your team uses several models and agents. Which ones follow your rules? Which rules do they break most? Do they fix a blocked task, or give up?
+
+`interlint metrics report` answers that in one report, with charts, ready to share with your team or a client:
 
 ```bash
-interlint metrics
+interlint metrics report                 # Markdown, with charts GitHub draws
+interlint metrics report --format html   # one page that opens anywhere, offline
+interlint metrics report --format pdf    # a PDF to send
 ```
 
-```text
-Interlint metrics · shop · 2026-11-05 to 2026-11-06
+<p align="center">
+  <img src="assets/screenshots/metrics-report-by-model.png" alt="Pie chart of failed checks by model, with the checks and sessions behind each model, and bars of violations per check run by model. Sample report with invented data." width="720">
+</p>
 
-Checks run: 4 (1 skipped) · violations: 24
-By type: checkstyle 21 · pmd 2 · architecture 1
-Top rules:
-  6  checkstyle  LineLength
-  5  checkstyle  MissingJavadocMethod
-  4  checkstyle  EmptyCatchBlock
+<p align="center">
+  <img src="assets/screenshots/metrics-report-over-time.png" alt="Bars of checks run and a line of violations, week by week. Sample report with invented data." width="720">
+</p>
 
-By model (violations per check run):
-  claude-opus-5-5   7.33  (3 checks, 1 session)
-  unknown           2.00  (1 check, 0 sessions)
+<p align="center"><sub>Sample report with <strong>invented data</strong>, made for this demo. It is not a benchmark of any model.</sub></p>
 
-Task-end blocks: 1, 1 fixed later in the session
-Time spent on checks: 20.0s
-```
+The report has:
 
-- **Violations per check run, by model and by agent,** so a model you use more does not look worse just for that.
-- **Task-end blocks** show how often the agent tried to finish with a broken rule, and how often it fixed it in the same session.
-- `interlint metrics report` writes the full report in Markdown to `interlint-metrics.md`, ready to share or paste into a pull request.
-- `--all`, `--since <YYYY-MM-DD>` and `--agent` narrow or widen what it reads.
+- **The models side by side.** A pie of the failed checks by model, each with the checks and sessions behind it, and bars of violations per check run. The pie shows who fails most in total; the bars are the fair comparison, since a model you use more fails more often.
+- **The rules your agents break most,** by type (ArchUnit, Checkstyle, PMD) and one by one.
+- **Task-end blocks:** how often each model tried to finish with a broken rule, and how often it fixed it in the same session.
+- **The time your checks take,** at edit and at task end.
+- **Week by week:** checks run and violations, to see whether your rules and prompts are working.
 
-Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`.
+The PDF is printed with the Chrome, Edge or Chromium you already have, so Interlint adds no dependency. Without one, use `--format html` and print it from your browser.
 
-See [Metrics](docs/usage.md#metrics) for where they are kept, the line format and every option.
+For a quick look in the terminal, run `interlint metrics`. Both commands read the current project, or every project with `--all`, and take `--since <YYYY-MM-DD>` and `--agent`.
+
+**Your data never leaves your machine.** Interlint has no telemetry, no account and no server, and it makes no network calls. Metrics are plain files in your user's state directory, never in the project, and the report is built from them on your machine. They keep only what the report needs: the check, its result and time, the rule, type and file of each violation, and the agent, model and session that ran it. Never your code, the violation messages or anything personal. To keep none, set `metrics: false` in `interlint.yaml`. See [Metrics](docs/usage.md#metrics) for every option.
 
 ## Supported today
 

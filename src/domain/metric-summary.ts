@@ -44,6 +44,8 @@ export interface MetricsSummary {
   byType: { type: string; violations: number }[]
   rules: RuleTally[]
   byModel: Tally[]
+  /** Checks that ran and did not pass, by model, in the order of `byModel`. */
+  failedByModel: { name: string; failed: number }[]
   byAgent: Tally[]
   sessions: SessionSummary[]
   blocks: number
@@ -63,6 +65,7 @@ export function summarize(events: MetricEvent[]): MetricsSummary {
   const days = events.map((event) => event.at.slice(0, 10)).sort()
   const runs = runsOf(events)
   const blocks = blocksOf(runs)
+  const byModel = tallies(events, modelOf)
   return {
     projects: [...new Set(events.map((event) => event.project))].sort(),
     from: days[0],
@@ -77,7 +80,11 @@ export function summarize(events: MetricEvent[]): MetricsSummary {
         const [type = "", rule = ""] = key.split("\u0000")
         return { rule, type, violations }
       }),
-    byModel: tallies(events, (event) => event.model ?? UNKNOWN_MODEL),
+    byModel,
+    failedByModel: byModel.map(({ name }) => ({
+      name,
+      failed: ran.filter((event) => modelOf(event) === name && event.result !== "passed").length,
+    })),
     byAgent: tallies(events, (event) => event.agent ?? NO_AGENT),
     sessions: sessionsOf(events, runs, blocks),
     blocks: blocks.length,
@@ -171,6 +178,10 @@ function sessionsOf(events: MetricEvent[], runs: Run[], blocks: Block[]): Sessio
       endedGreen: lastTaskEnd?.passed,
     }
   })
+}
+
+function modelOf(event: MetricEvent): string {
+  return event.model ?? UNKNOWN_MODEL
 }
 
 function tallies(events: MetricEvent[], nameOf: (event: MetricEvent) => string): Tally[] {

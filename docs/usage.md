@@ -289,7 +289,7 @@ Each line is a JSON object:
 - `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle` or `pmd`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
 - `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
 
-The lines are plain text: you can read them with any tool, and they never leave your machine. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
+The lines are plain text: you can read them with any tool, and they never leave your machine. Interlint has no telemetry, no account and no server, and makes no network calls: `interlint metrics` and `interlint metrics report` read these files on your machine, and the HTML and PDF reports load nothing from the internet. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
 
 To keep no metrics, add this to `interlint.yaml`:
 
@@ -353,6 +353,33 @@ interlint metrics report
 
 Writes the full report in Markdown to `interlint-metrics.md` in the project, ready to keep, share or paste into a pull request. It has the totals, violations by type, the top 20 rules, tables by model and by agent, a table of sessions, task-end blocks and their fix rate by model, the time spent on each check at edit and at task end, and the checks and violations week by week.
 
+It also has charts:
+
+- bars of the violations by type, and of the top 10 rules;
+- a pie of the failed checks by model, each slice with the checks and sessions behind it, beside bars of the violations per check run by model. The pie shows absolute shares: a model used more has a larger slice, so compare models by the bars;
+- bars of the time spent on each check, at edit and at task end;
+- the checks run and violations week by week.
+
+A chart with nothing to draw is left out. In Markdown the charts are [Mermaid](https://mermaid.js.org/) blocks: GitHub and GitLab draw them; other viewers, such as the VS Code preview without an extension, show their text.
+
+`--format` picks the file:
+
+| Format | File | What it is |
+|---|---|---|
+| `md` (default) | `interlint-metrics.md` | Markdown with Mermaid charts |
+| `html` | `interlint-metrics.html` | One self-contained page with the charts drawn in SVG. It opens in any browser, offline, and prints well |
+| `pdf` | `interlint-metrics.pdf` | The HTML page printed to PDF, ready to send |
+
+```bash
+interlint metrics report --format pdf
+```
+
+To write the PDF, Interlint runs an installed Chrome, Edge or Chromium, headless, in a profile of its own; an open browser window is not touched. It looks for them where they are installed on Windows and macOS, and on the `PATH` on Linux (`google-chrome`, `chromium`, `microsoft-edge` and their variants). Without one it writes nothing, exits with 2 and says so:
+
+```text
+interlint: could not write a PDF: no Chrome, Edge or Chromium was found. Use --format html and print it to PDF from a browser.
+```
+
 - `--out <path>` writes it elsewhere, from the current directory.
 - It never replaces an existing file: it exits with 2 unless you pass `--force`.
-- Without metrics, it writes nothing.
+- Without metrics, it writes nothing, in every format.

@@ -16,6 +16,7 @@ import { runCommand } from "./adapters/driven/process/command-runner.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
+import { headlessPdf } from "./adapters/driven/browser/headless-pdf.js"
 import { fileMetrics, fileMetricsSource } from "./adapters/driven/state/file-metrics.js"
 import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
@@ -50,7 +51,7 @@ const DEPS: CliDeps = {
     agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles },
     hasExecutable: lookupExecutable,
   },
-  metrics: { source: fileMetricsSource(), reportFile: diskReportFile, now: () => new Date() },
+  metrics: { source: fileMetricsSource(), reportFile: diskReportFile, pdf: headlessPdf(), now: () => new Date() },
   version: interlintVersion,
 }
 
