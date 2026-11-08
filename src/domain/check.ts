@@ -10,8 +10,8 @@ export type When = (typeof WHENS)[number]
  */
 const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = { archunit: [".java"], maven: [".java"], jacoco: [] }
 
-/** The report formats a check may use only at task end. */
-export const TASK_END_ONLY: readonly Report[] = ["jacoco"]
+/** The report formats a check may use only at task end, with the reason `interlint.yaml` gives for it. */
+export const TASK_END_ONLY: Partial<Record<Report, string>> = { jacoco: "coverage needs the whole test suite" }
 
 /** The tools behind each report format, as the output names them. */
 export const REPORT_TOOLS: Record<Report, string> = { archunit: "ArchUnit", maven: "Checkstyle or PMD", jacoco: "JaCoCo" }

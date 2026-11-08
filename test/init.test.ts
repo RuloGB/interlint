@@ -868,6 +868,19 @@ describe("interlint init in a multi-module project", () => {
   const BOTH = ["maven-checkstyle-plugin", "maven-pmd-plugin"]
   const MANAGED_BOTH = [managed("maven-checkstyle-plugin", "style"), managed("maven-pmd-plugin", "pmd")]
 
+  it("runs the coverage rules the parent manages when a module turns JaCoCo on, and none when no module does", async () => {
+    reactor("", { managed: [managed("jacoco-maven-plugin", "check")], modules: { domain: ["jacoco-maven-plugin"], launcher: [] } })
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "coverage", run: "./mvnw test jacoco:check@check -fae -Djacoco.append=false", report: "jacoco", when: "task-end" },
+    ])
+
+    reactor("", { managed: [managed("jacoco-maven-plugin", "check")], modules: { domain: [], launcher: [] } })
+
+    expect((await run("init", "--force")).exitCode).toBe(2)
+  })
+
   it("finds the @ArchTest classes of a module and runs only that module and the ones it depends on", async () => {
     reactor("", { managed: MANAGED_BOTH, modules: { domain: BOTH, "adapters/rest": BOTH, launcher: BOTH } })
     archTest("launcher/src/test/java/com/acme/ArchitectureRulesTest.java")

@@ -8,7 +8,8 @@ import { moduleDirs } from "../modules.js"
  * A rule `jacoco:check` found broken, as it prints it: `Rule violated for bundle core: lines covered ratio is 0.50,
  * but expected minimum is 0.80`. Maven puts the level before it, and mvnd the module too, as in `[core] [WARNING]`.
  */
-const BROKEN_RULE = /Rule violated for (\w+) (\S+): (.+?) is (\S+), but expected (minimum|maximum) is (\S+?)\s*$/
+const BROKEN_RULE =
+  /Rule violated for (?<element>\w+) (?<name>\S+): (?<counter>.+?) is (?<actual>\S+), but expected (?<bound>minimum|maximum) is (?<limit>\S+?)\s*$/
 /** The line Maven prints when `jacoco:check` fails the build, with or without -q. */
 const JACOCO_FAILED = /Failed to execute goal org\.jacoco:jacoco-maven-plugin:[^:\s]+:check\b.*? on project (\S+?):/
 /** Any goal that failed, to tell a build that also failed for another reason. */
@@ -22,7 +23,8 @@ const MAIN_SOURCES = join("src", "main", "java")
 
 /**
  * Reads the coverage rules `jacoco:check` found broken from the output of Maven: JaCoCo writes them nowhere else.
- * A rule appears once even when the build checked it twice. A build that also failed for another reason, such as a
+ * They count only when JaCoCo failed the build: with `haltOnFailure` false the build accepts them. A rule appears once
+ * even when the build checked it twice. A build that also failed for another reason, such as a
  * failing test or a module that does not compile, gives no failures, so its output explains it. Found is false when
  * JaCoCo checked no rule, as with `-Djacoco.skip` or without execution data.
  */
@@ -33,7 +35,8 @@ export function readJacocoOutput(projectDir: string, output: string): ReportResu
   const broken = [...new Set(lines.flatMap((line) => BROKEN_RULE.exec(line)?.[0].trimEnd() ?? []))]
   const found = broken.length > 0 || failedProjects.length > 0 || lines.some((line) => line.includes(ALL_MET))
   if (failedGoals.some((goal) => !JACOCO_CHECK_GOAL.test(goal))) return { found, failures: [], otherFailure: true }
-  if (broken.length === 0 && failedProjects.length > 0) return { found, failures: [hiddenRules(failedProjects)] }
+  if (failedProjects.length === 0) return { found, failures: [] }
+  if (broken.length === 0) return { found, failures: [hiddenRules(failedProjects)] }
   // Searched once, and only for a rule on a class: the tree of a large project takes a while to walk.
   let dirs: string[] | undefined
   const modules = () => (dirs ??= moduleDirs(projectDir))
@@ -58,9 +61,9 @@ interface BrokenRule {
 
 /** One broken rule, titled by what it limits, such as `lines covered ratio of each bundle: minimum 0.80`. */
 function brokenRule(projectDir: string, modules: () => string[], text: string): BrokenRule {
-  const [, element = "", name = "", value = "", , limit = "", expected = ""] = BROKEN_RULE.exec(text) ?? []
+  const { element = "", name = "", counter = "", bound = "", limit = "" } = BROKEN_RULE.exec(text)?.groups ?? {}
   return {
-    title: `${value} of each ${element}: ${limit} ${expected}`,
+    title: `${counter} of each ${element}: ${bound} ${limit}`,
     violation: element === "class" ? { text, className: name, ...sourceOf(projectDir, modules(), name) } : { text },
   }
 }

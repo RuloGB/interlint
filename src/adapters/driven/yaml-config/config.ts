@@ -49,9 +49,9 @@ function parseCheck(entry: unknown, at: string): Check {
   const run = requireString(entry, "run", at)
   const report = requireOneOf(entry, "report", REPORTS, at)
   const when = requireOneOf(entry, "when", WHENS, at)
-  // Coverage needs every test to run, which an edit is too frequent for.
-  if (when !== "task-end" && TASK_END_ONLY.includes(report)) {
-    throw invalid(`${at}.when must be task-end with report ${report}, since coverage needs the whole test suite (got "${when}")`)
+  const taskEndOnly = TASK_END_ONLY[report]
+  if (when !== "task-end" && taskEndOnly !== undefined) {
+    throw invalid(`${at}.when must be task-end with report ${report}, since ${taskEndOnly} (got "${when}")`)
   }
   return {
     name,

@@ -184,6 +184,7 @@ Fix these problems before continuing.
 - `-fae` builds every module it can after one fails, so each module with broken rules shows them. A module that depends on a failed one is skipped.
 - `-Djacoco.append=false` starts the coverage data of each module afresh. Without it, JaCoCo adds each run to the data of earlier ones, and tests the agent deleted would still count. If your Surefire runs tests in several JVMs at once (`forkCount` above 1), they would overwrite each other's data: replace it with `clean` in the command.
 - When Maven also fails for another reason, such as a failing test or a module that does not compile, the check shows the last lines of Maven's output instead of the coverage rules.
+- The build decides, as with Checkstyle and PMD: a broken rule counts only when JaCoCo fails the build. With `<haltOnFailure>false</haltOnFailure>` JaCoCo prints the rule and the build goes on, so the check passes.
 - When Maven exits 0 but JaCoCo checked no rule, as with `-Djacoco.skip` or without execution data, the check fails: nothing proves the coverage is met.
 - A build the agent ran does not count for this check: JaCoCo leaves no report of its result, so the check always runs (see [Reports from the agent's own build](#reports-from-the-agents-own-build)).
 

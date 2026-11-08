@@ -104,7 +104,7 @@ describe("readJacocoOutput", () => {
 
     const [failure] = readJacocoOutput(
       projectDir,
-      output("[WARNING] Rule violated for class demo.Calc.Part: lines covered ratio is 0.00, but expected minimum is 0.50"),
+      output("[WARNING] Rule violated for class demo.Calc.Part: lines covered ratio is 0.00, but expected minimum is 0.50", JACOCO_FAILED),
     ).failures
 
     expect(failure?.violations[0]?.path).toBe("src/main/java/demo/Calc.java")
@@ -113,7 +113,7 @@ describe("readJacocoOutput", () => {
   it("names a maximum as JaCoCo does", () => {
     const result = readJacocoOutput(
       projectDir,
-      output("[WARNING] Rule violated for package demo: classes missed count is 3, but expected maximum is 0"),
+      output("[WARNING] Rule violated for package demo: classes missed count is 3, but expected maximum is 0", JACOCO_FAILED),
     )
 
     expect(result.failures[0]?.title).toBe("classes missed count of each package: maximum 0")
@@ -123,6 +123,10 @@ describe("readJacocoOutput", () => {
     const result = readJacocoOutput(projectDir, output(BUNDLE_LINE, BUNDLE_LINE, JACOCO_FAILED))
 
     expect(result.failures[0]?.violations).toHaveLength(1)
+  })
+
+  it("leaves out the broken rules the build accepts, as with haltOnFailure false, where Maven does not fail on them", () => {
+    expect(readJacocoOutput(projectDir, output(BUNDLE_LINE, "[INFO] BUILD SUCCESS"))).toEqual({ found: true, failures: [] })
   })
 
   it("passes, as found, when every rule was met", () => {
