@@ -114,41 +114,6 @@ Only added or changed lines count, not removed ones. When a check fails after an
 
 See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full rules, and [Using Interlint](docs/usage.md) for every field, such as `run`, `report` and `dir`.
 
-## Metrics
-
-Interlint records every check it runs, so you can see which rules your agents break most, and with which models.
-
-```bash
-interlint metrics
-```
-
-```text
-Interlint metrics · shop · 2026-11-05 to 2026-11-06
-
-Checks run: 4 (1 skipped) · violations: 24
-By type: checkstyle 21 · pmd 2 · architecture 1
-Top rules:
-  6  checkstyle  LineLength
-  5  checkstyle  MissingJavadocMethod
-  4  checkstyle  EmptyCatchBlock
-
-By model (violations per check run):
-  claude-opus-5-5   7.33  (3 checks, 1 session)
-  unknown           2.00  (1 check, 0 sessions)
-
-Task-end blocks: 1, 1 fixed later in the session
-Time spent on checks: 20.0s
-```
-
-- **Violations per check run, by model and by agent,** so a model you use more does not look worse just for that.
-- **Task-end blocks** show how often the agent tried to finish with a broken rule, and how often it fixed it in the same session.
-- `interlint metrics report` writes the full report, with charts. See [Metrics report](#metrics-report).
-- `--all`, `--since <YYYY-MM-DD>` and `--agent` narrow or widen what it reads.
-
-Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`.
-
-See [Metrics](docs/usage.md#metrics) for where they are kept, the line format and every option.
-
 ## Metrics report
 
 Your team uses several models and agents. Which ones follow your rules? Which rules do they break most? Do they fix a blocked task, or give up?
@@ -179,7 +144,11 @@ The report has:
 - **The time your checks take,** at edit and at task end.
 - **Week by week:** checks run and violations, to see whether your rules and prompts are working.
 
-The PDF is printed with the Chrome, Edge or Chromium you already have, so Interlint adds no dependency. Without one, use `--format html` and print it from your browser. See [`interlint metrics report`](docs/usage.md#interlint-metrics-report) for every option.
+The PDF is printed with the Chrome, Edge or Chromium you already have, so Interlint adds no dependency. Without one, use `--format html` and print it from your browser.
+
+For a quick look in the terminal, run `interlint metrics`. Both commands read the current project, or every project with `--all`, and take `--since <YYYY-MM-DD>` and `--agent`.
+
+Interlint records every check it runs. Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`. See [Metrics](docs/usage.md#metrics) for every option.
 
 ## Supported today
 
