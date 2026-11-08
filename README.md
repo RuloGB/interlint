@@ -42,6 +42,7 @@ The agent reads the rule, removes the dependency and carries on.
 - **Feedback when it is cheap.** The agent fixes the violation while it still has the context, before it builds on top of it.
 - **One command to set up.** `interlint init` finds your ArchUnit tests and your Checkstyle and PMD plugins, and wires your agent.
 - **No endless loops.** After 3 failed attempts in a row, Interlint lets the task end and shows you what is still failing.
+- **Know your agents.** A [metrics report](#metrics-report) shows which models follow your rules best, and which rules your agents break most.
 
 ## Quick start
 
@@ -141,12 +142,44 @@ Time spent on checks: 20.0s
 
 - **Violations per check run, by model and by agent,** so a model you use more does not look worse just for that.
 - **Task-end blocks** show how often the agent tried to finish with a broken rule, and how often it fixed it in the same session.
-- `interlint metrics report` writes the full report, with charts, to `interlint-metrics.md`, ready to share or paste into a pull request. `--format html` writes one page that opens anywhere, and `--format pdf` a PDF to send, printed with your installed Chrome, Edge or Chromium.
+- `interlint metrics report` writes the full report, with charts. See [Metrics report](#metrics-report).
 - `--all`, `--since <YYYY-MM-DD>` and `--agent` narrow or widen what it reads.
 
 Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`.
 
 See [Metrics](docs/usage.md#metrics) for where they are kept, the line format and every option.
+
+## Metrics report
+
+Your team uses several models and agents. Which ones follow your rules? Which rules do they break most? Do they fix a blocked task, or give up?
+
+`interlint metrics report` answers that in one report, with charts, ready to share with your team or a client:
+
+```bash
+interlint metrics report                 # Markdown, with charts GitHub draws
+interlint metrics report --format html   # one page that opens anywhere, offline
+interlint metrics report --format pdf    # a PDF to send
+```
+
+<p align="center">
+  <img src="assets/screenshots/metrics-report-by-model.png" alt="Pie chart of failed checks by model, with the checks and sessions behind each model, and bars of violations per check run by model. Sample report with invented data." width="720">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/metrics-report-over-time.png" alt="Bars of checks run and a line of violations, week by week. Sample report with invented data." width="720">
+</p>
+
+<p align="center"><sub>Sample report with <strong>invented data</strong>, made for this demo. It is not a benchmark of any model.</sub></p>
+
+The report has:
+
+- **The models side by side.** A pie of the failed checks by model, each with the checks and sessions behind it, and bars of violations per check run. The pie shows who fails most in total; the bars are the fair comparison, since a model you use more fails more often.
+- **The rules your agents break most,** by type (ArchUnit, Checkstyle, PMD) and one by one.
+- **Task-end blocks:** how often each model tried to finish with a broken rule, and how often it fixed it in the same session.
+- **The time your checks take,** at edit and at task end.
+- **Week by week:** checks run and violations, to see whether your rules and prompts are working.
+
+The PDF is printed with the Chrome, Edge or Chromium you already have, so Interlint adds no dependency. Without one, use `--format html` and print it from your browser. See [`interlint metrics report`](docs/usage.md#interlint-metrics-report) for every option.
 
 ## Supported today
 
