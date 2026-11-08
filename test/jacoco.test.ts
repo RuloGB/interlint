@@ -289,9 +289,19 @@ describe("jacocoReader.recheck", () => {
   const SINCE_MS = Date.parse("2026-11-08T10:00:00Z")
   const command = "./mvnw test jacoco:check@check -fae -Djacoco.append=false -Dcheckstyle.skip"
 
-  function execAt(path: string, ms: number) {
-    writeFile(path, "exec")
+  function fileAt(path: string, content: string, ms: number) {
+    writeFile(path, content)
     utimesSync(join(projectDir, path), new Date(ms), new Date(ms))
+  }
+
+  /** A module's coverage data and the Surefire report of its tests, as a build that ran them leaves both. */
+  function execAt(path: string, ms: number, { failures = 0, errors = 0 } = {}) {
+    fileAt(path, "exec", ms)
+    const report = join(dirname(dirname(path)), "target", "surefire-reports", "TEST-demo.CalcTest.xml")
+    fileAt(report, `<?xml version="1.0"?>
+<testsuite name="demo.CalcTest" tests="3" errors="${errors}" skipped="0" failures="${failures}">
+</testsuite>
+`, ms)
   }
 
   it("runs only the check goals when every module's coverage data was written after the last change", () => {
@@ -308,6 +318,25 @@ describe("jacocoReader.recheck", () => {
     writeFile("app/pom.xml", "<project/>")
     execAt("core/target/jacoco.exec", SINCE_MS + 1000)
     execAt("app/target/jacoco.exec", SINCE_MS - 1000)
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
+  })
+
+  it("gives nothing when a test failed in that build, which still writes the coverage data", () => {
+    writeFile("core/pom.xml", "<project/>")
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000, { failures: 1 })
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
+
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000, { errors: 1 })
+
+    expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
+  })
+
+  it("gives nothing when the build ran only some tests, leaving older Surefire reports of the others", () => {
+    writeFile("core/pom.xml", "<project/>")
+    execAt("core/target/jacoco.exec", SINCE_MS + 1000)
+    fileAt("core/target/surefire-reports/TEST-demo.OtherTest.xml", '<testsuite tests="1" errors="0" failures="0"/>', SINCE_MS - 1000)
 
     expect(jacocoReader.recheck?.(projectDir, command, SINCE_MS)).toBeUndefined()
   })

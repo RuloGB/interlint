@@ -1,5 +1,5 @@
-import { existsSync, statSync } from "node:fs"
-import { join, relative, sep } from "node:path"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { dirname, join, relative, sep } from "node:path"
 import type { ReportReader, ReportResult } from "../../../../application/checking/ports.js"
 import type { RuleFailure, Violation } from "../../../../domain/violation.js"
 import { moduleDirs } from "../modules.js"
@@ -22,6 +22,10 @@ const ANSI_ESCAPE = /\u001b\[[0-9;]*m/g
 const CHECK_GOAL = /(?:^|\s)(jacoco:check(?:@\S+)?)(?=\s|$)/g
 /** Where `prepare-agent` writes a module's coverage data by default. */
 const EXEC_FILE = join("target", "jacoco.exec")
+/** Where Surefire writes a module's test results, one `TEST-*.xml` per test class. */
+const SUREFIRE_REPORTS = join("target", "surefire-reports")
+/** The attributes of a test class's results that count its failed tests. */
+const FAILED_COUNTS = /\b(?:failures|errors)="(\d+)"/g
 /** Where Maven keeps a module's main sources, where a class rule's class is looked for. */
 const MAIN_SOURCES = join("src", "main", "java")
 
@@ -102,8 +106,9 @@ function sourceOf(projectDir: string, modules: string[], className: string): Pic
 
 /**
  * The command's `jacoco:check` goals alone, with no lifecycle phase, so they check the coverage data a build already
- * left instead of running the tests: when every module that has data wrote it after `sinceMs`. A module whose tests
- * did not run since, as with `-DskipTests`, keeps older data, and then there is nothing to recheck.
+ * left instead of running the tests: when every module that has data wrote it after `sinceMs`, and all its tests ran
+ * since and passed. A module whose tests did not run since, as with `-DskipTests`, keeps older data. A failing test
+ * still writes the data, and the full check shows Maven's output for it. Then there is nothing to recheck.
  */
 export function jacocoRecheck(projectDir: string, command: string, sinceMs: number): string | undefined {
   const goals = [...command.matchAll(CHECK_GOAL)].map((match) => match[1])
@@ -113,7 +118,31 @@ export function jacocoRecheck(projectDir: string, command: string, sinceMs: numb
     .map((dir) => join(dir, EXEC_FILE))
     .filter((path) => existsSync(path))
   if (execs.length === 0 || !execs.every((path) => statSync(path).mtimeMs > sinceMs)) return undefined
+  if (!execs.every((path) => testsPassedSince(dirname(dirname(path)), sinceMs))) return undefined
   return `${executable} ${goals.join(" ")} -fae`
+}
+
+/**
+ * Whether the module's Surefire reports show every test class ran after `sinceMs` with no failed test. One older than
+ * that is a test the build did not run, so its coverage data misses that test. No report at all proves nothing.
+ */
+function testsPassedSince(moduleDir: string, sinceMs: number): boolean {
+  const dir = join(moduleDir, SUREFIRE_REPORTS)
+  let reports: string[]
+  try {
+    reports = readdirSync(dir).filter((name) => name.startsWith("TEST-") && name.endsWith(".xml"))
+  } catch {
+    return false
+  }
+  return (
+    reports.length > 0 &&
+    reports.every((name) => {
+      const path = join(dir, name)
+      const suite = /<testsuite\b[^>]*>/.exec(readFileSync(path, "utf8"))?.[0]
+      const counts = suite === undefined ? [] : [...suite.matchAll(FAILED_COUNTS)].map((match) => Number(match[1]))
+      return statSync(path).mtimeMs > sinceMs && counts.length > 0 && counts.every((count) => count === 0)
+    })
+  )
 }
 
 /** JaCoCo writes its rules only to the console, so nothing is snapshot before a run. */
