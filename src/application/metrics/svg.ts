@@ -12,7 +12,26 @@ const GRID = "#e5e7eb"
 
 /** A chart as inline SVG, sized by its viewBox so it scales with the page. */
 export function svg(chart: Chart): string {
-  return chart.kind === "pie" ? pie(chart) : chart.horizontal ? horizontalBars(chart) : verticalBars(chart)
+  if (chart.kind === "pie") return pie(chart)
+  return chart.horizontal || !labelsFitUnder(chart) ? horizontalBars(chart) : verticalBars(chart)
+}
+
+/** Room for the labels of upright bars: the plot of `verticalBars`, shared by the labels. */
+const VERTICAL_PLOT_WIDTH = 576
+
+/**
+ * Whether every label fits under its upright bar. When one does not, the bars are laid along, as for rule names, so no
+ * label is cut; a chart with a line stays upright, since its line runs along the labels.
+ */
+function labelsFitUnder(chart: BarChart): boolean {
+  if (chart.series.some((series) => series.as === "line")) return true
+  const room = labelRoom(VERTICAL_PLOT_WIDTH / chart.labels.length)
+  return chart.labels.every((label) => label.length <= room)
+}
+
+/** How many characters fit under a bar of `band` width. */
+function labelRoom(band: number): number {
+  return Math.max(4, Math.floor(band / CHAR) - 1)
 }
 
 export function escapeXml(text: string): string {
@@ -20,9 +39,9 @@ export function escapeXml(text: string): string {
 }
 
 function verticalBars(chart: BarChart): string {
-  const width = 640
   const left = 48
   const right = 16
+  const width = left + VERTICAL_PLOT_WIDTH + right
   const top = 24
   const plot = 200
   const bottom = 28
@@ -31,8 +50,8 @@ function verticalBars(chart: BarChart): string {
   const bars = chart.series.filter((series) => series.as === "bar")
   const lines = chart.series.filter((series) => series.as === "line")
   const { max, step } = axisOf(Math.max(...stackHeights(chart), ...lines.flatMap((series) => series.values)))
-  const band = (width - left - right) / chart.labels.length
-  const labelLength = Math.max(4, Math.floor(band / CHAR) - 1)
+  const band = VERTICAL_PLOT_WIDTH / chart.labels.length
+  const labelLength = labelRoom(band)
   const y = (value: number) => top + plot - (value / max) * plot
   const barWidth = Math.min(band * 0.6, 72)
   const parts = [...yGrid(max, step, left, width - right, y)]

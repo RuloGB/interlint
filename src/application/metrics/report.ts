@@ -194,19 +194,24 @@ function perCheck(title: string, tallies: Tally[]): BarChart {
   ])
 }
 
-/** Seconds per check, `edit` and `task-end` stacked. */
+/** From this long on, the time chart counts in minutes: `1095.4` seconds is hard to read. */
+const MINUTES_FROM_MS = 120_000
+
+/** Time per check, `edit` and `task-end` stacked: in seconds, or in minutes once a check took two minutes or more. */
 function timeChart(summary: MetricsSummary): BarChart {
   const checks = [...new Set(summary.waitByCheck.map(({ check }) => check))]
   const moments = [...new Set(summary.waitByCheck.map(({ when }) => when))].sort()
+  const minutes = summary.waitByCheck.some(({ totalMs }) => totalMs >= MINUTES_FROM_MS)
+  const unit = minutes ? { name: "Minutes", ms: 60_000 } : { name: "Seconds", ms: 1000 }
   return bars(
-    "Time spent on checks (seconds)",
-    "Seconds",
+    `Time spent on checks (${unit.name.toLowerCase()})`,
+    unit.name,
     checks,
     moments.map((when) => ({
       name: when,
       values: checks.map((check) => {
         const wait = summary.waitByCheck.find((entry) => entry.check === check && entry.when === when)
-        return wait === undefined ? 0 : Number((wait.totalMs / 1000).toFixed(1))
+        return wait === undefined ? 0 : Number((wait.totalMs / unit.ms).toFixed(1))
       }),
       as: "bar",
     })),

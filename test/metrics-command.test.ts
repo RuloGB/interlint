@@ -289,6 +289,25 @@ describe("interlint metrics report", () => {
     expect(report).toContain(`| 1 | architecture | classes in "domain" should not depend on classes in infrastructure, ever |`)
   })
 
+  it("shows the time spent on checks in minutes once a check took two minutes or more", async () => {
+    keep("2026-11-05T10:00:00.000Z", [
+      { when: "task-end", check: "architecture", report: "archunit", result: "passed", durationMs: 150_000 },
+      { when: "edit", check: "checkstyle", report: "maven", result: "passed", durationMs: 30_000 },
+    ])
+
+    await run("report")
+
+    const report = readFileSync(join(projectDir, "interlint-metrics.md"), "utf8")
+    expect(report).toContain(
+      [
+        '    title "Time spent on checks (minutes)"',
+        '    x-axis ["architecture task-end", "checkstyle edit"]',
+        '    y-axis "Minutes"',
+        "    bar [2.5, 0.5]",
+      ].join("\n"),
+    )
+  })
+
   it("draws no chart that would be empty", async () => {
     keep("2026-11-05T10:00:00.000Z", [{ when: "edit", check: "pmd", report: "maven", result: "passed", durationMs: 1000 }])
 
