@@ -25,6 +25,7 @@ const CHECK_GOAL = /<goal>\s*check\s*<\/goal>/
 /** How a POM turns off an execution it inherits. */
 const TURNED_OFF = /<phase>\s*none\s*<\/phase>/
 const EXECUTION_ID = /<id>\s*([^<]*?)\s*<\/id>/
+const JACOCO_PLUGIN = "jacoco-maven-plugin"
 /** The id Maven gives an execution without `<id>`. */
 const DEFAULT_EXECUTION_ID = "default"
 
@@ -86,26 +87,32 @@ export function scanProject(projectDir: string): ProjectFacts {
 }
 
 /**
- * The Checkstyle and PMD plugins the build runs, and the ids of the executions that run their `check` goal.
+ * The Checkstyle and PMD plugins the build runs, and the ids of the executions that run their `check` goal, or
+ * JaCoCo's `check` goal, which holds the coverage rules.
  * A plugin counts when a POM of the project declares it in `<build><plugins>`. In a project without modules it
  * also counts when its `pom.xml` only manages it in `pluginManagement`; in a reactor a managed plugin counts only
  * when some module turns it on, but the executions the parent manages are the ones the modules run.
  */
-function scanQualityPlugins(modules: string[]): Pick<ProjectFacts, "qualityPlugins" | "checkExecutions"> {
+function scanQualityPlugins(
+  modules: string[],
+): Pick<ProjectFacts, "qualityPlugins" | "checkExecutions" | "coverageExecutions"> {
   const poms = modules.map((module) => readBuild(join(module, "pom.xml")))
   const activeOf = (build: string) => pluginsIn(build.replace(PLUGIN_MANAGEMENT, " "))
   const managedOf = (build: string) => [...build.matchAll(PLUGIN_MANAGEMENT)].flatMap((match) => pluginsIn(match[0]))
   const active = poms.flatMap(activeOf)
   const declared = poms.flatMap((build) => [...managedOf(build), ...activeOf(build)])
   const counted = modules.length > 1 ? active : declared
-  const declarationsOf = (plugins: string[], plugin: QualityPlugin) =>
-    plugins.filter((body) => new RegExp(`<artifactId>\\s*maven-${plugin}-plugin\\s*</artifactId>`).test(body))
+  const declarationsOf = (plugins: string[], artifactId: string) =>
+    plugins.filter((body) => new RegExp(`<artifactId>\\s*${artifactId}\\s*</artifactId>`).test(body))
+  const qualityPlugin = (plugin: QualityPlugin) => `maven-${plugin}-plugin`
   const checkExecutions = Object.fromEntries(
-    QUALITY_PLUGINS.map((plugin) => [plugin, checkExecutionIds(declarationsOf(declared, plugin))]),
+    QUALITY_PLUGINS.map((plugin) => [plugin, checkExecutionIds(declarationsOf(declared, qualityPlugin(plugin)))]),
   ) as Record<QualityPlugin, string[]>
+  const jacoco = declarationsOf(counted, JACOCO_PLUGIN).length > 0
   return {
-    qualityPlugins: QUALITY_PLUGINS.filter((plugin) => declarationsOf(counted, plugin).length > 0),
+    qualityPlugins: QUALITY_PLUGINS.filter((plugin) => declarationsOf(counted, qualityPlugin(plugin)).length > 0),
     checkExecutions,
+    coverageExecutions: jacoco ? checkExecutionIds(declarationsOf(declared, JACOCO_PLUGIN)) : [],
   }
 }
 

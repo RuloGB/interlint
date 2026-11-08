@@ -34,7 +34,9 @@ integrations pass the files a subagent changed, so it gets the failures of its o
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
 Wrapper (or mvn), when: edit and every: 3, and a checkstyle check (report: maven, when: edit) and a
-pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules. In a directory without pom.xml it writes
+pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules, and a
+coverage check (report: jacoco, when: task-end) when the build runs jacoco-maven-plugin's check
+goal. In a directory without pom.xml it writes
 the checks of each Maven project below it, with their dir. It never replaces a different
 interlint.yaml without --force: without --agent it writes nothing, and with --agent it keeps that
 file and still writes the agent's files.
@@ -43,6 +45,8 @@ A report: maven check fails only when Maven fails, and shows the most severe lev
 Checkstyle and PMD reports, so nothing the project's build accepts is shown. At edit it shows
 only the failures of the changed files, and a run with checkstyle:check gets
 -Dcheckstyle.includes so Checkstyle checks only those files; PMD checks the whole project.
+A report: jacoco check reads the coverage rules jacoco:check prints as broken; it runs only at
+task end, without -q, which hides them.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
 the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
 

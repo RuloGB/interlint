@@ -22,7 +22,7 @@ function fakeDeps(result: ReportResult = PASSING, options: { changed?: boolean; 
   }
   const deps: CheckDeps = {
     run: async () => ({ exitCode: result.failures.length > 0 ? 1 : 0, output: "" }),
-    readers: { archunit: reader, maven: reader },
+    readers: { archunit: reader, maven: reader, jacoco: reader },
     hasExecutable: () => true,
     lock: (_projectDir, work) => work(),
     changes: {

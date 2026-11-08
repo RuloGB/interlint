@@ -5,6 +5,7 @@ import { AGENTS, type Agent, type InitDeps, initProject } from "../../../applica
 import { AgentSetupError } from "../../../application/setup/ports.js"
 import {
   architectureCheck,
+  coverageCheck,
   projectChecks,
   QUALITY_EVERY,
   SLOW_CHECK_EVERY,
@@ -37,11 +38,11 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
     if (result.projects[0]?.dir === undefined) {
       throw new UsageError(
-        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.`,
+        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.`,
       )
     }
     throw new UsageError(
-      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin or maven-pmd-plugin in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}). Nothing was written.`,
+      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}). Nothing was written.`,
     )
   }
   if (result.status === "conflicts") {
@@ -132,6 +133,9 @@ function detectedLines(facts: ProjectFacts, indent: string): string[] {
   return [
     `${indent}ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}${modules.length > 0 ? ` (in ${modules.join(", ")})` : ""}`,
     ...facts.qualityPlugins.map((plugin) => `${indent}${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml`),
+    ...(coverageCheck(facts) === undefined
+      ? []
+      : [`${indent}JaCoCo: jacoco-maven-plugin check in pom.xml, so the coverage check runs at task end`]),
     `${indent}Maven: ${mavenCommand(facts)} (${facts.hasMavenWrapper ? "Maven Wrapper" : "no Maven Wrapper"})`,
   ]
 }

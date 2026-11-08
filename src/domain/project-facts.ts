@@ -17,6 +17,8 @@ export interface ProjectFacts {
   qualityPlugins: QualityPlugin[]
   /** The ids of the build's executions that run each plugin's `check` goal. */
   checkExecutions: Record<QualityPlugin, string[]>
+  /** The ids of the build's executions that run `jacoco-maven-plugin`'s `check` goal: none when it has no coverage rules. */
+  coverageExecutions: string[]
 }
 
 /** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */

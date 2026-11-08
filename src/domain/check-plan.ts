@@ -61,6 +61,13 @@ function reactorArgs(facts: ProjectFacts): string {
   return onlyModules ? ` -pl ${[...modules].sort().join(",")} -am` : ""
 }
 
+/** Skips the Checkstyle and PMD plugins the build declares, for a check that runs the lifecycle for something else. */
+function qualitySkips(facts: ProjectFacts): string {
+  return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin))
+    .map((plugin) => ` -D${plugin}.skip`)
+    .join("")
+}
+
 /**
  * The check that runs only the ArchUnit test classes, or nothing when there are none. It builds the project, so it
  * runs after every `SLOW_CHECK_EVERY` edited files or `SLOW_CHECK_LINES` written lines.
@@ -71,10 +78,9 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
   const classes = runnableClasses(facts).join(",")
   if (classes === "") return undefined
   const reactor = facts.hasModules ? " -Dsurefire.failIfNoSpecifiedTests=false" : ""
-  const skips = QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ` -D${plugin}.skip`)
   return {
     name: "architecture",
-    run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${skips.join("")}`,
+    run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${qualitySkips(facts)}`,
     report: "archunit",
     ...afterEdits(SLOW_CHECK_EVERY),
   }
@@ -95,12 +101,34 @@ export function qualityChecks(facts: ProjectFacts): Check[] {
 }
 
 /**
+ * The check of the build's JaCoCo coverage rules, or nothing when no execution runs `jacoco:check`. It runs the
+ * whole test suite, so only at task end, and names the execution so its rules apply; `test` stops before `verify`,
+ * where the build runs that execution again.
+ * - Without `-q`: Maven hides the broken rules with it, and prints only that coverage checks have not been met.
+ * - `-fae` gives the broken rules of every module that can be built, not only of the first one.
+ * - `-Djacoco.append=false` drops the coverage of earlier runs, such as that of tests deleted since.
+ * - The Checkstyle and PMD plugins are skipped, as in the architecture check: their own checks report them.
+ */
+export function coverageCheck(facts: ProjectFacts): Check | undefined {
+  const ids = facts.coverageExecutions.filter((id) => PLAIN_EXECUTION_ID.test(id))
+  if (ids.length === 0) return undefined
+  const goals = ids.map((id) => `jacoco:check@${id}`).join(" ")
+  return {
+    name: "coverage",
+    run: `${mavenCommand(facts)} test ${goals} -fae -Djacoco.append=false${qualitySkips(facts)}`,
+    report: "jacoco",
+    when: "task-end",
+  }
+}
+
+/**
  * Every check of one project. A project in a directory of the workspace (`dir`) runs there, and its checks are
  * named after it, as in `orders/architecture`, so the checks of several projects never share a name.
  */
 export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
   const architecture = architectureCheck(facts)
-  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts)]
+  const coverage = coverageCheck(facts)
+  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts), ...(coverage ? [coverage] : [])]
   if (dir === undefined) return checks
   return checks.map(({ name, ...rest }) => ({ name: `${dir}/${name}`, dir, ...rest }))
 }

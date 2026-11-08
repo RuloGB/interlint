@@ -1,4 +1,4 @@
-import { REPORT_TOOLS } from "../../domain/check.js"
+import { type Check, NO_RESULT, REPORT_TOOLS } from "../../domain/check.js"
 import { usesMaven } from "../../domain/maven-command.js"
 import type { Violation } from "../../domain/violation.js"
 import type { CheckOutcome } from "./run-checks.js"
@@ -11,9 +11,10 @@ const FOOTER = "Fix these problems before continuing."
 export function formatOutcomes(outcomes: CheckOutcome[]): string {
   const blocks = outcomes.flatMap((outcome) => {
     if (outcome.status === "violations") {
-      return outcome.failures.map((failure) =>
+      const failures = outcome.failures.map((failure) =>
         [`✗ ${outcome.check.name} · ${failure.title}`, "", ...violationLines(failure.violations)].join("\n"),
       )
+      return outcome.check.report === "jacoco" ? [...failures, coverageHint(outcome.check)] : failures
     }
     if (outcome.status === "missing-dir") {
       return [
@@ -41,7 +42,7 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
       return [
         [
           outcome.exitCode === 0
-            ? `✗ ${outcome.check.name} · the command exited 0 but wrote no ${tool} report`
+            ? `✗ ${outcome.check.name} · the command exited 0 but ${NO_RESULT[outcome.check.report]}`
             : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ${tool} failures`,
           "",
           `  Command: ${outcome.command}`,
@@ -97,6 +98,14 @@ export function formatNotices(outcomes: CheckOutcome[]): string {
 }
 
 const REFREEZE = "archunit.freeze.refreeze=true"
+
+/**
+ * Where the agent finds what a coverage rule leaves uncovered. A rule on a bundle or a package names no class, and
+ * JaCoCo's CSV report gives the missed lines and branches of each class.
+ */
+function coverageHint(check: Check): string {
+  return `  To see which classes lack tests, run ${mavenOf(check.run)} jacoco:report and read target/site/jacoco/jacoco.csv in each module.`
+}
 
 function hiddenLine(hidden: number): string {
   return hidden === 0 ? "None of them came up in this run." : `Interlint did not show the agent ${hidden} of them.`

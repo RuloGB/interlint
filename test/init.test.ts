@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -777,7 +777,71 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+    )
+  })
+})
+
+describe("interlint init with JaCoCo", () => {
+  const execution = (id: string | undefined, goal: string, phase?: string) =>
+    `          <execution>\n${id === undefined ? "" : `            <id>${id}</id>\n`}${phase === undefined ? "" : `            <phase>${phase}</phase>\n`}            <goals>\n              <goal>${goal}</goal>\n            </goals>\n          </execution>\n`
+  const jacoco = (executions: string) =>
+    `      <plugin>\n        <groupId>org.jacoco</groupId>\n        <artifactId>jacoco-maven-plugin</artifactId>\n        <executions>\n${executions}        </executions>\n      </plugin>\n`
+  const plugin = (artifactId: string) => `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
+
+  function pom(build: string) {
+    writeFile("pom.xml", `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n</project>\n`)
+  }
+
+  it("adds a coverage check for task end only when the build runs the check goal", async () => {
+    pom(jacoco(execution("prepare", "prepare-agent") + execution("check", "check")))
+
+    const { exitCode } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "coverage", run: "mvn test jacoco:check@check -fae -Djacoco.append=false", report: "jacoco", when: "task-end" },
+    ])
+  })
+
+  it("skips the Checkstyle and PMD plugins of the build, which their own checks report", async () => {
+    writeFile("mvnw", "")
+    pom(plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") + jacoco(execution(undefined, "check")))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map(({ name, run }) => [name, run])).toEqual([
+      ["checkstyle", "./mvnw -q checkstyle:check"],
+      ["pmd", "./mvnw -q compile pmd:check -Dcheckstyle.skip"],
+      ["coverage", "./mvnw test jacoco:check@default -fae -Djacoco.append=false -Dcheckstyle.skip -Dpmd.skip"],
+    ])
+  })
+
+  it("adds none when the build only prepares the agent or writes the report, or turns the check off", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom(jacoco(execution("prepare", "prepare-agent") + execution("report", "report") + execution("check", "check", "none")))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+  })
+
+  it("says it detected the check goal, and that the coverage check runs at task end", async () => {
+    pom(jacoco(execution("check", "check")))
+
+    const { stdout } = await run("init")
+
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: none",
+        "  JaCoCo: jacoco-maven-plugin check in pom.xml, so the coverage check runs at task end",
+        "  Maven: mvn (no Maven Wrapper)",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
     )
   })
 })
@@ -918,7 +982,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has neither maven-checkstyle-plugin nor maven-pmd-plugin. Nothing was written.\n",
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -930,7 +994,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin or maven-pmd-plugin in its build (found: orders). Nothing was written.\n",
+        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: orders). Nothing was written.\n",
     })
   })
 })
