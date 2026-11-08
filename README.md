@@ -141,7 +141,7 @@ Time spent on checks: 20.0s
 
 - **Violations per check run, by model and by agent,** so a model you use more does not look worse just for that.
 - **Task-end blocks** show how often the agent tried to finish with a broken rule, and how often it fixed it in the same session.
-- `interlint metrics report` writes the full report in Markdown to `interlint-metrics.md`, ready to share or paste into a pull request.
+- `interlint metrics report` writes the full report, with charts, to `interlint-metrics.md`, ready to share or paste into a pull request. `--format html` writes one page that opens anywhere, and `--format pdf` a PDF to send, printed with your installed Chrome, Edge or Chromium.
 - `--all`, `--since <YYYY-MM-DD>` and `--agent` narrow or widen what it reads.
 
 Metrics stay on your machine, in your user's state directory, never in the project. They keep the rule, its type and the file of each violation, never its message or code. To keep none, set `metrics: false` in `interlint.yaml`.

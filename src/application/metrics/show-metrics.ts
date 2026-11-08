@@ -1,11 +1,13 @@
 import type { MetricEvent } from "../../domain/metric.js"
 import { type MetricsSummary, summarize } from "../../domain/metric-summary.js"
 import { formatReport, formatSummary, skippedLines } from "./format-metrics.js"
-import type { MetricsScope, MetricsSource, ReportFile } from "./ports.js"
+import { formatHtmlReport } from "./html-report.js"
+import type { MetricsScope, MetricsSource, PdfPrinter, ReportFile } from "./ports.js"
 
 export interface MetricsDeps {
   source: MetricsSource
   reportFile: ReportFile
+  pdf: PdfPrinter
   now: () => Date
 }
 
@@ -17,7 +19,23 @@ export interface MetricsQuery {
   agent?: string
 }
 
-export type ReportOutcome = { status: "written"; text: string } | { status: "exists" } | { status: "empty"; text: string }
+export const REPORT_FORMATS = ["md", "html", "pdf"] as const
+export type ReportFormat = (typeof REPORT_FORMATS)[number]
+
+/** Where and how to write the report. */
+export interface ReportRequest {
+  path: string
+  format: ReportFormat
+  /** Replaces an existing file. */
+  force: boolean
+}
+
+export type ReportOutcome =
+  | { status: "written"; text: string }
+  | { status: "exists" }
+  | { status: "empty"; text: string }
+  /** The PDF could not be printed, for `reason`. */
+  | { status: "no-pdf"; reason: string }
 
 /** The terminal summary of the metrics, or why there is none. */
 export function showMetrics(query: MetricsQuery, deps: MetricsDeps): string {
@@ -26,14 +44,21 @@ export function showMetrics(query: MetricsQuery, deps: MetricsDeps): string {
 }
 
 /**
- * Writes the Markdown report to `path`. An existing file is replaced only with `force`; with no metrics, nothing is
- * written.
+ * Writes the report to `path` in Markdown, HTML, or as a PDF printed from the HTML. An existing file is replaced only
+ * with `force`; with no metrics, nothing is written.
  */
-export function writeMetricsReport(query: MetricsQuery, path: string, force: boolean, deps: MetricsDeps): ReportOutcome {
+export function writeMetricsReport(query: MetricsQuery, { path, format, force }: ReportRequest, deps: MetricsDeps): ReportOutcome {
   const selected = select(query, deps)
   if (!("summary" in selected)) return { status: "empty", text: selected.text }
   if (!force && deps.reportFile.exists(path)) return { status: "exists" }
-  deps.reportFile.write(path, formatReport(selected.summary, selected.unreadable, filtersOf(query), deps.now()))
+  const render = format === "md" ? formatReport : formatHtmlReport
+  const content = render(selected.summary, selected.unreadable, filtersOf(query), deps.now())
+  if (format === "pdf") {
+    const result = deps.pdf.print(content, path)
+    if (!result.printed) return { status: "no-pdf", reason: result.reason }
+  } else {
+    deps.reportFile.write(path, content)
+  }
   return { status: "written", text: [`Wrote the metrics report to ${path}`, skippedLines(selected.unreadable)].filter(Boolean).join("\n") }
 }
 

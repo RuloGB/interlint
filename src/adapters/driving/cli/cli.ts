@@ -18,8 +18,8 @@ const USAGE = `Usage:
   interlint hook claude-code post-edit|stop|subagent-stop      Claude Code hook: reads the hook's JSON on stdin
   interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|opencode] [--cwd <dir>]
                                                                Sum up the metrics of the checks
-  interlint metrics report [--out <path>] [--force] [same options as metrics]
-                                                               Write the full metrics report in Markdown
+  interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
+                                                               Write the full metrics report, with charts
 
 A check with dir runs in that directory (one Maven project of a workspace). An edit check runs
 only when a changed file inside its project is one of its sources (*.java for report: archunit
@@ -54,8 +54,9 @@ interlint metrics sums up the metrics of the project in --cwd (or the current di
 every project with --all: checks run, violations by type, the top rules, violations per check run
 by model and by agent, sessions, task-end blocks and time spent on checks. A violation counts in
 every run that shows it. --since keeps the events from that day on (UTC) and --agent those of one
-agent. metrics report writes all of it, with tables, to interlint-metrics.md in the project, or
-to --out; it never replaces an existing file without --force.
+agent. metrics report writes all of it, with tables and charts, to interlint-metrics.md in the
+project, or to --out; it never replaces an existing file without --force. --format html writes one
+page with SVG charts, and --format pdf prints that page with an installed Chrome, Edge or Chromium.
 
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
 

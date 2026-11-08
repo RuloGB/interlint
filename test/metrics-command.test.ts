@@ -325,12 +325,98 @@ describe("interlint metrics report", () => {
   })
 })
 
+describe("interlint metrics report --format html", () => {
+  it("writes one HTML file with the same sections, SVG charts and the main figures, and says where", async () => {
+    keepSession()
+
+    const { exitCode, stdout } = await run("report", "--format", "html")
+
+    const path = join(projectDir, "interlint-metrics.html")
+    expect(exitCode).toBe(0)
+    expect(stdout).toBe(`Wrote the metrics report to ${path}\n`)
+    const html = readFileSync(path, "utf8")
+    expect(html.startsWith("<!doctype html>")).toBe(true)
+    for (const heading of ["Totals", "Violations by type", "Top 20 rules", "By model", "By agent", "Sessions", "Task-end blocks", "Time spent on checks", "Over time"]) {
+      expect(html).toContain(`<h2>${heading}</h2>`)
+    }
+    expect(html.match(/<svg /g)).toHaveLength(6)
+    expect(html).toContain("<title>Failed checks by model</title>")
+    expect(html).toContain("claude-opus-5-5 (3 checks, 1 session) · 2 (67%)")
+    expect(html).toContain("unknown (1 check, 0 sessions) · 1 (33%)")
+    expect(html).toContain("<strong>4</strong><span>Checks run</span>")
+    expect(html).toContain("<strong>24</strong><span>Violations</span>")
+    expect(html).toContain("<strong>1 of 1</strong><span>Task-end blocks fixed</span>")
+    expect(html).toContain("@media print")
+    expect(html).not.toMatch(/<script|<link|src="http/)
+  })
+
+  it("escapes what the metrics hold, such as a rule name with markup", async () => {
+    keep("2026-11-05T10:00:00.000Z", [
+      {
+        when: "edit",
+        check: "architecture",
+        report: "archunit",
+        result: "violations",
+        durationMs: 1000,
+        violations: [{ rule: "no <script> & List<String>", type: "architecture" }],
+      },
+    ])
+
+    await run("report", "--format", "html")
+
+    const html = readFileSync(join(projectDir, "interlint-metrics.html"), "utf8")
+    expect(html).toContain("no &lt;script&gt; &amp; List&lt;String&gt;")
+    expect(html).not.toContain("<script>")
+  })
+
+  it("takes --out and never replaces an existing file without --force", async () => {
+    keepSession()
+    const path = join(projectDir, "out", "team.html")
+    mkdirSync(join(projectDir, "out"))
+    writeFileSync(path, "mine")
+
+    const refused = await run("report", "--format", "html", "--out", "out/team.html")
+
+    expect(refused.exitCode).toBe(2)
+    expect(refused.stderr).toContain(`${path} already exists. Use --force to replace it.`)
+    expect(readFileSync(path, "utf8")).toBe("mine")
+    expect((await run("report", "--format", "html", "--out", "out/team.html", "--force")).exitCode).toBe(0)
+    expect(readFileSync(path, "utf8")).toContain("<h1>Metrics report</h1>")
+  })
+
+  it("writes nothing when there are no metrics", async () => {
+    const { exitCode, stdout } = await run("report", "--format", "html")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("No metrics yet.")
+    expect(existsSync(join(projectDir, "interlint-metrics.html"))).toBe(false)
+  })
+
+  it.each([
+    [["report", "--format", "docx"], '--format must be md, html or pdf (got "docx")'],
+    [["--format", "html"], "--format is only valid with metrics report"],
+  ])("rejects %j with exit code 2", async (args, message) => {
+    const { exitCode, stderr } = await run(...args)
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain(message)
+  })
+
+  it("writes Markdown with --format md, as with no --format", async () => {
+    keepSession()
+
+    await run("report", "--format", "md")
+
+    expect(readFileSync(join(projectDir, "interlint-metrics.md"), "utf8")).toContain("# Interlint metrics")
+  })
+})
+
 describe("the usage", () => {
   it("lists both metrics commands", async () => {
     let stdout = ""
     await main(["--help"], { cwd: projectDir, stdout: (text) => void (stdout += text), stderr: () => {} })
 
     expect(stdout).toContain("interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|opencode] [--cwd <dir>]")
-    expect(stdout).toContain("interlint metrics report [--out <path>] [--force]")
+    expect(stdout).toContain("interlint metrics report [--out <path>] [--force] [--format md|html|pdf]")
   })
 })
