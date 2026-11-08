@@ -268,6 +268,27 @@ describe("interlint metrics report", () => {
     )
   })
 
+  it("keeps a rule name with quotes or line breaks from breaking a Mermaid chart, and shortens a long one", async () => {
+    const long = `classes in "domain" should not depend on\nclasses in infrastructure, ever`
+    keep("2026-11-05T10:00:00.000Z", [
+      {
+        when: "edit",
+        check: "architecture",
+        report: "archunit",
+        result: "violations",
+        durationMs: 1000,
+        violations: [{ rule: long, type: "architecture" }],
+      },
+    ])
+
+    await run("report")
+
+    const report = readFileSync(join(projectDir, "interlint-metrics.md"), "utf8")
+    // 40 characters with the ellipsis.
+    expect(report).toContain(`    x-axis ["classes in 'domain' should not depend o…"]`)
+    expect(report).toContain(`| 1 | architecture | classes in "domain" should not depend on classes in infrastructure, ever |`)
+  })
+
   it("draws no chart that would be empty", async () => {
     keep("2026-11-05T10:00:00.000Z", [{ when: "edit", check: "pmd", report: "maven", result: "passed", durationMs: 1000 }])
 

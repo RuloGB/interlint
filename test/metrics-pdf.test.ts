@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { browserCandidates, findBrowser, headlessPdf } from "../src/adapters/driven/browser/headless-pdf.js"
 import type { MetricsDeps } from "../src/application/metrics/show-metrics.js"
@@ -142,6 +142,53 @@ describe("printing with a headless browser", () => {
     expect(printer.print("<p>report</p>", join(dir, "report.pdf"))).toEqual({
       printed: false,
       reason: "no Chrome, Edge or Chromium was found",
+    })
+  })
+
+  it("prints in a work folder beside the path, not in the system's temporary folder, and removes it", () => {
+    const path = join(dir, "report.pdf")
+    let pdf = ""
+    const printer = headlessPdf(
+      () => "browser",
+      (_browser, given) => {
+        pdf = given.find((arg) => arg.startsWith("--print-to-pdf="))?.slice("--print-to-pdf=".length) as string
+        writeFileSync(pdf, "%PDF-1.4")
+        return { ok: true }
+      },
+    )
+
+    printer.print("<p>report</p>", path)
+
+    expect(dirname(dirname(pdf))).toBe(dir)
+    expect(readdirSync(dir)).toEqual(["report.pdf"])
+  })
+
+  it("does not copy a PDF the browser left when it failed, such as half a file after a timeout", () => {
+    const path = join(dir, "report.pdf")
+    const printer = headlessPdf(
+      () => "browser",
+      (_browser, given) => {
+        writeFileSync(given.find((arg) => arg.startsWith("--print-to-pdf="))?.slice("--print-to-pdf=".length) as string, "%PDF-1.")
+        return { ok: false, detail: "timed out" }
+      },
+    )
+
+    expect(printer.print("<p>report</p>", path)).toEqual({ printed: false, reason: "browser could not print the report (timed out)" })
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it("says the browser wrote no PDF when it ended well with an empty file", () => {
+    const printer = headlessPdf(
+      () => "browser",
+      (_browser, given) => {
+        writeFileSync(given.find((arg) => arg.startsWith("--print-to-pdf="))?.slice("--print-to-pdf=".length) as string, "")
+        return { ok: true }
+      },
+    )
+
+    expect(printer.print("<p>report</p>", join(dir, "report.pdf"))).toEqual({
+      printed: false,
+      reason: "browser could not print the report (it wrote no PDF)",
     })
   })
 

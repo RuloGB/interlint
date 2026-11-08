@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { delimiter, dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { PdfPrinter } from "../../../application/metrics/ports.js"
@@ -40,8 +39,9 @@ export function findBrowser(candidates: string[], exists: (path: string) => bool
 }
 
 /**
- * Prints the HTML report with an installed Chrome, Edge or Chromium, headless. The browser prints into a temporary
- * folder of its own, so a failed print leaves nothing at `path` and an open browser window is not disturbed.
+ * Prints the HTML report with an installed Chrome, Edge or Chromium, headless. The browser prints into a work folder
+ * beside `path`, with a profile of its own, so a failed print leaves nothing at `path` and an open browser window is
+ * not disturbed. The folder is not in the system's temporary directory: a Chromium installed as a snap cannot read it.
  */
 export function headlessPdf(
   locate: () => string | undefined = () => findBrowser(browserCandidates(process.platform, process.env)),
@@ -51,7 +51,8 @@ export function headlessPdf(
     print(html, path) {
       const browser = locate()
       if (browser === undefined) return { printed: false, reason: "no Chrome, Edge or Chromium was found" }
-      const work = mkdtempSync(join(tmpdir(), "interlint-pdf-"))
+      mkdirSync(dirname(path), { recursive: true })
+      const work = mkdtempSync(join(dirname(path), "interlint-pdf-"))
       try {
         const page = join(work, "interlint-metrics.html")
         const pdf = join(work, "interlint-metrics.pdf")
@@ -67,14 +68,13 @@ export function headlessPdf(
           `--print-to-pdf=${pdf}`,
           pathToFileURL(page).href,
         ])
-        if (!existsSync(pdf)) {
-          return { printed: false, reason: `browser could not print the report (${result.ok ? "it wrote no PDF" : result.detail})` }
-        }
-        mkdirSync(dirname(path), { recursive: true })
+        // A browser that failed or timed out may have left half a PDF: only a complete run counts.
+        if (!result.ok) return { printed: false, reason: `browser could not print the report (${result.detail})` }
+        if (!isFile(pdf) || statSync(pdf).size === 0) return { printed: false, reason: "browser could not print the report (it wrote no PDF)" }
         copyFileSync(pdf, path)
         return { printed: true }
       } finally {
-        rmSync(work, { recursive: true, force: true })
+        removeQuietly(work)
       }
     },
   }
@@ -84,6 +84,18 @@ function runBrowser(browser: string, args: string[]): { ok: true } | { ok: false
   const result = spawnSync(browser, args, { stdio: "ignore", timeout: PRINT_TIMEOUT_MS, windowsHide: true })
   if (result.error !== undefined) return { ok: false, detail: result.error.message }
   return result.status === 0 ? { ok: true } : { ok: false, detail: `exit code ${result.status ?? result.signal}` }
+}
+
+/**
+ * Removes the work folder. A browser process that is still closing can hold a file on Windows; the folder is left
+ * then, since failing here would hide whether the PDF was written.
+ */
+function removeQuietly(dir: string) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  } catch {
+    // Left behind: the result of the print is what the user needs.
+  }
 }
 
 function isFile(path: string): boolean {

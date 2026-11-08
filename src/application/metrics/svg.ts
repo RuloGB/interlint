@@ -30,12 +30,7 @@ function verticalBars(chart: BarChart): string {
   const height = top + plot + bottom + (legend.length > 0 ? 24 : 0)
   const bars = chart.series.filter((series) => series.as === "bar")
   const lines = chart.series.filter((series) => series.as === "line")
-  const { max, step } = axisOf(
-    Math.max(
-      ...chart.labels.map((_, index) => bars.reduce((total, series) => total + (series.values[index] ?? 0), 0)),
-      ...lines.flatMap((series) => series.values),
-    ),
-  )
+  const { max, step } = axisOf(Math.max(...stackHeights(chart), ...lines.flatMap((series) => series.values)))
   const band = (width - left - right) / chart.labels.length
   const labelLength = Math.max(4, Math.floor(band / CHAR) - 1)
   const y = (value: number) => top + plot - (value / max) * plot
@@ -69,21 +64,25 @@ function verticalBars(chart: BarChart): string {
   return frame(chart.title, width, height, parts)
 }
 
+/** Characters of a label beside a horizontal bar: the rest shows on hover. */
+const HORIZONTAL_LABEL = 40
+
+/** One row per label: the label on the left, the bar, and its total on the right. */
 function horizontalBars(chart: BarChart): string {
   const width = 720
-  const labelWidth = 40 * CHAR
+  const gap = 8
+  const labelWidth = HORIZONTAL_LABEL * CHAR
   const valueWidth = 48
   const row = 26
-  const top = 8
-  const height = top + row * chart.labels.length + 8
+  const height = gap + row * chart.labels.length + gap
   const bars = chart.series.filter((series) => series.as === "bar")
-  const totals = chart.labels.map((_, index) => bars.reduce((total, series) => total + (series.values[index] ?? 0), 0))
-  const max = Math.max(...totals, 1)
-  const scale = (width - labelWidth - valueWidth - 8) / max
+  const totals = stackHeights(chart)
+  const scale = (width - labelWidth - valueWidth - gap) / Math.max(...totals, 1)
   const parts: string[] = []
   chart.labels.forEach((label, index) => {
-    const y = top + row * index
-    parts.push(text(labelWidth - 8, y + row / 2 + 4, shortened(label, 40), { anchor: "end", fill: INK, title: label }))
+    const y = gap + row * index
+    const baseline = y + row / 2 + 4
+    parts.push(text(labelWidth - gap, baseline, shortened(label, HORIZONTAL_LABEL), { anchor: "end", fill: INK, title: label }))
     let base = 0
     bars.forEach((series) => {
       const value = series.values[index] ?? 0
@@ -91,7 +90,7 @@ function horizontalBars(chart: BarChart): string {
       parts.push(rect(labelWidth + base * scale, y + 4, value * scale, row - 8, color(chart, series.name)))
       base += value
     })
-    parts.push(text(labelWidth + base * scale + 6, y + row / 2 + 4, number(totals[index] ?? 0), { fill: INK }))
+    parts.push(text(labelWidth + base * scale + 6, baseline, number(totals[index] ?? 0), { fill: INK }))
   })
   return frame(chart.title, width, height, parts)
 }
@@ -128,6 +127,12 @@ function pie(chart: PieChart): string {
     )
   })
   return frame(chart.title, width, height, parts)
+}
+
+/** The height of each label's stack of bars: the sum of its bar series. */
+function stackHeights(chart: BarChart): number[] {
+  const bars = chart.series.filter((series) => series.as === "bar")
+  return chart.labels.map((_, index) => bars.reduce((total, series) => total + (series.values[index] ?? 0), 0))
 }
 
 /** The series named in a legend: only when there is more than one. */
