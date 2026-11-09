@@ -105,7 +105,7 @@ function verticalBars(chart: BarChart): string {
       `<polyline points="${points.map(([px, py]) => `${round(px)},${round(py)}`).join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`,
       ...points.flatMap(([px, py], index) => [
         `<circle cx="${round(px)}" cy="${round(py)}" r="3.5" fill="${stroke}"/>`,
-        ...(figured[index] ? [text(px + POINT_FIGURE, py - 6, number(series.values[index] ?? 0), { fill: stroke })] : []),
+        ...(figured[index] ? [text(px + POINT_FIGURE, py - 6, number(series.values[index] ?? 0), { fill: stroke, outlined: true })] : []),
       ]),
     )
   })
@@ -231,9 +231,16 @@ function rect(x: number, y: number, width: number, height: number, fill: string)
   return `<rect x="${round(x)}" y="${round(y)}" width="${round(width)}" height="${round(height)}" rx="2" fill="${fill}"/>`
 }
 
-function text(x: number, y: number, content: string, { anchor = "start", fill, title }: { anchor?: string; fill: string; title?: string }): string {
+/** `outlined` draws a white edge under the letters, so a figure that falls on a bar still reads. */
+function text(
+  x: number,
+  y: number,
+  content: string,
+  { anchor = "start", fill, title, outlined = false }: { anchor?: string; fill: string; title?: string; outlined?: boolean },
+): string {
   const tooltip = title !== undefined && title !== content ? `<title>${escapeXml(title)}</title>` : ""
-  return `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" fill="${fill}">${tooltip}${escapeXml(content)}</text>`
+  const outline = outlined ? ' stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"' : ""
+  return `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" fill="${fill}"${outline}>${tooltip}${escapeXml(content)}</text>`
 }
 
 function shortened(label: string, length: number): string {

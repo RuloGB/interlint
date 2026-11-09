@@ -67,6 +67,19 @@ describe("a bar chart in SVG", () => {
     expect(boxes.filter((box) => box.anchor === "middle" && /^\d+$/.test(box.content)).length).toBeGreaterThanOrEqual(4)
   })
 
+  it("outlines the figures of the line in white, so they read over a bar", () => {
+    const drawn = svg(weekly(8))
+    const figures = [...drawn.matchAll(/<text [^>]*fill="#f59e0b"[^>]*>/g)].map(([tag]) => tag)
+    const totals = [...drawn.matchAll(/<text [^>]*text-anchor="middle" fill="#1f2937"[^>]*>\d+</g)].map(([tag]) => tag)
+
+    expect(figures).toHaveLength(8)
+    for (const figure of figures) {
+      expect(figure).toContain('stroke="#fff"')
+      expect(figure).toContain('paint-order="stroke"')
+    }
+    for (const total of totals) expect(total).not.toContain("stroke")
+  })
+
   it("writes the figures over every week while they fit", () => {
     const totals = textBoxes(svg(weekly(8))).filter((box) => box.anchor === "middle" && /^\d+$/.test(box.content))
 
@@ -101,7 +114,7 @@ interface TextBox {
 
 /** The room of each label and figure of a chart, leaving out the muted axis and legend. */
 function textBoxes(drawn: string): TextBox[] {
-  return [...drawn.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" fill="([^"]+)">(?:<title>[^<]*<\/title>)?([^<]*)<\/text>/g)]
+  return [...drawn.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" fill="([^"]+)"[^>]*>(?:<title>[^<]*<\/title>)?([^<]*)<\/text>/g)]
     .filter(([, , , , fill]) => fill !== "#6b7280")
     .map(([, x, y, anchor = "start", , content = ""]) => {
       const width = content.length * 6.8
