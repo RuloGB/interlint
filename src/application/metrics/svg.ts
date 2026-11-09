@@ -45,6 +45,20 @@ function labelEvery(labels: string[], band: number): number {
   return every
 }
 
+/** How far right of its point the figure of a line point is written. */
+const POINT_FIGURE = 8
+
+/**
+ * Whether a figure fits over every upright bar: its total, and the value of its line point, written to the right of the
+ * point and so toward the total over the next bar. When they do not, only the bars with a shown label have figures.
+ */
+function figuresFit(chart: BarChart, band: number): boolean {
+  const lines = chart.series.filter((series) => series.as === "line")
+  const figures = [...stackHeights(chart), ...lines.flatMap((series) => series.values)].map((value) => number(value).length)
+  const widest = Math.max(...figures) * CHAR
+  return band >= (lines.length > 0 ? POINT_FIGURE + widest * 1.5 : widest) + CHAR
+}
+
 export function escapeXml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;")
 }
@@ -64,6 +78,10 @@ function verticalBars(chart: BarChart): string {
   const band = VERTICAL_PLOT_WIDTH / chart.labels.length
   const every = labelEvery(chart.labels, band)
   const labelLength = labelRoom(band * every)
+  const center = (index: number) => left + band * index + band / 2
+  // A shown label is wider than its bar when only some are shown: the last one may not fit before the edge.
+  const labelled = chart.labels.map((label, index) => index % every === 0 && center(index) + (shortened(label, labelLength).length * CHAR) / 2 <= width)
+  const figured = figuresFit(chart, band) ? chart.labels.map(() => true) : labelled
   const y = (value: number) => top + plot - (value / max) * plot
   const barWidth = Math.min(band * 0.6, 72)
   const parts = [...yGrid(max, step, left, width - right, y)]
@@ -77,21 +95,17 @@ function verticalBars(chart: BarChart): string {
       parts.push(rect(x, y(base + value), barWidth, y(base) - y(base + value), color(chart, series.name)))
       base += value
     })
-    if (base > 0) parts.push(text(x + barWidth / 2, y(base) - 4, number(base), { anchor: "middle", fill: INK }))
-    const shown = shortened(label, labelLength)
-    const center = left + band * index + band / 2
-    // A shown label is wider than its bar when only some are shown: the last one may not fit before the edge.
-    if (index % every !== 0 || center + (shown.length * CHAR) / 2 > width) return
-    parts.push(text(center, top + plot + 16, shown, { anchor: "middle", fill: INK, title: label }))
+    if (base > 0 && figured[index]) parts.push(text(x + barWidth / 2, y(base) - 4, number(base), { anchor: "middle", fill: INK }))
+    if (labelled[index]) parts.push(text(center(index), top + plot + 16, shortened(label, labelLength), { anchor: "middle", fill: INK, title: label }))
   })
   lines.forEach((series) => {
-    const points = series.values.map((value, index) => [left + band * index + band / 2, y(value)] as const)
+    const points = series.values.map((value, index) => [center(index), y(value)] as const)
     const stroke = color(chart, series.name)
     parts.push(
       `<polyline points="${points.map(([px, py]) => `${round(px)},${round(py)}`).join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`,
       ...points.flatMap(([px, py], index) => [
         `<circle cx="${round(px)}" cy="${round(py)}" r="3.5" fill="${stroke}"/>`,
-        text(px + 8, py - 6, number(series.values[index] ?? 0), { fill: stroke }),
+        ...(figured[index] ? [text(px + POINT_FIGURE, py - 6, number(series.values[index] ?? 0), { fill: stroke })] : []),
       ]),
     )
   })

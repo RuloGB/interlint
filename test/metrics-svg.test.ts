@@ -57,7 +57,62 @@ describe("a bar chart in SVG", () => {
     shown.slice(1).forEach(({ x }, index) => expect(x - (shown[index]?.x ?? 0)).toBeGreaterThanOrEqual(LABEL_WIDTH))
     for (const { x } of shown) expect(x + DATE_WIDTH / 2).toBeLessThanOrEqual(width)
   })
+
+  it.each([8, 13, 26, 52])("keeps the figures over %i weeks apart, so none is written over another", (count) => {
+    const boxes = textBoxes(svg(weekly(count)))
+
+    boxes.forEach((box, index) => {
+      for (const other of boxes.slice(index + 1)) expect(overlap(box, other), `${box.content} and ${other.content}`).toBe(false)
+    })
+    expect(boxes.filter((box) => box.anchor === "middle" && /^\d+$/.test(box.content)).length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("writes the figures over every week while they fit", () => {
+    const totals = textBoxes(svg(weekly(8))).filter((box) => box.anchor === "middle" && /^\d+$/.test(box.content))
+
+    expect(totals).toHaveLength(8)
+  })
 })
+
+/** Weekly checks with as many violations, so the figure of each line point sits as high as the totals. */
+function weekly(count: number): BarChart {
+  const values = weeks(count).map((_, index) => 30 + (index % 3))
+  return {
+    kind: "bar",
+    title: "Checks run (bars) and violations (line) per week",
+    horizontal: false,
+    axis: "Checks and violations",
+    labels: weeks(count),
+    series: [
+      { name: "Checks run", values, as: "bar" },
+      { name: "Violations", values, as: "line" },
+    ],
+  }
+}
+
+interface TextBox {
+  content: string
+  anchor: string
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/** The room of each label and figure of a chart, leaving out the muted axis and legend. */
+function textBoxes(drawn: string): TextBox[] {
+  return [...drawn.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" fill="([^"]+)">(?:<title>[^<]*<\/title>)?([^<]*)<\/text>/g)]
+    .filter(([, , , , fill]) => fill !== "#6b7280")
+    .map(([, x, y, anchor = "start", , content = ""]) => {
+      const width = content.length * 6.8
+      const left = anchor === "middle" ? Number(x) - width / 2 : Number(x)
+      return { content, anchor, left, right: left + width, top: Number(y) - 10, bottom: Number(y) }
+    })
+}
+
+function overlap(one: TextBox, other: TextBox): boolean {
+  return one.left < other.right && other.left < one.right && one.top < other.bottom && other.top < one.bottom
+}
 
 /** The width of a `YYYY-MM-DD` label at 12px. */
 const DATE_WIDTH = 10 * 6.8
