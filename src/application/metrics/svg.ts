@@ -21,7 +21,7 @@ const VERTICAL_PLOT_WIDTH = 576
 
 /**
  * Whether every label fits under its upright bar. When one does not, the bars are laid along, as for rule names, so no
- * label is cut; a chart with a line stays upright, since its line runs along the labels.
+ * label is cut; a chart with a line stays upright, since its line runs along the labels, and shows only some of them.
  */
 function labelsFitUnder(chart: BarChart): boolean {
   if (chart.series.some((series) => series.as === "line")) return true
@@ -32,6 +32,31 @@ function labelsFitUnder(chart: BarChart): boolean {
 /** How many characters fit under a bar of `band` width. */
 function labelRoom(band: number): number {
   return Math.max(4, Math.floor(band / CHAR) - 1)
+}
+
+/**
+ * Every how many upright bars a label is shown: 1 when all fit, more for many weeks, so each shown label is whole and
+ * has the room of the bars up to the next one.
+ */
+function labelEvery(labels: string[], band: number): number {
+  const longest = Math.max(...labels.map((label) => label.length))
+  let every = 1
+  while (every < labels.length && labelRoom(band * every) < longest) every += 1
+  return every
+}
+
+/** How far right of its point the figure of a line point is written. */
+const POINT_FIGURE = 8
+
+/**
+ * Whether a figure fits over every upright bar: its total, and the value of its line point, written to the right of the
+ * point and so toward the total over the next bar. When they do not, only the bars with a shown label have figures.
+ */
+function figuresFit(chart: BarChart, band: number): boolean {
+  const lines = chart.series.filter((series) => series.as === "line")
+  const figures = [...stackHeights(chart), ...lines.flatMap((series) => series.values)].map((value) => number(value).length)
+  const widest = Math.max(...figures) * CHAR
+  return band >= (lines.length > 0 ? POINT_FIGURE + widest * 1.5 : widest) + CHAR
 }
 
 export function escapeXml(text: string): string {
@@ -51,7 +76,12 @@ function verticalBars(chart: BarChart): string {
   const lines = chart.series.filter((series) => series.as === "line")
   const { max, step } = axisOf(Math.max(...stackHeights(chart), ...lines.flatMap((series) => series.values)))
   const band = VERTICAL_PLOT_WIDTH / chart.labels.length
-  const labelLength = labelRoom(band)
+  const every = labelEvery(chart.labels, band)
+  const labelLength = labelRoom(band * every)
+  const center = (index: number) => left + band * index + band / 2
+  // A shown label is wider than its bar when only some are shown: the last one may not fit before the edge.
+  const labelled = chart.labels.map((label, index) => index % every === 0 && center(index) + (shortened(label, labelLength).length * CHAR) / 2 <= width)
+  const figured = figuresFit(chart, band) ? chart.labels.map(() => true) : labelled
   const y = (value: number) => top + plot - (value / max) * plot
   const barWidth = Math.min(band * 0.6, 72)
   const parts = [...yGrid(max, step, left, width - right, y)]
@@ -65,17 +95,17 @@ function verticalBars(chart: BarChart): string {
       parts.push(rect(x, y(base + value), barWidth, y(base) - y(base + value), color(chart, series.name)))
       base += value
     })
-    if (base > 0) parts.push(text(x + barWidth / 2, y(base) - 4, number(base), { anchor: "middle", fill: INK }))
-    parts.push(text(left + band * index + band / 2, top + plot + 16, shortened(label, labelLength), { anchor: "middle", fill: INK, title: label }))
+    if (base > 0 && figured[index]) parts.push(text(x + barWidth / 2, y(base) - 4, number(base), { anchor: "middle", fill: INK }))
+    if (labelled[index]) parts.push(text(center(index), top + plot + 16, shortened(label, labelLength), { anchor: "middle", fill: INK, title: label }))
   })
   lines.forEach((series) => {
-    const points = series.values.map((value, index) => [left + band * index + band / 2, y(value)] as const)
+    const points = series.values.map((value, index) => [center(index), y(value)] as const)
     const stroke = color(chart, series.name)
     parts.push(
       `<polyline points="${points.map(([px, py]) => `${round(px)},${round(py)}`).join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`,
       ...points.flatMap(([px, py], index) => [
         `<circle cx="${round(px)}" cy="${round(py)}" r="3.5" fill="${stroke}"/>`,
-        text(px + 8, py - 6, number(series.values[index] ?? 0), { fill: stroke }),
+        ...(figured[index] ? [text(px + POINT_FIGURE, py - 6, number(series.values[index] ?? 0), { fill: stroke, outlined: true })] : []),
       ]),
     )
   })
@@ -201,9 +231,16 @@ function rect(x: number, y: number, width: number, height: number, fill: string)
   return `<rect x="${round(x)}" y="${round(y)}" width="${round(width)}" height="${round(height)}" rx="2" fill="${fill}"/>`
 }
 
-function text(x: number, y: number, content: string, { anchor = "start", fill, title }: { anchor?: string; fill: string; title?: string }): string {
+/** `outlined` draws a white edge under the letters, so a figure that falls on a bar still reads. */
+function text(
+  x: number,
+  y: number,
+  content: string,
+  { anchor = "start", fill, title, outlined = false }: { anchor?: string; fill: string; title?: string; outlined?: boolean },
+): string {
   const tooltip = title !== undefined && title !== content ? `<title>${escapeXml(title)}</title>` : ""
-  return `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" fill="${fill}">${tooltip}${escapeXml(content)}</text>`
+  const outline = outlined ? ' stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"' : ""
+  return `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" fill="${fill}"${outline}>${tooltip}${escapeXml(content)}</text>`
 }
 
 function shortened(label: string, length: number): string {
