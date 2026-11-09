@@ -21,7 +21,7 @@ const VERTICAL_PLOT_WIDTH = 576
 
 /**
  * Whether every label fits under its upright bar. When one does not, the bars are laid along, as for rule names, so no
- * label is cut; a chart with a line stays upright, since its line runs along the labels.
+ * label is cut; a chart with a line stays upright, since its line runs along the labels, and shows only some of them.
  */
 function labelsFitUnder(chart: BarChart): boolean {
   if (chart.series.some((series) => series.as === "line")) return true
@@ -32,6 +32,17 @@ function labelsFitUnder(chart: BarChart): boolean {
 /** How many characters fit under a bar of `band` width. */
 function labelRoom(band: number): number {
   return Math.max(4, Math.floor(band / CHAR) - 1)
+}
+
+/**
+ * Every how many upright bars a label is shown: 1 when all fit, more for many weeks, so each shown label is whole and
+ * has the room of the bars up to the next one.
+ */
+function labelEvery(labels: string[], band: number): number {
+  const longest = Math.max(...labels.map((label) => label.length))
+  let every = 1
+  while (every < labels.length && labelRoom(band * every) < longest) every += 1
+  return every
 }
 
 export function escapeXml(text: string): string {
@@ -51,7 +62,8 @@ function verticalBars(chart: BarChart): string {
   const lines = chart.series.filter((series) => series.as === "line")
   const { max, step } = axisOf(Math.max(...stackHeights(chart), ...lines.flatMap((series) => series.values)))
   const band = VERTICAL_PLOT_WIDTH / chart.labels.length
-  const labelLength = labelRoom(band)
+  const every = labelEvery(chart.labels, band)
+  const labelLength = labelRoom(band * every)
   const y = (value: number) => top + plot - (value / max) * plot
   const barWidth = Math.min(band * 0.6, 72)
   const parts = [...yGrid(max, step, left, width - right, y)]
@@ -66,7 +78,11 @@ function verticalBars(chart: BarChart): string {
       base += value
     })
     if (base > 0) parts.push(text(x + barWidth / 2, y(base) - 4, number(base), { anchor: "middle", fill: INK }))
-    parts.push(text(left + band * index + band / 2, top + plot + 16, shortened(label, labelLength), { anchor: "middle", fill: INK, title: label }))
+    const shown = shortened(label, labelLength)
+    const center = left + band * index + band / 2
+    // A shown label is wider than its bar when only some are shown: the last one may not fit before the edge.
+    if (index % every !== 0 || center + (shown.length * CHAR) / 2 > width) return
+    parts.push(text(center, top + plot + 16, shown, { anchor: "middle", fill: INK, title: label }))
   })
   lines.forEach((series) => {
     const points = series.values.map((value, index) => [left + band * index + band / 2, y(value)] as const)
