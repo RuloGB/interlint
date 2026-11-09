@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 596" role="img" aria-label="An agent session. The agent edits Order.java in the domain. Interlint sends it an ArchUnit violation, ARCH-01: domain depends on nothing outside domain, with the file and line, and asks it to fix the problem before continuing. The agent moves the mapping to infrastructure. At task end Interlint shows that every check passed.">
+  <rect x="1" y="1" width="998" height="594" rx="14" fill="#020617" stroke="#1E293B" stroke-width="2"/>
+  <circle cx="30" cy="27" r="6" fill="#334155"/>
+  <circle cx="52" cy="27" r="6" fill="#334155"/>
+  <circle cx="74" cy="27" r="6" fill="#334155"/>
+  <text x="500" y="33" text-anchor="middle" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#64748B">agent session · acme-shop</text>
+  <path d="M2 52 H998" stroke="#1E293B" stroke-width="2"/>
+
+  <rect x="36" y="146" width="928" height="206" rx="6" fill="#F87171" opacity="0.08"/>
+  <rect x="36" y="146" width="4" height="206" fill="#F87171"/>
+  <rect x="36" y="486" width="928" height="76" rx="6" fill="#34D399" opacity="0.08"/>
+  <rect x="36" y="486" width="4" height="76" fill="#34D399"/>
+
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" text-anchor="end">
+    <text x="948" y="168"><tspan fill="#34D399" font-weight="700">Interlint</tspan><tspan fill="#64748B"> · after this edit · to the agent</tspan></text>
+    <text x="948" y="508" fill="#64748B">task end · to you</text>
+  </g>
+
+  <g fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 186 L68 196 M68 186 L58 196" stroke="#F87171"/>
+    <path d="M57 532 L62 537 L71 527" stroke="#34D399"/>
+  </g>
+  <g fill="#94A3B8">
+    <circle cx="44" cy="122" r="4.5"/>
+    <circle cx="44" cy="388" r="4.5"/>
+    <circle cx="44" cy="424" r="4.5"/>
+    <circle cx="44" cy="460" r="4.5"/>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">
+    <text x="36" y="92"><tspan fill="#34D399">›</tspan><tspan x="60" fill="#E0E7FF">Add a toEntity() method to Order</tspan></text>
+    <text x="60" y="128"><tspan fill="#E0E7FF" font-weight="700">Edit</tspan><tspan fill="#94A3B8">  src/main/java/com/acme/domain/Order.java</tspan></text>
+
+    <text x="80" y="197"><tspan fill="#F87171" font-weight="700">architecture</tspan><tspan fill="#E0E7FF"> · ARCH-01: domain depends on nothing outside domain</tspan></text>
+    <text x="80" y="236" fill="#94A3B8">Method &lt;com.acme.domain.Order.toEntity()&gt; calls constructor</text>
+    <text x="80" y="262" fill="#94A3B8">&lt;com.acme.infra.OrderEntity.&lt;init&gt;()&gt; in (Order.java:27)</text>
+    <text x="100" y="290" fill="#64748B">at src/main/java/com/acme/domain/Order.java:27</text>
+    <text x="80" y="330" fill="#FBBF24">Fix these problems before continuing.</text>
+
+    <text x="60" y="394" fill="#CBD5E1">The domain must not depend on infra: moving the mapping out.</text>
+    <text x="60" y="430"><tspan fill="#E0E7FF" font-weight="700">Edit</tspan><tspan fill="#94A3B8">  src/main/java/com/acme/infra/OrderMapper.java</tspan></text>
+    <text x="60" y="466"><tspan fill="#E0E7FF" font-weight="700">Edit</tspan><tspan fill="#94A3B8">  src/main/java/com/acme/domain/Order.java</tspan></text>
+
+    <text x="80" y="538"><tspan fill="#34D399" font-weight="700">Interlint</tspan><tspan fill="#E0E7FF"> · checks passed: architecture (3.1s), checkstyle (1.2s), pmd (6.8s)</tspan></text>
+  </g>
+</svg>
