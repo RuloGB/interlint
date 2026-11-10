@@ -21,9 +21,9 @@ const USAGE = `Usage:
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
                                                                Write the full metrics report, with charts
 
-A check with dir runs in that directory (one Maven project of a workspace). An edit check runs
+A check with dir runs in that directory (one project of a workspace). An edit check runs
 only when a changed file inside its project is one of its sources (*.java for report: archunit
-and maven). With mvnd on the PATH, a check whose run starts with mvn, mvnw or ./mvnw runs with
+and maven; *.ts, *.tsx, *.mts, *.cts, *.js, *.jsx, *.mjs and *.cjs for report: eslint). With mvnd on the PATH, a check whose run starts with mvn, mvnw or ./mvnw runs with
 mvnd instead; without mvnd, Maven edit checks wait for task-end.
 
 --changed runs only the checks of the projects that changed since their checks last passed:
@@ -36,8 +36,9 @@ init writes an architecture check that runs the test classes with @ArchTest, wit
 Wrapper (or mvn), when: edit and every: 3, and a checkstyle check (report: maven, when: edit) and a
 pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules, and a
 coverage check (report: jacoco, when: task-end) when the build runs jacoco-maven-plugin's check
-goal. In a directory without pom.xml it writes
-the checks of each Maven project below it, with their dir. It never replaces a different
+goal. In an npm project with eslint in package.json and an eslint.config file it writes an
+eslint check (report: eslint, when: edit). In a directory without pom.xml it writes
+the checks of each Maven project and each such npm project below it, with their dir. It never replaces a different
 interlint.yaml without --force: without --agent it writes nothing, and with --agent it keeps that
 file and still writes the agent's files.
 
@@ -45,6 +46,10 @@ A report: maven check fails only when Maven fails, and shows the most severe lev
 Checkstyle and PMD reports, so nothing the project's build accepts is shown. At edit it shows
 only the failures of the changed files, and a run with checkstyle:check gets
 -Dcheckstyle.includes so Checkstyle checks only those files; PMD checks the whole project.
+A report: eslint check reads the JSON report of ESLint from node_modules/.cache/interlint/eslint.json,
+which its run writes with -f json -o, and fails only when ESLint fails: it shows the errors, or
+the warnings when ESLint fails on them alone. At edit the " ." its run ends with is replaced
+with the changed files, and only their failures are shown.
 A report: jacoco check reads the coverage rules jacoco:check prints as broken; it runs only at
 task end, without -q, which hides them. With --changed, when every tested module's target/jacoco.exec
 and Surefire reports are newer than the last change and no test failed, the command runs without
