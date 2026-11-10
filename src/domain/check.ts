@@ -1,4 +1,4 @@
-export const REPORTS = ["archunit", "maven", "jacoco"] as const
+export const REPORTS = ["archunit", "maven", "jacoco", "eslint"] as const
 export const WHENS = ["edit", "task-end"] as const
 
 export type Report = (typeof REPORTS)[number]
@@ -6,29 +6,46 @@ export type When = (typeof WHENS)[number]
 
 /**
  * The files whose change makes an `edit` check worth running, by report format. Coverage needs the whole test suite
- * and is measured for a whole module, so no edit runs a JaCoCo check.
+ * and is measured for a whole module, so no edit runs a JaCoCo check. ESLint's are a fixed list (decision 53): with
+ * its older configuration format, ESLint checks any file it is given, whatever it is.
  */
-const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = { archunit: [".java"], maven: [".java"], jacoco: [] }
+const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = {
+  archunit: [".java"],
+  maven: [".java"],
+  jacoco: [],
+  eslint: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+}
 
 /** The report formats a check may use only at task end, with the reason `interlint.yaml` gives for it. */
 export const TASK_END_ONLY: Partial<Record<Report, string>> = { jacoco: "coverage needs the whole test suite" }
 
 /** The tools behind each report format, as the output names them. */
-export const REPORT_TOOLS: Record<Report, string> = { archunit: "ArchUnit", maven: "Checkstyle or PMD", jacoco: "JaCoCo" }
+export const REPORT_TOOLS: Record<Report, string> = {
+  archunit: "ArchUnit",
+  maven: "Checkstyle or PMD",
+  jacoco: "JaCoCo",
+  eslint: "ESLint",
+}
 
 /** What a run that exits 0 without a result of its tool did not do, as the output says it. */
 export const NO_RESULT: Record<Report, string> = {
   archunit: "wrote no ArchUnit report",
   maven: "wrote no Checkstyle or PMD report",
   jacoco: "JaCoCo checked no coverage rule",
+  eslint: "wrote no ESLint report",
 }
 
 /**
- * Whether an `edit` check shows only the failures of the changed files. Checkstyle and PMD rate each file on its own,
- * so another file's failures are not the edit's, and task end reports them. An ArchUnit rule is about how classes
- * relate, so an edit can break it in a class the edit did not change.
+ * Whether an `edit` check shows only the failures of the changed files. Checkstyle, PMD and ESLint rate each file on
+ * its own, so another file's failures are not the edit's, and task end reports them. An ArchUnit rule is about how
+ * classes relate, so an edit can break it in a class the edit did not change.
  */
-export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = { archunit: false, maven: true, jacoco: false }
+export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = {
+  archunit: false,
+  maven: true,
+  jacoco: false,
+  eslint: true,
+}
 
 /** Whether `file`, relative to the project, is a source the check verifies. */
 export function isSourceOf(report: Report, file: string): boolean {
