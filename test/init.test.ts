@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -777,7 +777,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     )
   })
 })
@@ -995,7 +995,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1007,7 +1007,175 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: orders). Nothing was written.\n",
+        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: orders). No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
+  })
+})
+
+describe("interlint init with ESLint", () => {
+  const ESLINT_RUN = "npx --no -- eslint -f json -o node_modules/.cache/interlint/eslint.json ."
+  const CHECKSTYLE_POM =
+    "<project>\n  <build>\n    <plugins>\n      <plugin>\n        <artifactId>maven-checkstyle-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n"
+
+  /** An npm project that lists ESLint and has a flat configuration, in `dir` (`""` is the root). */
+  function eslintProject(dir: string, config = "eslint.config.js") {
+    const at = (path: string) => (dir === "" ? path : `${dir}/${path}`)
+    writeFile(at("package.json"), JSON.stringify({ name: "web", devDependencies: { eslint: "^10.0.0", typescript: "^5.6.0" } }))
+    writeFile(at(config), "export default []\n")
+  }
+
+  it("writes an eslint check that runs the project's ESLint after each edit", async () => {
+    eslintProject("")
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([{ name: "eslint", run: ESLINT_RUN, report: "eslint", when: "edit" }])
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ESLint: eslint in package.json and eslint.config.js, so the eslint check runs after each edit",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it.each([["eslint.config.mjs"], ["eslint.config.cjs"], ["eslint.config.ts"], ["eslint.config.mts"], ["eslint.config.cts"]])(
+    "finds the flat configuration in %s",
+    async (config) => {
+      eslintProject("", config)
+
+      expect((await run("init")).stdout).toContain(`  ESLint: eslint in package.json and ${config}, so`)
+    },
+  )
+
+  it("finds ESLint among the dependencies too", async () => {
+    writeFile("package.json", JSON.stringify({ dependencies: { eslint: "^10.0.0" } }))
+    writeFile("eslint.config.js", "export default []\n")
+
+    expect((await run("init")).exitCode).toBe(0)
+  })
+
+  it.each([
+    ["package.json does not list eslint", () => (writeFile("package.json", '{"devDependencies":{"typescript":"^5.6.0"}}'), writeFile("eslint.config.js", ""))],
+    ["there is no package.json", () => writeFile("eslint.config.js", "")],
+    ["package.json is not valid JSON", () => (writeFile("package.json", "{"), writeFile("eslint.config.js", ""))],
+    ["the configuration is the older .eslintrc", () => (writeFile("package.json", '{"devDependencies":{"eslint":"^8.57.0"}}'), writeFile(".eslintrc.json", "{}"))],
+  ])("writes nothing when %s", async (_case, arrange) => {
+    arrange()
+
+    expect(await run("init")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+    })
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+  })
+
+  it("installs the agent's files for a project with only an eslint check", async () => {
+    eslintProject("")
+
+    expect((await run("init", "--agent", "opencode")).exitCode).toBe(0)
+    expect(existsSync(join(projectDir, PLUGIN_COPY))).toBe(true)
+  })
+
+  describe("in a workspace with a Maven project and an npm project", () => {
+    beforeEach(() => {
+      writeFile("api/pom.xml", CHECKSTYLE_POM)
+      eslintProject("web")
+      writeFile("web/node_modules/dep/package.json", JSON.stringify({ devDependencies: { eslint: "^10.0.0" } }))
+      writeFile("web/node_modules/dep/eslint.config.js", "")
+      writeFile("docs/package.json", "{}")
+    })
+
+    it("writes the checks of both, each in its directory", async () => {
+      expect((await run("init")).exitCode).toBe(0)
+
+      expect(loadConfig(projectDir).checks).toEqual([
+        { name: "api/checkstyle", dir: "api", run: "mvn -q checkstyle:check", report: "maven", when: "edit" },
+        { name: "web/eslint", dir: "web", run: ESLINT_RUN, report: "eslint", when: "edit" },
+      ])
+    })
+
+    it("lists each project with what it detected", async () => {
+      installMavenDaemon()
+
+      expect((await run("init")).stdout).toBe(
+        [
+          "Detected 2 projects:",
+          "  api",
+          "    ArchUnit tests: none",
+          "    Checkstyle: maven-checkstyle-plugin in pom.xml",
+          "    Maven: mvn (no Maven Wrapper)",
+          "  web",
+          "    ESLint: eslint in package.json and eslint.config.js, so the eslint check runs after each edit",
+          "  mvnd: on the PATH, so the Checkstyle checks run after each edit",
+          "",
+          "Wrote:",
+          "  interlint.yaml",
+          "",
+        ].join("\n"),
+      )
+    })
+
+    it("runs only the eslint check for an edit in the npm project", async () => {
+      await run("init")
+      writeFile("web/src/app.ts", "export const a = 1\n")
+
+      // Without dependencies installed npx fails, so the check that ran is the one named in the output.
+      const { stdout, stderr } = await run("check", "--when", "edit", "--file", "web/src/app.ts")
+
+      expect(stdout + stderr).toContain("web/eslint")
+      expect(stdout + stderr).not.toContain("api/checkstyle")
+    })
+  })
+
+  it("writes the eslint checks of the npm projects alone when no directory is a Maven project", async () => {
+    eslintProject("apps/web")
+    eslintProject("apps/admin")
+
+    const { stdout } = await run("init")
+
+    expect(loadConfig(projectDir).checks.map(({ name, dir }) => [name, dir])).toEqual([
+      ["apps/admin/eslint", "apps/admin"],
+      ["apps/web/eslint", "apps/web"],
+    ])
+    expect(stdout).toContain("Detected 2 projects:\n  apps/admin\n")
+    expect(stdout).not.toContain("mvnd")
+  })
+
+  it("leaves a Maven project as it is when it also holds an npm project with ESLint", async () => {
+    writeFile("pom.xml", CHECKSTYLE_POM)
+    eslintProject("")
+    eslintProject("frontend")
+
+    const { stdout } = await run("init")
+
+    expect(loadConfig(projectDir).checks).toEqual([{ name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "edit" }])
+    expect(stdout).not.toContain("ESLint")
+  })
+
+  it("finds no npm project inside a Maven project of a workspace", async () => {
+    writeFile("api/pom.xml", CHECKSTYLE_POM)
+    eslintProject("api/frontend")
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks.map(({ name }) => name)).toEqual(["api/checkstyle"])
+  })
+
+  it("writes the Maven checks of the projects below an npm project at the root", async () => {
+    eslintProject("")
+    writeFile("api/pom.xml", CHECKSTYLE_POM)
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map(({ name, dir }) => [name, dir])).toEqual([
+      ["eslint", undefined],
+      ["api/checkstyle", "api"],
+    ])
   })
 })

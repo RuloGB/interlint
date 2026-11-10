@@ -9,11 +9,11 @@ import { formatOutcomes } from "../src/application/checking/format-outcomes.js"
 import type { PendingEdit, ReportReader } from "../src/application/checking/ports.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 import { type Check, isSourceOf } from "../src/domain/check.js"
-import { ESLINT_REPORT } from "../src/domain/eslint-command.js"
+import { ESLINT_COMMAND, ESLINT_REPORT } from "../src/domain/eslint-command.js"
 import { metricEventOf } from "../src/domain/metric.js"
 import { summarize } from "../src/domain/metric-summary.js"
 
-const RUN = `npx --no -- eslint -f json -o ${ESLINT_REPORT} .`
+const RUN = ESLINT_COMMAND
 const eslintEdit: Check = { name: "eslint", run: RUN, report: "eslint", when: "edit" }
 
 let dir: string
@@ -200,6 +200,22 @@ describe("eslintOnFiles", () => {
     },
   )
 
+  it("names a file once, however many times it was edited", () => {
+    write("src/a.ts")
+
+    expect(eslintOnFiles(RUN, ["src/a.ts", "src/a.ts"], dir)).toBe(
+      `npx --no -- eslint -f json -o ${ESLINT_REPORT} src/a.ts`,
+    )
+  })
+
+  it("leaves the command as it is for more files than a command line takes", () => {
+    const files = Array.from({ length: 51 }, (_, index) => `src/file${index}.ts`)
+    for (const file of files) write(file)
+
+    expect(eslintOnFiles(RUN, files, dir)).toBe(RUN)
+    expect(eslintOnFiles(RUN, files.slice(0, 50), dir)).toContain(" src/file49.ts")
+  })
+
   it("leaves the command as it is when every file is gone", () => {
     expect(eslintOnFiles(RUN, ["src/deleted.ts"], dir)).toBe(RUN)
   })
@@ -215,7 +231,11 @@ describe("sources of report: eslint", () => {
 
   it.each([["README.md"], ["package.json"], ["src/Order.java"], ["styles.css"], ["notes.tsv"]])("%s is not one", (file) => {
     expect(isSourceOf("eslint", file)).toBe(false)
+  })
+
+  it("a TypeScript file is not a source of a Maven check", () => {
     expect(isSourceOf("maven", "src/a.ts")).toBe(false)
+    expect(isSourceOf("archunit", "src/a.ts")).toBe(false)
   })
 })
 

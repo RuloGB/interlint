@@ -4,7 +4,13 @@ export type QualityPlugin = (typeof QUALITY_PLUGINS)[number]
 /** Where a Maven project keeps its test classes, and so its `@ArchTest` classes. */
 export const TEST_SOURCES = "src/test/java"
 
-/** What `interlint init` found in the project. */
+/** What `interlint init` found in an npm project that runs ESLint. */
+export interface NpmFacts {
+  /** The name of its flat ESLint configuration file, such as `eslint.config.js`. */
+  eslintConfig: string
+}
+
+/** What `interlint init` found in a Maven project. */
 export interface ProjectFacts {
   /** Simple names of the test classes with `@ArchTest`. */
   archTestClasses: string[]

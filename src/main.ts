@@ -5,6 +5,7 @@ import { claudeCodeSettingsFiles } from "./adapters/driven/agents/claude-code-se
 import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript.js"
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
+import { scanEslintProjects } from "./adapters/driven/eslint/project-scan.js"
 import { eslintReader } from "./adapters/driven/eslint/report-reader.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
@@ -49,6 +50,7 @@ const DEPS: CliDeps = {
   feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter, transcriptModel },
   setup: {
     scan: scanMavenProjects,
+    scanNpm: scanEslintProjects,
     files: diskProjectFiles,
     config: yamlConfigFile,
     agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles },

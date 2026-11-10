@@ -1,14 +1,23 @@
 import type { Check } from "../../domain/check.js"
-import { projectChecks } from "../../domain/check-plan.js"
+import { npmChecks, projectChecks } from "../../domain/check-plan.js"
 import { MAVEN_DAEMON } from "../../domain/maven-command.js"
 import type { ExecutableLookup } from "../checking/ports.js"
-import type { AgentFiles, ConfigFile, PlannedFile, ProjectFiles, ProjectScanner, ScannedProject } from "./ports.js"
+import type {
+  AgentFiles,
+  ConfigFile,
+  NpmProjectScanner,
+  PlannedFile,
+  ProjectFiles,
+  ProjectScanner,
+  ScannedProject,
+} from "./ports.js"
 
 export const AGENTS = ["opencode", "claude-code"] as const
 export type Agent = (typeof AGENTS)[number]
 
 export interface InitDeps {
   scan: ProjectScanner
+  scanNpm: NpmProjectScanner
   files: ProjectFiles
   config: ConfigFile
   agents: Record<Agent, AgentFiles>
@@ -42,8 +51,8 @@ export type InitResult =
  * after the user edits the config.
  */
 export function initProject(projectDir: string, { agent, force }: InitRequest, deps: InitDeps): InitResult {
-  const projects = deps.scan(projectDir)
-  const checks = projects.flatMap(({ dir, facts }) => projectChecks(facts, dir))
+  const projects = scannedProjects(projectDir, deps)
+  const checks = projects.flatMap(checksOf)
   if (checks.length === 0) return { status: "nothing-to-check", projects }
 
   const config: PlannedFile = { path: deps.config.path, content: deps.config.render({ checks }), replace: force }
@@ -68,4 +77,20 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
     kept,
     daemonOnPath: deps.hasExecutable(MAVEN_DAEMON),
   }
+}
+
+function checksOf(project: ScannedProject): Check[] {
+  return "npm" in project ? npmChecks(project.npm, project.dir) : projectChecks(project.facts, project.dir)
+}
+
+/**
+ * The Maven and npm projects, sorted by directory. Without a Maven project the Maven scanner gives the root as one
+ * with nothing to check: it is left out when there is an npm project, so `init` does not list a project that is not there.
+ */
+function scannedProjects(projectDir: string, deps: InitDeps): ScannedProject[] {
+  const maven = deps.scan(projectDir)
+  const npm = deps.scanNpm(projectDir)
+  if (npm.length === 0) return maven
+  const real = maven.filter((project) => project.dir !== undefined || checksOf(project).length > 0)
+  return [...real, ...npm].sort((a, b) => (a.dir ?? "").localeCompare(b.dir ?? ""))
 }
