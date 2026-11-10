@@ -31,7 +31,10 @@ export interface NpmProject {
 
 export type ScannedProject = MavenProject | NpmProject
 
-/** The root itself when it is a Maven project, or else each one below it; the root when there is none. */
+/**
+ * The root itself when it is a Maven project, or else each one below it, sorted by directory. When there is none,
+ * the root alone, as a project with nothing to check.
+ */
 export type ProjectScanner = (rootDir: string) => MavenProject[]
 
 /**

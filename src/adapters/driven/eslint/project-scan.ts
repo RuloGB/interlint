@@ -3,7 +3,10 @@ import { join, relative, sep } from "node:path"
 import type { NpmProjectScanner } from "../../../application/setup/ports.js"
 import { FLAT_CONFIGS } from "./eslint-scope.js"
 
-/** Directories that never hold a project of a workspace. Hidden ones neither. */
+/**
+ * Directories that never hold a project of a workspace. Hidden ones neither. These limits are the Maven scanner's,
+ * kept here too because one driven adapter never imports another: change both together.
+ */
 const NOT_PROJECTS = new Set(["src", "target", "node_modules"])
 /** How deep below a workspace root a project is searched for, as for Maven projects. */
 const MAX_PROJECT_DEPTH = 3

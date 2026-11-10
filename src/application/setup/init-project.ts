@@ -80,17 +80,23 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
 }
 
 function checksOf(project: ScannedProject): Check[] {
-  return "npm" in project ? npmChecks(project.npm, project.dir) : projectChecks(project.facts, project.dir)
+  return "npm" in project ? npmChecks(project.dir) : projectChecks(project.facts, project.dir)
 }
 
 /**
- * The Maven and npm projects, sorted by directory. Without a Maven project the Maven scanner gives the root as one
- * with nothing to check: it is left out when there is an npm project, so `init` does not list a project that is not there.
+ * The Maven projects as their scanner gives them, or, when there is an npm project, both kinds sorted by directory.
+ * Without a Maven project the Maven scanner gives the root as one with nothing to check (see `ProjectScanner`): it is
+ * left out when there is an npm project, so `init` does not list a project that is not there.
+ * Directories compare by code unit, as the scanners sort them, so the file is the same on every machine.
  */
 function scannedProjects(projectDir: string, deps: InitDeps): ScannedProject[] {
   const maven = deps.scan(projectDir)
   const npm = deps.scanNpm(projectDir)
   if (npm.length === 0) return maven
   const real = maven.filter((project) => project.dir !== undefined || checksOf(project).length > 0)
-  return [...real, ...npm].sort((a, b) => (a.dir ?? "").localeCompare(b.dir ?? ""))
+  return [...real, ...npm].sort((a, b) => byCodeUnit(a.dir ?? "", b.dir ?? ""))
+}
+
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
 }

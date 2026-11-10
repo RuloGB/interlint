@@ -1,7 +1,7 @@
 import type { Check } from "./check.js"
 import { ESLINT_COMMAND } from "./eslint-command.js"
 import { mavenCommand } from "./maven-command.js"
-import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
+import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
 /**
  * PMD resolves types from the compiled classes, so its check compiles first. Compiling runs the lifecycle, and a
@@ -134,9 +134,9 @@ export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
 
 /**
  * The check of an npm project that runs ESLint, named and run in its `dir` as those of a Maven project. It runs
- * after each edit: ESLint on the edited files starts no build. `_facts` only says the project has ESLint.
+ * after each edit: ESLint on the edited files starts no build.
  */
-export function npmChecks(_facts: NpmFacts, dir?: string): Check[] {
+export function npmChecks(dir?: string): Check[] {
   return inDir([{ name: "eslint", run: ESLINT_COMMAND, report: "eslint", when: "edit" }], dir)
 }
 

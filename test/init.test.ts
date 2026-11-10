@@ -777,7 +777,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
     )
   })
 })
@@ -1126,10 +1126,12 @@ describe("interlint init with ESLint", () => {
       await run("init")
       writeFile("web/src/app.ts", "export const a = 1\n")
 
-      // Without dependencies installed npx fails, so the check that ran is the one named in the output.
-      const { stdout, stderr } = await run("check", "--when", "edit", "--file", "web/src/app.ts")
+      // PATH holds no npx here, so the command fails whatever is installed, and the output names it.
+      const { exitCode, stdout, stderr } = await run("check", "--when", "edit", "--file", "web/src/app.ts")
 
-      expect(stdout + stderr).toContain("web/eslint")
+      expect(exitCode).toBe(1)
+      expect(stdout + stderr).toContain("✗ web/eslint · the command failed")
+      expect(stdout + stderr).toContain(`  Command: ${ESLINT_RUN.slice(0, -1)}--no-warn-ignored src/app.ts`)
       expect(stdout + stderr).not.toContain("api/checkstyle")
     })
   })
@@ -1157,6 +1159,37 @@ describe("interlint init with ESLint", () => {
 
     expect(loadConfig(projectDir).checks).toEqual([{ name: "checkstyle", run: "mvn -q checkstyle:check", report: "maven", when: "edit" }])
     expect(stdout).not.toContain("ESLint")
+  })
+
+  it("does not say it looked for an npm project in a Maven project with nothing to check", async () => {
+    writeFile("pom.xml", "<project/>")
+    eslintProject("")
+
+    expect((await run("init")).stderr).toBe(
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+    )
+  })
+
+  it("looks for an npm project up to three levels down, and never in a hidden directory", async () => {
+    eslintProject("a/b/c/d")
+    eslintProject(".tools/web")
+
+    expect((await run("init")).exitCode).toBe(2)
+
+    eslintProject("a/b/c")
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks.map(({ name }) => name)).toEqual(["a/b/c/eslint"])
+  })
+
+  it("orders the projects by code unit, the same on every machine", async () => {
+    eslintProject("Zeta")
+    eslintProject("alpha")
+    writeFile("beta/pom.xml", CHECKSTYLE_POM)
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map(({ dir }) => dir)).toEqual(["Zeta", "alpha", "beta"])
   })
 
   it("finds no npm project inside a Maven project of a workspace", async () => {
