@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { AGENTS, type Agent, type InitDeps, initProject } from "../../../application/setup/init-project.js"
-import { AgentSetupError } from "../../../application/setup/ports.js"
+import { AgentSetupError, type MavenProject, type ScannedProject } from "../../../application/setup/ports.js"
 import {
   architectureCheck,
   coverageCheck,
@@ -11,7 +11,7 @@ import {
   SLOW_CHECK_EVERY,
   SLOW_CHECK_LINES,
 } from "../../../domain/check-plan.js"
-import { mavenCommand } from "../../../domain/maven-command.js"
+import { mavenCommand, usesMaven } from "../../../domain/maven-command.js"
 import {
   type ProjectFacts,
   QUALITY_PLUGINS,
@@ -22,6 +22,8 @@ import {
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 
 const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD" }
+/** What `init` looks for besides Maven projects, said when it looked for one and found nothing at all. */
+const NO_NPM_PROJECT = " No npm project with ESLint (eslint in package.json and an eslint.config file) was found either"
 
 export function init(args: string[], io: Io, deps: InitDeps): number {
   const { values } = parseInitArgs(args)
@@ -35,14 +37,15 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
   const result = initOrUsageError(projectDir, agent as Agent | undefined, values.force === true, deps)
 
   if (result.status === "nothing-to-check") {
+    const noNpmProject = noNpmProjectNote(result.npm)
     // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
     if (result.projects[0]?.dir === undefined) {
       throw new UsageError(
-        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.`,
+        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check.${noNpmProject} Nothing was written.`,
       )
     }
     throw new UsageError(
-      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}). Nothing was written.`,
+      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}).${noNpmProject} Nothing was written.`,
     )
   }
   if (result.status === "conflicts") {
@@ -55,7 +58,8 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
 
   const { projects } = result
   const single = projects.length === 1 && projects[0]?.dir === undefined
-  const kinds = editCheckKinds(projects.map(({ facts }) => facts))
+  const maven = projects.filter((project): project is MavenProject => "facts" in project)
+  const kinds = editCheckKinds(maven.map(({ facts }) => facts))
   const groups = bySchedule(kinds)
   const plural = (tools: string[]) => !single || tools.length > 1
   const subject = (tools: string[]) => `the ${listOf(tools)} ${plural(tools) ? "checks run" : "check runs"}`
@@ -64,15 +68,15 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     ? `on the PATH, so ${groups.map(({ tools, every }) => `${subject(tools)} ${schedule(every)}`).join(", and ")}`
     : `not on the PATH, so ${subject(all)} at task end; install mvnd to run ${plural(all) ? "them" : "it"} ${groups.length === 1 ? schedule(groups[0]?.every) : "after edits"}`
   const detected = single
-    ? ["Detected:", ...detectedLines(projects[0]!.facts, "  ")]
+    ? ["Detected:", ...detectedLines(projects[0]!, "  ")]
     : [
-        `Detected ${projects.length} Maven projects:`,
-        ...projects.flatMap(({ dir, facts }) => [`  ${dir}`, ...detectedLines(facts, "    ")]),
+        `Detected ${projects.length} ${maven.length === projects.length ? "Maven projects" : "projects"}:`,
+        ...projects.flatMap((project) => [`  ${project.dir ?? "."}`, ...detectedLines(project, "    ")]),
       ]
   io.stdout(
     [
       ...detected,
-      ...(result.checks.some((check) => check.when === "edit") ? [`  mvnd: ${daemon}`] : []),
+      ...(result.checks.some((check) => check.when === "edit" && usesMaven(check.run)) ? [`  mvnd: ${daemon}`] : []),
       "",
       ...section("Wrote:", result.written),
       ...section("Unchanged:", result.unchanged),
@@ -83,6 +87,16 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     ].join("\n"),
   )
   return EXIT.passed
+}
+
+/**
+ * That no npm project was found, with the `package.json` files that could not be read, since one of them may be
+ * why. Nothing when none was looked for, as in a Maven project.
+ */
+function noNpmProjectNote({ searched, unreadable }: { searched: boolean; unreadable: string[] }): string {
+  if (!searched) return ""
+  if (unreadable.length === 0) return `${NO_NPM_PROJECT}.`
+  return `${NO_NPM_PROJECT}: ${listOf(unreadable)} ${unreadable.length === 1 ? "is" : "are"} not valid JSON.`
 }
 
 function initOrUsageError(projectDir: string, agent: Agent | undefined, force: boolean, deps: InitDeps) {
@@ -126,8 +140,12 @@ function listOf(items: string[]): string {
   return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 }
 
-/** What `init` found in one project. In a workspace, a project with nothing to check says so. */
-function detectedLines(facts: ProjectFacts, indent: string): string[] {
+/** What `init` found in one project. In a workspace, a Maven project with nothing to check says so. */
+function detectedLines(project: ScannedProject, indent: string): string[] {
+  if ("npm" in project) {
+    return [`${indent}ESLint: eslint in package.json and ${project.npm.eslintConfig}, so the eslint check runs after each edit`]
+  }
+  const { facts } = project
   if (projectChecks(facts).length === 0 && facts.archTestModules.length === 0) return [`${indent}nothing to check`]
   const modules = facts.archTestModules.filter((module) => module !== "")
   return [

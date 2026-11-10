@@ -4,7 +4,7 @@ Guide for AI coding agents working on this repository. For what Interlint does, 
 
 ## What this project is
 
-Interlint is a Node CLI (`interlint`, TypeScript, ESM) that runs a project's existing checks (ArchUnit, Checkstyle, PMD on Maven) inside an AI agent's session and feeds violations back to the agent. It integrates with:
+Interlint is a Node CLI (`interlint`, TypeScript, ESM) that runs a project's existing checks (ArchUnit, Checkstyle, PMD and JaCoCo on Maven; ESLint on npm projects) inside an AI agent's session and feeds violations back to the agent. It integrates with:
 
 - **Claude Code** through hooks written to `.claude/settings.json` ([docs/claude-code.md](docs/claude-code.md)).
 - **OpenCode** through the plugin in `integrations/opencode/interlint/` ([docs/opencode.md](docs/opencode.md)).
@@ -34,7 +34,7 @@ Before you report a change as done, run `npm run typecheck`, `npm run build` and
 | `src/domain/` | Pure model: checks, violations, Maven commands, project facts | Nothing outside `domain` |
 | `src/application/<use-case>/` | Use cases (`checking`, `feedback`, `setup`) and their `ports.ts` | `domain` only |
 | `src/adapters/driving/` | Entry points: the CLI and the Claude Code hook | `domain`, `application` |
-| `src/adapters/driven/<adapter>/` | Implementations of ports: `fs`, `maven`, `process`, `state`, `yaml-config`, `agents` | `domain`, `application`, and its own adapter only |
+| `src/adapters/driven/<adapter>/` | Implementations of ports: `fs`, `maven`, `eslint`, `process`, `state`, `yaml-config`, `agents` | `domain`, `application`, and its own adapter only |
 | `src/main.ts` | Composition root: wires use cases to adapters | Anything |
 
 Rules that follow from it:

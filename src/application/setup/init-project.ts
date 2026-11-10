@@ -1,14 +1,26 @@
 import type { Check } from "../../domain/check.js"
-import { projectChecks } from "../../domain/check-plan.js"
+import { npmChecks, projectChecks } from "../../domain/check-plan.js"
 import { MAVEN_DAEMON } from "../../domain/maven-command.js"
 import type { ExecutableLookup } from "../checking/ports.js"
-import type { AgentFiles, ConfigFile, PlannedFile, ProjectFiles, ProjectScanner, ScannedProject } from "./ports.js"
+import type {
+  AgentFiles,
+  ConfigFile,
+  MavenProject,
+  NpmProject,
+  NpmProjectScanner,
+  NpmScan,
+  PlannedFile,
+  ProjectFiles,
+  ProjectScanner,
+  ScannedProject,
+} from "./ports.js"
 
 export const AGENTS = ["opencode", "claude-code"] as const
 export type Agent = (typeof AGENTS)[number]
 
 export interface InitDeps {
   scan: ProjectScanner
+  scanNpm: NpmProjectScanner
   files: ProjectFiles
   config: ConfigFile
   agents: Record<Agent, AgentFiles>
@@ -22,7 +34,8 @@ export interface InitRequest {
 }
 
 export type InitResult =
-  | { status: "nothing-to-check"; projects: ScannedProject[] }
+  /** `npm` says whether npm projects were looked for, and the `package.json` files that could not be read. */
+  | { status: "nothing-to-check"; projects: ScannedProject[]; npm: Pick<NpmScan, "searched" | "unreadable"> }
   /** Nothing was written: these files exist, differ, and may not be replaced. */
   | { status: "conflicts"; paths: string[] }
   | {
@@ -42,9 +55,12 @@ export type InitResult =
  * after the user edits the config.
  */
 export function initProject(projectDir: string, { agent, force }: InitRequest, deps: InitDeps): InitResult {
-  const projects = deps.scan(projectDir)
-  const checks = projects.flatMap(({ dir, facts }) => projectChecks(facts, dir))
-  if (checks.length === 0) return { status: "nothing-to-check", projects }
+  const npm = deps.scanNpm(projectDir)
+  const projects = scannedProjects(deps.scan(projectDir), npm.projects)
+  const checks = projects.flatMap(checksOf)
+  if (checks.length === 0) {
+    return { status: "nothing-to-check", projects, npm: { searched: npm.searched, unreadable: npm.unreadable } }
+  }
 
   const config: PlannedFile = { path: deps.config.path, content: deps.config.render({ checks }), replace: force }
   const agentFiles = agent === undefined ? [] : deps.agents[agent](projectDir)
@@ -68,4 +84,24 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
     kept,
     daemonOnPath: deps.hasExecutable(MAVEN_DAEMON),
   }
+}
+
+function checksOf(project: ScannedProject): Check[] {
+  return "npm" in project ? npmChecks(project.dir) : projectChecks(project.facts, project.dir)
+}
+
+/**
+ * The Maven projects as their scanner gives them, or, when there is an npm project, both kinds sorted by directory.
+ * Without a Maven project the Maven scanner gives the root as one with nothing to check (see `ProjectScanner`): it is
+ * left out when there is an npm project, so `init` does not list a project that is not there.
+ * Directories compare by code unit, as the scanners sort them, so the file is the same on every machine.
+ */
+function scannedProjects(maven: MavenProject[], npm: NpmProject[]): ScannedProject[] {
+  if (npm.length === 0) return maven
+  const real = maven.filter((project) => project.dir !== undefined || checksOf(project).length > 0)
+  return [...real, ...npm].sort((a, b) => byCodeUnit(a.dir ?? "", b.dir ?? ""))
+}
+
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
 }

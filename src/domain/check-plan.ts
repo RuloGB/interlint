@@ -1,4 +1,5 @@
 import type { Check } from "./check.js"
+import { ESLINT_COMMAND } from "./eslint-command.js"
 import { mavenCommand } from "./maven-command.js"
 import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
@@ -122,13 +123,24 @@ export function coverageCheck(facts: ProjectFacts): Check | undefined {
 }
 
 /**
- * Every check of one project. A project in a directory of the workspace (`dir`) runs there, and its checks are
- * named after it, as in `orders/architecture`, so the checks of several projects never share a name.
+ * Every check of one Maven project. A project in a directory of the workspace (`dir`) runs there, and its checks
+ * are named after it, as in `orders/architecture`, so the checks of several projects never share a name.
  */
 export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
   const architecture = architectureCheck(facts)
   const coverage = coverageCheck(facts)
-  const checks = [...(architecture ? [architecture] : []), ...qualityChecks(facts), ...(coverage ? [coverage] : [])]
+  return inDir([...(architecture ? [architecture] : []), ...qualityChecks(facts), ...(coverage ? [coverage] : [])], dir)
+}
+
+/**
+ * The check of an npm project that runs ESLint, named and run in its `dir` as those of a Maven project. It runs
+ * after each edit: ESLint on the edited files starts no build.
+ */
+export function npmChecks(dir?: string): Check[] {
+  return inDir([{ name: "eslint", run: ESLINT_COMMAND, report: "eslint", when: "edit" }], dir)
+}
+
+function inDir(checks: Check[], dir: string | undefined): Check[] {
   if (dir === undefined) return checks
   return checks.map(({ name, ...rest }) => ({ name: `${dir}/${name}`, dir, ...rest }))
 }

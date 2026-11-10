@@ -20,7 +20,7 @@ interlint --version
 
 ## `interlint init`
 
-Run it in the root of your Maven project, or of a workspace that holds several (see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces)), with the agent you use (`opencode` or `claude-code`):
+Run it in the root of your Maven or npm project, or of a workspace that holds several (see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces)), with the agent you use (`opencode` or `claude-code`):
 
 ```bash
 interlint init --agent opencode
@@ -57,7 +57,8 @@ checks:
 - When the build runs a plugin's `check` goal in an `<execution>`, the check names that execution, as in `checkstyle:check@style`, so the configuration inside it applies: called plainly, Maven runs the goal with the plugin's defaults. An execution without `<id>` is `default`; one turned off with `<phase>none</phase>` is left out.
 - A plugin counts when it is in `<build>`, in `<plugins>` or `<pluginManagement>`. Plugins only in a comment, a `<profile>`, `<reporting>`, `<dependencies>` or `<dependencyManagement>` are left out, and so are plugins declared only in an external parent. In a project with modules, see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces).
 - When the build runs `jacoco:check`, it adds a `coverage` check that runs at task end only. See [JaCoCo coverage](#jacoco-coverage).
-- With no `@ArchTest` classes, no Checkstyle or PMD plugin and no JaCoCo `check` goal it says so, writes nothing and exits with 2.
+- In an npm project with ESLint, it writes an `eslint` check that runs after each edit. See [ESLint](#eslint).
+- With no `@ArchTest` classes, no Checkstyle or PMD plugin, no JaCoCo `check` goal and no npm project with ESLint it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
 - At the end it prints what it detected and which files it wrote, left unchanged or kept. `--cwd <dir>` runs it on another directory.
@@ -188,6 +189,41 @@ Fix these problems before continuing.
 - When Maven exits 0 but JaCoCo checked no rule, as with `-Djacoco.skip` or without execution data, the check fails: nothing proves the coverage is met.
 - With `--changed`, a build the agent ran since its last change, such as `mvn clean install`, spares the tests: Interlint runs only the command's `jacoco:check` goals on the coverage data that build left, in a second or two, and the check passes "in the last build" when every rule is met. See [Reports from the agent's own build](#reports-from-the-agents-own-build).
 
+## ESLint
+
+A check with `report: eslint` runs the project's own ESLint, with its configuration, and reads its JSON report. `init` writes it for an npm project that lists `eslint` in the `dependencies` or `devDependencies` of its `package.json` and has a flat configuration file (`eslint.config.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts`):
+
+```yaml
+checks:
+  - name: eslint
+    run: npx --no -- eslint -f json -o node_modules/.cache/interlint/eslint.json .
+    report: eslint
+    when: edit
+```
+
+Each broken rule shows its message, file and line, like a Checkstyle rule:
+
+```text
+✗ eslint · @typescript-eslint/no-explicit-any
+
+  Unexpected any. Specify a different type.
+    at src/orders/order.ts:1
+
+Fix these problems before continuing.
+```
+
+- The report must go to `node_modules/.cache/interlint/eslint.json`, relative to the directory the check runs in, with `-f json -o`: that is where Interlint reads it. It is outside git, and ESLint creates the directory.
+- `npx --no` runs the ESLint installed in the project and never downloads one. Keep the `--`: without it, npx takes `-f` for itself.
+- Your ESLint configuration decides, not Interlint. The check fails only when ESLint fails. A warning your project accepts does not block and is not shown. When ESLint fails with errors, only the errors are shown. When it fails on warnings alone, as with `--max-warnings 0`, the warnings are shown.
+- An error without a rule, such as a file ESLint cannot parse, shows under `ESLint` with its file and line.
+- When ESLint fails before it checks any file, as with a broken configuration or without `node_modules`, the check shows the last lines of its output instead, and still blocks.
+- The check needs no `mvnd`. After an edit, the ` .` at the end of the command is replaced with the edited files, so ESLint checks only them, and only their failures are shown. With a flat configuration the command also gets `--no-warn-ignored`, so editing a file ESLint ignores does not fail under `--max-warnings 0`.
+- After an edit, ESLint checks the whole project, and still shows only the failures of the edited files, when the command does not end with ` .` (such as `npm run lint -- …`), when it is more than one program (`&&`, `|`, `>`…), when more than 50 files are pending, or when a path has characters other than ASCII letters, digits, `_`, `.`, `-`, `/`, `@` and `+` (such as `[id].tsx`). When another file then has errors, a warning in the edited file that fails `--max-warnings` shows at task end, not after the edit.
+- With the older configuration (`.eslintrc*`), `init` writes no check. Write it yourself, and name the extensions as that ESLint needs: `npx --no -- eslint --ext .ts -f json -o node_modules/.cache/interlint/eslint.json .`
+- `init` looks for npm projects with ESLint in the root and, when the root is not one, up to three levels below it. In a monorepo whose root has ESLint it writes one check for the root and does not look for a configuration in each package: add those checks yourself, each with its `dir`.
+- A `package.json` that is not valid JSON next to an ESLint configuration is not a project for `init`. When it then finds nothing to check, it names that file.
+- Not checked yet on npm projects: `tsc` and coverage.
+
 ## After each edit
 
 A check with `when: edit` also runs after the agent changes one of its sources:
@@ -196,11 +232,11 @@ A check with `when: edit` also runs after the agent changes one of its sources:
 interlint check --when edit --file src/main/java/shop/Order.java
 ```
 
-- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
+- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`, and `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `*.js`, `*.jsx`, `*.mjs` and `*.cjs` for `report: eslint`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
 - The output and exit codes are the same as at task end. `--file` can be repeated.
 - `--lines <n>` gives the lines the edit wrote in a file, for checks with [`lines`](#every-n-files-or-lines). Give one `--lines` after each `--file`, as in `--file A.java --lines 12 --file B.java --lines 0`, or none at all: files without it wrote no lines. The agent integrations always give it.
 - With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
-- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end.
+- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end. Other `edit` checks, such as an [ESLint](#eslint) check, run after edits with or without it.
 - A `report: maven` check shows only the failures of the changed files: Checkstyle and PMD rate each file on its own, so another file's failures are not the edit's, and task end shows them. When Maven failed only because of other files, the check passes after the edit. An ArchUnit check shows every failure, because an edit can break a rule in a class it did not change.
 - A `run` with `checkstyle:check` gets `-Dcheckstyle.includes` with the changed files' paths from their source root, such as `shop/Order.java`, and `-Dcheckstyle.includeResources=false -Dcheckstyle.includeTestResources=false`, so Checkstyle checks only those files, still with the build's configuration. PMD cannot be limited from the command line, so it checks the whole project.
 - Checkstyle also checks the whole project when the `run` sets `checkstyle.includes` itself or is more than one program (`&&`, `|`, `>`…), when a path is not plain ASCII, when a `pom.xml` of the project or `.mvn/maven.config` names `checkstyle.includes` (the `-D` would replace it, and the edit would check files the build never checks), or when the plugin's configuration in `pom.xml` sets `<includes>`, which Maven applies over `-D`.
@@ -305,7 +341,8 @@ checks:
 
 - `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` does not exist, a typo or a removed Git submodule, fails at every task end with `✗ <check> · its dir "<dir>" does not exist`, changed or not, so the agent and you always see it; the other projects still run. After an edit it is left to task end, so it does not block every edit.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
-- After an edit, only the `edit` checks of the project that holds the file run. A file outside every Maven project runs nothing.
+- A workspace can mix Maven projects and npm projects with [ESLint](#eslint): `init` writes the checks of each, such as `web/eslint` with `dir: web`. It looks for an npm project in the root and up to three levels below it, never inside a Maven project.
+- After an edit, only the `edit` checks of the project that holds the file run. A file outside every project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
 
 ## Metrics
@@ -326,7 +363,7 @@ Each line is a JSON object:
 - `v` is the version of the line format. `project` is the folder name of the project, not its path.
 - `when` is `edit` or `task-end`. `report` is the check's `report`.
 - `result` is `passed`, `violations`, `failed` (the command failed without a report that explains it), `missing-dir`, `broken-build` or `skipped`. A skipped check has `skipped`: `pending` (it waits for more edits, see [Every N files or lines](#every-n-files-or-lines)), `unchanged` (its project did not change since its checks passed, with `--changed`) or `build` (it passed on the reports of the agent's own build).
-- `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle` or `pmd`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
+- `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle`, `pmd`, `coverage` or `eslint`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
 - `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
 
 The lines are plain text: you can read them with any tool, and they never leave your machine. Interlint has no telemetry, no account and no server, and makes no network calls: `interlint metrics` and `interlint metrics report` read these files on your machine, and the HTML and PDF reports load nothing from the internet. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
