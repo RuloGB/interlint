@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { basename, join, relative, sep } from "node:path"
 import type { ProjectScanner } from "../../../application/setup/ports.js"
 import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, TEST_SOURCES } from "../../../domain/project-facts.js"
+import { MAX_PROJECT_DEPTH, NOT_PROJECT_DIRS } from "../../../domain/workspace.js"
 import { declaredModules } from "./modules.js"
 
 const ARCH_TEST = /@(?:[\w.]+\.)?ArchTest\b/
@@ -29,11 +30,6 @@ const JACOCO_PLUGIN = "jacoco-maven-plugin"
 /** The id Maven gives an execution without `<id>`. */
 const DEFAULT_EXECUTION_ID = "default"
 
-/** Directories that never hold a Maven project of a workspace. Hidden ones neither. */
-const NOT_PROJECTS = new Set(["src", "target", "node_modules"])
-/** How deep below a workspace root a Maven project is searched for. */
-const MAX_PROJECT_DEPTH = 3
-
 /**
  * The Maven projects Interlint runs from `rootDir`, as `/`-separated paths relative to it: the root itself (`""`)
  * when it has a `pom.xml`, and otherwise each directory below it with a `pom.xml` that is not inside another one
@@ -55,7 +51,7 @@ function projectsBelow(dir: string, depth: number): string[] {
     return []
   }
   return entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !NOT_PROJECTS.has(entry.name))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !NOT_PROJECT_DIRS.has(entry.name))
     .map((entry) => entry.name)
     .sort()
     .flatMap((name) => {

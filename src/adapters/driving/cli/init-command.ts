@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { AGENTS, type Agent, type InitDeps, initProject } from "../../../application/setup/init-project.js"
 import { AgentSetupError, type MavenProject, type ScannedProject } from "../../../application/setup/ports.js"
@@ -22,11 +22,8 @@ import {
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 
 const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD" }
-/**
- * What `init` looks for besides Maven projects, said when it finds nothing at all. A Maven project at the root is
- * never searched for an npm project, so it is not said there.
- */
-const NO_NPM_PROJECT = " No npm project with ESLint (eslint in package.json and an eslint.config file) was found either."
+/** What `init` looks for besides Maven projects, said when it looked for one and found nothing at all. */
+const NO_NPM_PROJECT = " No npm project with ESLint (eslint in package.json and an eslint.config file) was found either"
 
 export function init(args: string[], io: Io, deps: InitDeps): number {
   const { values } = parseInitArgs(args)
@@ -40,7 +37,7 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
   const result = initOrUsageError(projectDir, agent as Agent | undefined, values.force === true, deps)
 
   if (result.status === "nothing-to-check") {
-    const noNpmProject = existsSync(join(projectDir, "pom.xml")) ? "" : NO_NPM_PROJECT
+    const noNpmProject = noNpmProjectNote(result.npm)
     // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
     if (result.projects[0]?.dir === undefined) {
       throw new UsageError(
@@ -90,6 +87,16 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     ].join("\n"),
   )
   return EXIT.passed
+}
+
+/**
+ * That no npm project was found, with the `package.json` files that could not be read, since one of them may be
+ * why. Nothing when none was looked for, as in a Maven project.
+ */
+function noNpmProjectNote({ searched, unreadable }: { searched: boolean; unreadable: string[] }): string {
+  if (!searched) return ""
+  if (unreadable.length === 0) return `${NO_NPM_PROJECT}.`
+  return `${NO_NPM_PROJECT}: ${listOf(unreadable)} ${unreadable.length === 1 ? "is" : "are"} not valid JSON.`
 }
 
 function initOrUsageError(projectDir: string, agent: Agent | undefined, force: boolean, deps: InitDeps) {

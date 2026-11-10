@@ -1,69 +1,70 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
-import type { NpmProjectScanner } from "../../../application/setup/ports.js"
+import type { NpmProject, NpmProjectScanner } from "../../../application/setup/ports.js"
+import { MAVEN_BUILD_FILE, MAX_PROJECT_DEPTH, NOT_PROJECT_DIRS } from "../../../domain/workspace.js"
 import { FLAT_CONFIGS } from "./eslint-scope.js"
 
-/**
- * Directories that never hold a project of a workspace. Hidden ones neither. These limits are the Maven scanner's,
- * kept here too because one driven adapter never imports another: change both together.
- */
-const NOT_PROJECTS = new Set(["src", "target", "node_modules"])
-/** How deep below a workspace root a project is searched for, as for Maven projects. */
-const MAX_PROJECT_DEPTH = 3
-/** The file that makes a directory a Maven project. */
-const MAVEN_BUILD = "pom.xml"
+const MANIFEST = "package.json"
+
+/** What a directory holds: an npm project with ESLint, a manifest that cannot be read next to a configuration, or neither. */
+type Found = { eslintConfig: string } | { unreadable: true } | undefined
 
 /**
  * The npm projects with ESLint `init` writes a check for: the root itself, or else each directory below it, up to
- * three levels down, that is not inside another one. A Maven project is never one, and none is looked for inside it.
+ * three levels down, that is not inside another one. A Maven project is never one, and none is looked for inside
+ * it: at a Maven root nothing is searched.
  */
 export const scanEslintProjects: NpmProjectScanner = (rootDir) => {
-  if (existsSync(join(rootDir, MAVEN_BUILD))) return []
-  const eslintConfig = eslintConfigOf(rootDir)
-  if (eslintConfig !== undefined) return [{ npm: { eslintConfig } }]
-  return projectsBelow(rootDir, 1).map(({ dir, eslintConfig }) => ({
-    dir: relative(rootDir, dir).split(sep).join("/"),
-    npm: { eslintConfig },
-  }))
+  if (existsSync(join(rootDir, MAVEN_BUILD_FILE))) return { searched: false, projects: [], unreadable: [] }
+  const projects: NpmProject[] = []
+  const unreadable: string[] = []
+  const visit = (dir: string, depth: number): void => {
+    const found = inspect(dir)
+    const path = relative(rootDir, dir).split(sep).join("/")
+    if (found !== undefined && "eslintConfig" in found) {
+      projects.push({ ...(path === "" ? {} : { dir: path }), npm: { eslintConfig: found.eslintConfig } })
+      return
+    }
+    if (found !== undefined) unreadable.push(path === "" ? MANIFEST : `${path}/${MANIFEST}`)
+    if (depth >= MAX_PROJECT_DEPTH) return
+    for (const child of childDirs(dir)) {
+      if (!existsSync(join(child, MAVEN_BUILD_FILE))) visit(child, depth + 1)
+    }
+  }
+  visit(rootDir, 0)
+  return { searched: true, projects, unreadable }
 }
 
-function projectsBelow(dir: string, depth: number): { dir: string; eslintConfig: string }[] {
-  if (depth > MAX_PROJECT_DEPTH) return []
-  let entries
+/** The directories below `dir` that can hold a project, sorted by name. */
+function childDirs(dir: string): string[] {
   try {
-    entries = readdirSync(dir, { withFileTypes: true })
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !NOT_PROJECT_DIRS.has(entry.name))
+      .map((entry) => entry.name)
+      .sort()
+      .map((name) => join(dir, name))
   } catch {
     return []
   }
-  return entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !NOT_PROJECTS.has(entry.name))
-    .map((entry) => entry.name)
-    .sort()
-    .flatMap((name) => {
-      const child = join(dir, name)
-      if (existsSync(join(child, MAVEN_BUILD))) return []
-      const eslintConfig = eslintConfigOf(child)
-      return eslintConfig === undefined ? projectsBelow(child, depth + 1) : [{ dir: child, eslintConfig }]
-    })
 }
 
 /**
- * The flat ESLint configuration file of the directory, when its `package.json` also lists `eslint` among its
- * dependencies: the project then runs its own ESLint. Otherwise nothing (decision 56).
+ * A directory is an npm project with ESLint when it has a flat ESLint configuration file and its `package.json`
+ * lists `eslint` among its dependencies: the project then runs its own ESLint (decision 56).
  */
-function eslintConfigOf(dir: string): string | undefined {
-  const config = FLAT_CONFIGS.find((name) => existsSync(join(dir, name)))
-  return config !== undefined && dependsOnEslint(join(dir, "package.json")) ? config : undefined
-}
-
-function dependsOnEslint(packageJson: string): boolean {
+function inspect(dir: string): Found {
+  const eslintConfig = FLAT_CONFIGS.find((name) => existsSync(join(dir, name)))
+  const manifest = join(dir, MANIFEST)
+  if (eslintConfig === undefined || !existsSync(manifest)) return undefined
+  let parsed: unknown
   try {
-    const manifest: unknown = JSON.parse(readFileSync(packageJson, "utf8"))
-    if (!isRecord(manifest)) return false
-    return [manifest.dependencies, manifest.devDependencies].some((group) => isRecord(group) && "eslint" in group)
+    parsed = JSON.parse(readFileSync(manifest, "utf8"))
   } catch {
-    return false
+    return { unreadable: true }
   }
+  if (!isRecord(parsed)) return { unreadable: true }
+  const listsEslint = [parsed.dependencies, parsed.devDependencies].some((group) => isRecord(group) && "eslint" in group)
+  return listsEslint ? { eslintConfig } : undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

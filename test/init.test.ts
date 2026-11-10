@@ -1062,7 +1062,6 @@ describe("interlint init with ESLint", () => {
   it.each([
     ["package.json does not list eslint", () => (writeFile("package.json", '{"devDependencies":{"typescript":"^5.6.0"}}'), writeFile("eslint.config.js", ""))],
     ["there is no package.json", () => writeFile("eslint.config.js", "")],
-    ["package.json is not valid JSON", () => (writeFile("package.json", "{"), writeFile("eslint.config.js", ""))],
     ["the configuration is the older .eslintrc", () => (writeFile("package.json", '{"devDependencies":{"eslint":"^8.57.0"}}'), writeFile(".eslintrc.json", "{}"))],
   ])("writes nothing when %s", async (_case, arrange) => {
     arrange()
@@ -1204,11 +1203,53 @@ describe("interlint init with ESLint", () => {
     eslintProject("")
     writeFile("api/pom.xml", CHECKSTYLE_POM)
 
-    await run("init")
+    installMavenDaemon()
+
+    const { stdout } = await run("init")
 
     expect(loadConfig(projectDir).checks.map(({ name, dir }) => [name, dir])).toEqual([
       ["eslint", undefined],
       ["api/checkstyle", "api"],
     ])
+    expect(stdout).toBe(
+      [
+        "Detected 2 projects:",
+        "  .",
+        "    ESLint: eslint in package.json and eslint.config.js, so the eslint check runs after each edit",
+        "  api",
+        "    ArchUnit tests: none",
+        "    Checkstyle: maven-checkstyle-plugin in pom.xml",
+        "    Maven: mvn (no Maven Wrapper)",
+        "  mvnd: on the PATH, so the Checkstyle checks run after each edit",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("names a package.json it cannot read next to an ESLint configuration", async () => {
+    writeFile("package.json", "{")
+    writeFile("eslint.config.js", "")
+    writeFile("apps/web/package.json", "not json")
+    writeFile("apps/web/eslint.config.mjs", "")
+    writeFile("docs/package.json", "{")
+
+    expect(await run("init")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
+    })
+  })
+
+  it("still writes the checks of the other projects next to a package.json it cannot read", async () => {
+    eslintProject("web")
+    writeFile("admin/package.json", "{")
+    writeFile("admin/eslint.config.js", "")
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks.map(({ name }) => name)).toEqual(["web/eslint"])
   })
 })

@@ -154,7 +154,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 Known limits:
 
-- Only Maven projects and npm projects with ESLint. On npm projects there is no `tsc` check and no coverage check yet, and `init` does not look for an ESLint configuration in each package of a monorepo.
+- Only Maven projects and npm projects with ESLint. On npm projects there is no `tsc` check and no coverage check yet. In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package.
 - `init` finds ESLint only with its flat configuration (`eslint.config.*`). With `.eslintrc`, [write the check yourself](docs/usage.md#eslint).
 - PMD cannot be limited to one file from the command line, so it checks the whole project each time it runs. `init` gives it [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so it waits for 5 edited files or 100 written lines and shows the failures of all of them.
 

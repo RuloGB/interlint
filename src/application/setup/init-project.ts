@@ -5,7 +5,10 @@ import type { ExecutableLookup } from "../checking/ports.js"
 import type {
   AgentFiles,
   ConfigFile,
+  MavenProject,
+  NpmProject,
   NpmProjectScanner,
+  NpmScan,
   PlannedFile,
   ProjectFiles,
   ProjectScanner,
@@ -31,7 +34,8 @@ export interface InitRequest {
 }
 
 export type InitResult =
-  | { status: "nothing-to-check"; projects: ScannedProject[] }
+  /** `npm` says whether npm projects were looked for, and the `package.json` files that could not be read. */
+  | { status: "nothing-to-check"; projects: ScannedProject[]; npm: Pick<NpmScan, "searched" | "unreadable"> }
   /** Nothing was written: these files exist, differ, and may not be replaced. */
   | { status: "conflicts"; paths: string[] }
   | {
@@ -51,9 +55,12 @@ export type InitResult =
  * after the user edits the config.
  */
 export function initProject(projectDir: string, { agent, force }: InitRequest, deps: InitDeps): InitResult {
-  const projects = scannedProjects(projectDir, deps)
+  const npm = deps.scanNpm(projectDir)
+  const projects = scannedProjects(deps.scan(projectDir), npm.projects)
   const checks = projects.flatMap(checksOf)
-  if (checks.length === 0) return { status: "nothing-to-check", projects }
+  if (checks.length === 0) {
+    return { status: "nothing-to-check", projects, npm: { searched: npm.searched, unreadable: npm.unreadable } }
+  }
 
   const config: PlannedFile = { path: deps.config.path, content: deps.config.render({ checks }), replace: force }
   const agentFiles = agent === undefined ? [] : deps.agents[agent](projectDir)
@@ -89,9 +96,7 @@ function checksOf(project: ScannedProject): Check[] {
  * left out when there is an npm project, so `init` does not list a project that is not there.
  * Directories compare by code unit, as the scanners sort them, so the file is the same on every machine.
  */
-function scannedProjects(projectDir: string, deps: InitDeps): ScannedProject[] {
-  const maven = deps.scan(projectDir)
-  const npm = deps.scanNpm(projectDir)
+function scannedProjects(maven: MavenProject[], npm: NpmProject[]): ScannedProject[] {
   if (npm.length === 0) return maven
   const real = maven.filter((project) => project.dir !== undefined || checksOf(project).length > 0)
   return [...real, ...npm].sort((a, b) => byCodeUnit(a.dir ?? "", b.dir ?? ""))

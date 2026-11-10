@@ -220,7 +220,9 @@ Fix these problems before continuing.
 - The check needs no `mvnd`. After an edit, the ` .` at the end of the command is replaced with the edited files, so ESLint checks only them, and only their failures are shown. With a flat configuration the command also gets `--no-warn-ignored`, so editing a file ESLint ignores does not fail under `--max-warnings 0`.
 - After an edit, ESLint checks the whole project, and still shows only the failures of the edited files, when the command does not end with ` .` (such as `npm run lint -- …`), when it is more than one program (`&&`, `|`, `>`…), when more than 50 files are pending, or when a path has characters other than ASCII letters, digits, `_`, `.`, `-`, `/`, `@` and `+` (such as `[id].tsx`). When another file then has errors, a warning in the edited file that fails `--max-warnings` shows at task end, not after the edit.
 - With the older configuration (`.eslintrc*`), `init` writes no check. Write it yourself, and name the extensions as that ESLint needs: `npx --no -- eslint --ext .ts -f json -o node_modules/.cache/interlint/eslint.json .`
-- Not checked yet on npm projects: `tsc`, coverage, and a monorepo with one ESLint configuration per package.
+- `init` looks for npm projects with ESLint in the root and, when the root is not one, up to three levels below it. In a monorepo whose root has ESLint it writes one check for the root and does not look for a configuration in each package: add those checks yourself, each with its `dir`.
+- A `package.json` that is not valid JSON next to an ESLint configuration is not a project for `init`. When it then finds nothing to check, it names that file.
+- Not checked yet on npm projects: `tsc` and coverage.
 
 ## After each edit
 

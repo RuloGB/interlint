@@ -37,11 +37,20 @@ export type ScannedProject = MavenProject | NpmProject
  */
 export type ProjectScanner = (rootDir: string) => MavenProject[]
 
-/**
- * The root itself when it is an npm project with ESLint, or else each one below it, and none when there is none.
- * A Maven project is never one, and none is looked for inside it (decision 55).
- */
-export type NpmProjectScanner = (rootDir: string) => NpmProject[]
+/** What looking for npm projects with ESLint gave. */
+export interface NpmScan {
+  /** False when the root is a Maven project: none is looked for inside one (decision 55). */
+  searched: boolean
+  /** The root itself when it is one, or else each one below it, sorted by directory. */
+  projects: NpmProject[]
+  /**
+   * The `package.json` files that are not valid JSON next to an ESLint configuration, `/`-separated and relative
+   * to the root: their directories may be projects `init` could not tell.
+   */
+  unreadable: string[]
+}
+
+export type NpmProjectScanner = (rootDir: string) => NpmScan
 
 /** The file `init` writes the checks to. */
 export interface ConfigFile {
