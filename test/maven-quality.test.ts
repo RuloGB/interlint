@@ -514,10 +514,24 @@ describe("parseSpotBugsXml", () => {
     expect(parseSpotBugsXml(xml, PROJECT).map((failure) => failure.title)).toEqual(["COMMAND_INJECTION"])
   })
 
-  it("gives the file without a path when the report names no source dir", () => {
+  it("looks for the source in src/main/java when the report names no source dir", () => {
     const xml = spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")])
 
-    expect(parseSpotBugsXml(xml, PROJECT)[0]?.violations).toEqual([{ text: "Command Injection", file: "Order.java", line: 19 }])
+    expect(parseSpotBugsXml(xml, PROJECT)[0]?.violations).toEqual([
+      { text: "Command Injection", file: "Order.java", line: 19, path: "src/main/java/shop/Order.java" },
+    ])
+  })
+
+  it("places a bug without its own source line by its field's, method's or class's", () => {
+    const sourceLine = (start: number) =>
+      `<SourceLine classname='shop.Order' start='${start}' end='${start + 20}' sourcepath='shop/Order.java' sourcefile='Order.java'/>`
+    const classLevel = `<BugInstance type='SE_BAD_FIELD' priority='2'><LongMessage>Non-serializable field</LongMessage><Class classname='shop.Order' primary='true'>${sourceLine(3)}</Class><Field classname='shop.Order' name='lock' primary='true'>${sourceLine(9)}</Field></BugInstance>`
+    const onlyClass = `<BugInstance type='CN_IDIOM' priority='2'><LongMessage>Clone without super.clone</LongMessage><Class classname='shop.Order' primary='true'>${sourceLine(3)}</Class></BugInstance>`
+
+    expect(parseSpotBugsXml(spotbugsXml([srcDir], [classLevel, onlyClass]), PROJECT).map((failure) => failure.violations)).toEqual([
+      [{ text: "Non-serializable field", file: "Order.java", line: 9, path: "src/main/java/shop/Order.java" }],
+      [{ text: "Clone without super.clone", file: "Order.java", line: 3, path: "src/main/java/shop/Order.java" }],
+    ])
   })
 
   it("returns nothing for a report without bugs", () => {
@@ -565,6 +579,16 @@ describe("readQualityReports with SpotBugs", () => {
         violations: [{ text: "Command Injection", file: "Order.java", line: 19, path: "api/domain/src/main/java/shop/Order.java" }],
       },
     ])
+  })
+
+  it("looks for the source in the module of the report when it names no source dir", () => {
+    write("api/pom.xml", "<project/>")
+    const before = snapshotQualityReports(projectDir)
+    write("api/target/spotbugsXml.xml", spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")]))
+
+    expect(readQualityReports(projectDir, before, SPOTBUGS_FAILED).failures[0]?.violations[0]?.path).toBe(
+      "api/src/main/java/shop/Order.java",
+    )
   })
 
   it("resolves a source in the second source dir, such as a generated one", () => {

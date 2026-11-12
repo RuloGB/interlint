@@ -178,7 +178,7 @@ Fix these problems before continuing.
 - It works as with Checkstyle and PMD: the check fails only when Maven fails, and then shows only the most severe `priority` in the report. Bugs under the build's `failThreshold` are in the report but never shown. Bugs left out by `threshold` or by the build's include and exclude filters are not in the report at all.
 - SpotBugs analyses compiled classes, so the check runs `compile` first. Without it, `spotbugs:check` finds no classes and passes.
 - SpotBugs plugins, such as Find Security Bugs, write their bugs into the same report.
-- SpotBugs names each source by its path below a source directory. Interlint finds the file in the source directories the report lists, such as `src/main/java` or `target/generated-sources/annotations`.
+- SpotBugs names each source by its path below a source directory. Interlint finds the file in the source directories the report lists, such as `src/main/java` or `target/generated-sources/annotations`, or in the module's `src/main/java` when it lists none. A bug about a whole class or field, such as a serialization bug, shows the line of that field, method or class.
 - SpotBugs cannot be limited to one file from the command line here, so, as PMD, it analyses the whole project each time and an `edit` check shows only the failures of the changed files.
 
 ## JaCoCo coverage

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs"
-import { basename, isAbsolute, join, relative, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
 import type { RuleFailure, RuleType, Violation } from "../../../../domain/violation.js"
@@ -40,7 +40,7 @@ const LOWEST_PMD_PRIORITY = 5
 const LOWEST_SPOTBUGS_PRIORITY = 5
 
 /** The elements a report can repeat, read as lists even when there is only one. */
-const ARRAY_ELEMENTS = new Set(["file", "error", "violation", "BugInstance", "SrcDir", "SourceLine"])
+const ARRAY_ELEMENTS = new Set(["file", "error", "violation", "BugInstance", "SrcDir", "SourceLine", "Field", "Method", "Class"])
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -57,12 +57,22 @@ interface ReportFile {
   violation?: (Record<string, string> & { "#text"?: string })[]
 }
 
-interface BugInstance {
+/** An element of a bug that SpotBugs places with source lines: the bug itself, or its field, method or class. */
+interface Located {
+  SourceLine?: Record<string, string>[]
+}
+
+interface BugInstance extends Located {
   type?: string
   priority?: string
   LongMessage?: string
-  SourceLine?: Record<string, string>[]
+  Field?: Located[]
+  Method?: Located[]
+  Class?: Located[]
 }
+
+/** Maven's default source dir, relative to the module. */
+const DEFAULT_SOURCES = join("src", "main", "java")
 
 /** A rule broken at one place, with how severe the tool rates it: the lower, the more severe. */
 interface Finding {
@@ -118,9 +128,12 @@ function isComplete(path: string): boolean {
   return COMPLETE_REPORTS.some(({ report, end }) => path.endsWith(report) && end.test(xml))
 }
 
+/** Reads the findings of one report, with paths relative to `projectDir`; `moduleDir` is the module that wrote it. */
+type ParseReport = (xml: string, projectDir: string, moduleDir: string) => Finding[]
+
 /** The most severe findings of the reports, for each plugin in `plugins`. */
 function failuresIn(reports: string[], projectDir: string, plugins: Set<string | undefined>): RuleFailure[] {
-  const findingsOf = (report: string, parse: (xml: string, projectDir: string) => Finding[]) =>
+  const findingsOf = (report: string, parse: ParseReport) =>
     reports.filter((path) => path.endsWith(report)).flatMap((path) => readReport(path, projectDir, parse))
   return [
     ...(plugins.has("checkstyle") ? mostSevere(findingsOf(CHECKSTYLE_REPORT, checkstyleFindings)) : []),
@@ -133,9 +146,10 @@ function failuresIn(reports: string[], projectDir: string, plugins: Set<string |
  * A report that is not well-formed XML gives no findings, so the check shows Maven's output instead.
  * Checkstyle leaves one cut short when it stops on a source it cannot parse.
  */
-function readReport(path: string, projectDir: string, parse: (xml: string, projectDir: string) => Finding[]): Finding[] {
+function readReport(path: string, projectDir: string, parse: ParseReport): Finding[] {
   try {
-    return parse(readFileSync(path, "utf8"), projectDir)
+    // Every report is in its module's `target/`.
+    return parse(readFileSync(path, "utf8"), projectDir, dirname(dirname(path)))
   } catch {
     return []
   }
@@ -197,18 +211,32 @@ function pmdFindings(xml: string, projectDir: string): Finding[] {
 }
 
 /**
+ * Where a bug is: its own primary source line, or else the line of the field, method or class it is about, in that
+ * order. Bugs about a class's design or serialization have no source line of their own.
+ */
+function sourceLineOf(bug: BugInstance): Record<string, string> | undefined {
+  const own = bug.SourceLine?.find((line) => line.primary === "true") ?? bug.SourceLine?.[0]
+  if (own) return own
+  const linesOf = (elements: { SourceLine?: Record<string, string>[] }[] | undefined) =>
+    (elements ?? []).flatMap((element) => element.SourceLine ?? [])
+  return [...linesOf(bug.Field), ...linesOf(bug.Method), ...linesOf(bug.Class)][0]
+}
+
+/**
  * SpotBugs reads bytecode and names each source by its path below a source dir (`shop/Order.java`), so the source is
- * the first of the report's source dirs that holds it, or below the first one when none does.
+ * the first of the report's source dirs that holds it, or below the first one when none does. A report that lists
+ * none is taken to use the module's `src/main/java`, so the bug still has a path an edit check can match.
  * A report cut short throws, as one that is not well-formed: the parser would read the bugs before the cut.
  */
-function spotbugsFindings(xml: string, projectDir: string): Finding[] {
+function spotbugsFindings(xml: string, projectDir: string, moduleDir = projectDir): Finding[] {
   if (!SPOTBUGS_END.test(xml)) throw new Error("SpotBugs report cut short")
   const collection = xmlParser.parse(xml)?.BugCollection
-  const srcDirs: string[] = (collection?.Project?.SrcDir ?? []).map(String)
+  const listed: string[] = (collection?.Project?.SrcDir ?? []).map(String)
+  const srcDirs = listed.length > 0 ? listed : [join(moduleDir, DEFAULT_SOURCES)]
   const bugs: BugInstance[] = collection?.BugInstance ?? []
   return bugs.map((bug) => {
     const text = (bug.LongMessage ?? "").trim()
-    const at = bug.SourceLine?.find((line) => line.primary === "true") ?? bug.SourceLine?.[0]
+    const at = sourceLineOf(bug)
     const sourcepath = at?.sourcepath
     const candidates = sourcepath ? srcDirs.map((dir) => join(dir, sourcepath)) : []
     const source = candidates.find((path) => existsSync(path)) ?? candidates[0]
