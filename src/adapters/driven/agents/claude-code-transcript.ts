@@ -16,10 +16,18 @@ const SYNTHETIC = "<synthetic>"
  */
 export const transcriptModel: TranscriptModel = ({ path, agentId }) => {
   const file = agentId === undefined ? path : join(dirname(path), basename(path, ".jsonl"), "subagents", `agent-${agentId}.jsonl`)
+  return lastModelIn(file, modelOf)
+}
+
+/**
+ * The model of the last line of a JSON Lines file that `modelOf` reads one from, read from the file's end in blocks.
+ * None when the file cannot be read or no line in its last 8 MB gives one.
+ */
+export function lastModelIn(file: string, modelOf: (line: string) => string | undefined): string | undefined {
   let fd: number | undefined
   try {
     fd = openSync(file, "r")
-    return lastModel(fd, fstatSync(fd).size)
+    return lastModel(fd, fstatSync(fd).size, modelOf)
   } catch {
     return undefined
   } finally {
@@ -27,7 +35,7 @@ export const transcriptModel: TranscriptModel = ({ path, agentId }) => {
   }
 }
 
-function lastModel(fd: number, size: number): string | undefined {
+function lastModel(fd: number, size: number, modelOf: (line: string) => string | undefined): string | undefined {
   let end = size
   // The pieces, in file order, of the line that starts before the block read, kept until its start is read. Joined
   // only then, so a line longer than many blocks is neither searched nor copied again on each one.

@@ -10,7 +10,7 @@ import {
 } from "../../../application/metrics/show-metrics.js"
 import { EXIT, type Io, UsageError, UserFacingError } from "./cli-io.js"
 
-const AGENTS = ["claude-code", "opencode"]
+const AGENTS = ["claude-code", "copilot", "opencode"]
 
 /** The default report file, in the project's folder, with the format as its extension (decision 48). */
 export const REPORT_NAME = "interlint-metrics"
@@ -66,7 +66,7 @@ function formatOf(value: string | undefined): ReportFormat {
 
 function agentOf(value: string | undefined): string | undefined {
   if (value !== undefined && !AGENTS.includes(value)) {
-    throw new UsageError(`--agent must be ${AGENTS.join(" or ")} (got "${value}")`)
+    throw new UsageError(`--agent must be ${AGENTS.slice(0, -1).join(", ")} or ${AGENTS.at(-1)} (got "${value}")`)
   }
   return value
 }

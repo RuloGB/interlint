@@ -1,8 +1,10 @@
 import type { CheckProjectDeps } from "../../../application/checking/check-project.js"
 import type { FeedbackDeps } from "../../../application/feedback/agent-events.js"
+import type { TranscriptModel } from "../../../application/feedback/ports.js"
 import type { MetricsDeps } from "../../../application/metrics/show-metrics.js"
 import type { InitDeps } from "../../../application/setup/init-project.js"
 import { hook } from "../claude-code/hook-command.js"
+import { copilotHook } from "../copilot/hook-command.js"
 import { check } from "./check-command.js"
 import { EXIT, type Io, reportError, UsageError } from "./cli-io.js"
 import { init } from "./init-command.js"
@@ -10,13 +12,14 @@ import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
   interlint --version                                          Print the installed version of Interlint
-  interlint init [--agent opencode|claude-code] [--force] [--cwd <dir>]
+  interlint init [--agent opencode|claude-code|copilot] [--force] [--cwd <dir>]
                                                                Detect the project's checks and write interlint.yaml
   interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
                                                                Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
   interlint hook claude-code post-edit|stop|subagent-stop      Claude Code hook: reads the hook's JSON on stdin
-  interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|opencode] [--cwd <dir>]
+  interlint hook copilot post-edit|stop|subagent-stop          GitHub Copilot hook: reads the hook's JSON on stdin
+  interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|copilot|opencode] [--cwd <dir>]
                                                                Sum up the metrics of the checks
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
                                                                Write the full metrics report, with charts
@@ -56,7 +59,8 @@ task end, without -q, which hides them. With --changed, when every tested module
 and Surefire reports are newer than the last change and no test failed, the command runs without
 its lifecycle phases, so jacoco:check reads that data and no test runs.
 --agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
-the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file.
+the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file;
+--agent copilot writes the same hooks to .github/hooks/interlint.json.
 
 Every check that runs or is skipped keeps one metrics line, with no code or message, in the
 user's state directory (interlint/metrics under %LOCALAPPDATA% on Windows, $XDG_STATE_HOME or
@@ -77,12 +81,20 @@ A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 
 block). stop blocks at most 3 times in a row, then lets the task end and shows the failures.
 subagent-stop checks only the projects of the files that subagent changed, and runs nothing for
 a subagent that changed none; after 3 blocks it lets the subagent stop, and stop gets the rest.
+Run by GitHub Copilot, a Claude Code hook does nothing: Copilot runs its own hooks.
+
+A GitHub Copilot hook exits 0 when it ran: post-edit gives the agent the failures as
+additionalContext on stdout, and stop and subagent-stop block with {"decision": "block"} and the
+failures as reason. 1 means Interlint could not run; Copilot logs it and the agent goes on.
+The same limit of 3 blocks applies.
 `
 
 /** The use cases the commands run, with their adapters. */
 export interface CliDeps {
   checking: CheckProjectDeps
   feedback: FeedbackDeps
+  /** The model in a GitHub Copilot session's transcript: `feedback` reads Claude Code's. */
+  copilotTranscriptModel: TranscriptModel
   setup: InitDeps
   metrics: MetricsDeps
   /** The installed version of Interlint. */
@@ -102,6 +114,9 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
     }
     if (command === "check") return await check(rest, io, deps.checking)
     if (command === "init") return init(rest, io, deps.setup)
+    if (command === "hook" && rest[0] === "copilot") {
+      return await copilotHook(rest, io, { ...deps.feedback, transcriptModel: deps.copilotTranscriptModel })
+    }
     if (command === "hook") return await hook(rest, io, deps.feedback)
     if (command === "metrics") return metrics(rest, io, deps.metrics)
     throw new UsageError(`unknown command "${command}"\n\n${USAGE}`)

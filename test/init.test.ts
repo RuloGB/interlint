@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -301,7 +301,7 @@ describe("interlint init", () => {
     const { exitCode, stderr } = await run("init", "--agent", "cursor")
 
     expect(exitCode).toBe(2)
-    expect(stderr).toContain('--agent must be opencode or claude-code (got "cursor")')
+    expect(stderr).toContain('--agent must be opencode, claude-code or copilot (got "cursor")')
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 })
@@ -527,6 +527,70 @@ describe("interlint init --agent claude-code", () => {
 
     expect((await run("init", "--agent", "claude-code")).exitCode).toBe(2)
     expect(existsSync(join(projectDir, ".claude"))).toBe(false)
+  })
+})
+
+describe("interlint init --agent copilot", () => {
+  const HOOKS_FILE = join(".github", "hooks", "interlint.json")
+  const readHooks = () => readFileSync(join(projectDir, HOOKS_FILE), "utf8")
+  const HOOKS = {
+    version: 1,
+    hooks: {
+      postToolUse: [
+        {
+          type: "command",
+          matcher: "edit|create|str_replace_editor|apply_patch",
+          command: "interlint hook copilot post-edit",
+          timeoutSec: 120,
+        },
+      ],
+      agentStop: [{ type: "command", command: "interlint hook copilot stop", timeoutSec: 600 }],
+      subagentStop: [{ type: "command", command: "interlint hook copilot subagent-stop", timeoutSec: 600 }],
+    },
+  }
+
+  beforeEach(() => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("writes the post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "copilot")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(JSON.parse(readHooks())).toEqual(HOOKS)
+    expect(stdout).toContain("Wrote:\n  interlint.yaml\n  .github/hooks/interlint.json\n")
+  })
+
+  it("leaves the other files in .github/hooks as they are", async () => {
+    const other = '{ "version": 1, "hooks": { "sessionStart": [{ "command": "echo hi" }] } }\n'
+    writeFile(join(".github", "hooks", "team.json"), other)
+
+    await run("init", "--agent", "copilot")
+
+    expect(readFileSync(join(projectDir, ".github", "hooks", "team.json"), "utf8")).toBe(other)
+    expect(readdirSync(join(projectDir, ".github", "hooks")).sort()).toEqual(["interlint.json", "team.json"])
+  })
+
+  it("leaves the same result when it runs twice", async () => {
+    await run("init", "--agent", "copilot")
+    const first = readHooks()
+
+    const { exitCode, stdout } = await run("init", "--agent", "copilot")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Unchanged:\n  interlint.yaml\n  .github/hooks/interlint.json\n")
+    expect(readHooks()).toBe(first)
+  })
+
+  it("updates an older interlint.json", async () => {
+    writeFile(HOOKS_FILE, '{ "version": 1, "hooks": { "agentStop": [{ "command": "interlint hook copilot stop" }] } }\n')
+
+    const { exitCode, stdout } = await run("init", "--agent", "copilot")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(".github/hooks/interlint.json")
+    expect(JSON.parse(readHooks())).toEqual(HOOKS)
   })
 })
 
