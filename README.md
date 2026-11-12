@@ -18,7 +18,7 @@
 
 **Interlint runs the checks your project already has inside your AI agent's session.** When the agent breaks a rule, it hears about it right away and fixes it before it moves on. Not in CI. Not by hand.
 
-Works with **[Claude Code](docs/claude-code.md)**, **[GitHub Copilot](docs/copilot.md)** and **[OpenCode](docs/opencode.md)**, on Maven projects that use **ArchUnit, Checkstyle, PMD or JaCoCo** coverage rules, and on TypeScript and JavaScript projects that use **ESLint**.
+Works with **[Claude Code](docs/claude-code.md)**, **[GitHub Copilot](docs/copilot.md)** and **[OpenCode](docs/opencode.md)**, on Maven projects that use **ArchUnit, Checkstyle, PMD, SpotBugs or JaCoCo** coverage rules, and on TypeScript and JavaScript projects that use **ESLint**.
 
 The agent puts infrastructure code in the domain. Interlint tells it right away, with the rule, the file and the line. The agent fixes it and carries on:
 
@@ -28,7 +28,7 @@ The agent puts infrastructure code in the domain. Interlint tells it right away,
 
 ## Why Interlint
 
-- **Your rules, enforced.** Interlint has no rules of its own. It runs your ArchUnit tests, Checkstyle, PMD, JaCoCo coverage rules and ESLint, so your build stays the single source of truth.
+- **Your rules, enforced.** Interlint has no rules of its own. It runs your ArchUnit tests, Checkstyle, PMD, SpotBugs, JaCoCo coverage rules and ESLint, so your build stays the single source of truth.
 - **Fixed while the context is fresh.** Checks run after edits, so the agent fixes a violation before it builds more code on top of it.
 - **No green, no done.** At task end every check runs. The agent cannot finish while a rule is broken.
 - **One command to set up.** `interlint init` finds your checks and wires your agent.
@@ -45,7 +45,7 @@ Your team uses several models and agents. Which ones follow your rules? Which ru
   <img src="assets/screenshots/metrics-report-pdf.png" alt="Three pages of the PDF metrics report: headline figures and totals, the top 20 rules, and the models side by side. Sample report with invented data." width="100%">
 </p>
 
-**The rules your agents break most.** The top 20, by type: architecture, Checkstyle, PMD and coverage. Fix the prompt, the `AGENTS.md` or the rule itself where it hurts most.
+**The rules your agents break most.** The top 20, by type: architecture, Checkstyle, PMD, SpotBugs and coverage. Fix the prompt, the `AGENTS.md` or the rule itself where it hurts most.
 
 <p align="center">
   <img src="assets/screenshots/metrics-report-top-rules.png" alt="Bars of the 10 most broken rules and a table of the top 20, with their violations and type. Sample report with invented data." width="680">
@@ -79,7 +79,7 @@ The PDF is printed with the Chrome, Edge or Chromium you already have, so Interl
 
 Requires Node 22 or later and one of these:
 
-- A Maven project with ArchUnit tests, or with Checkstyle, PMD or a JaCoCo `check` goal in its `pom.xml`.
+- A Maven project with ArchUnit tests, or with Checkstyle, PMD, or a SpotBugs or JaCoCo `check` goal in its `pom.xml`.
 - An npm project with ESLint in its `package.json` and a flat configuration (`eslint.config.*`).
 
 1. Install the CLI:
@@ -103,7 +103,7 @@ Requires Node 22 or later and one of these:
 
 | When | What runs | What the agent gets |
 |---|---|---|
-| **After each edit** | Checkstyle and ESLint, on the changed files. ArchUnit and PMD, which are slower, after 5 edited files or 100 written lines. The Maven checks need `mvnd`. | The violations, right away, in the same session. |
+| **After each edit** | Checkstyle and ESLint, on the changed files. ArchUnit, PMD and SpotBugs, which are slower, after 5 edited files or 100 written lines. The Maven checks need `mvnd`. | The violations, right away, in the same session. |
 | **At task end** | Every check of the projects the agent changed, including the [JaCoCo coverage rules](docs/usage.md#jacoco-coverage) of your `pom.xml`. | It cannot finish until everything is green. |
 
 **No endless loops.** After 3 blocks in a row, Interlint lets the task end and shows you what is still failing.
@@ -148,7 +148,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 | | |
 |---|---|
 | Agents | Claude Code, GitHub Copilot (hooks in preview), OpenCode V2 |
-| Checks | ArchUnit, Checkstyle, PMD, JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint) |
+| Checks | ArchUnit, Checkstyle, PMD, [SpotBugs](docs/usage.md#spotbugs), JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint) |
 | Build | Maven, with or without the Maven Wrapper, and `mvnd` for checks after each edit; npm with the project's own ESLint |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven and npm projects |
 
@@ -156,7 +156,7 @@ Known limits:
 
 - Only Maven projects and npm projects with ESLint. On npm projects there is no `tsc` check and no coverage check yet. In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package.
 - `init` finds ESLint only with its flat configuration (`eslint.config.*`). With `.eslintrc`, [write the check yourself](docs/usage.md#eslint).
-- PMD cannot be limited to one file from the command line, so it checks the whole project each time it runs. `init` gives it [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so it waits for 5 edited files or 100 written lines and shows the failures of all of them.
+- PMD and SpotBugs cannot be limited to one file from the command line, so they check the whole project each time they run. `init` gives them [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so they wait for 5 edited files or 100 written lines and shows the failures of all of them.
 
 ## Documentation
 
