@@ -292,6 +292,32 @@ process.exit(${files.length > 0 ? 1 : 0})
     expect(existsSync(join(projectDir, "args.txt"))).toBe(false)
   })
 
+  it("shows a SpotBugs bug of the changed file, also one placed only by its class, in a report without source dirs", async () => {
+    const bug = (type: string, file: string) =>
+      `<BugInstance type='${type}' priority='2'><LongMessage>${type} found</LongMessage><Class classname='shop.X' primary='true'><SourceLine classname='shop.X' start='5' end='30' sourcepath='shop/${file}' sourcefile='${file}'/></Class></BugInstance>`
+    const report = `<BugCollection><Project projectName='shop'></Project>${bug("SE_BAD_FIELD", "Order.java")}${bug("EI_EXPOSE_REP", "Customer.java")}</BugCollection>`
+    writeFileSync(
+      join(projectDir, "spotbugs.mjs"),
+      `import { mkdirSync, writeFileSync } from "node:fs"
+mkdirSync("target", { recursive: true })
+writeFileSync("target/spotbugsXml.xml", ${JSON.stringify(report)})
+console.log("[ERROR] Failed to execute goal com.github.spotbugs:spotbugs-maven-plugin:4.9.8.3:check (spotbugs) on project shop: failed with 2 bugs")
+process.exit(1)
+`,
+    )
+    for (const file of [ORDER, CUSTOMER]) {
+      mkdirSync(join(projectDir, file, ".."), { recursive: true })
+      writeFileSync(join(projectDir, file), "class X {}")
+    }
+    writeConfig({ name: "spotbugs", run: "node spotbugs.mjs compile spotbugs:check@spotbugs", report: "maven", when: "edit" })
+
+    const { exitCode, stdout } = await run("check", "--when", "edit", "--file", ORDER)
+
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain("✗ spotbugs · SE_BAD_FIELD\n\n  SE_BAD_FIELD found\n    at src/main/java/shop/Order.java:5\n")
+    expect(stdout).not.toContain("EI_EXPOSE_REP")
+  })
+
   it("still checks the whole project at task end", async () => {
     fakeQuality("checkstyle:check@style", [ORDER, CUSTOMER])
 

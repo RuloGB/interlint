@@ -181,8 +181,8 @@ describe("formatOutcomes for Checkstyle and PMD", () => {
         { check: checkstyle, status: "failed", durationMs: 10, command: checkstyle.run, exitCode, outputTail: "" },
       ])
 
-    expect(failed(1)).toContain("✗ checkstyle · the command failed (exit code 1) and left no Checkstyle or PMD failures\n")
-    expect(failed(0)).toContain("✗ checkstyle · the command exited 0 but wrote no Checkstyle or PMD report\n")
+    expect(failed(1)).toContain("✗ checkstyle · the command failed (exit code 1) and left no Checkstyle, PMD or SpotBugs failures\n")
+    expect(failed(0)).toContain("✗ checkstyle · the command exited 0 but wrote no Checkstyle, PMD or SpotBugs report\n")
   })
 })
 

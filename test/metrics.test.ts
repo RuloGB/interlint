@@ -7,7 +7,7 @@ import { projectKey } from "../src/adapters/driven/state/user-state.js"
 import type { MetricsSink, ReportResult } from "../src/application/checking/ports.js"
 import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 import type { Check, Config } from "../src/domain/check.js"
-import type { CheckMetric } from "../src/domain/metric.js"
+import { type CheckMetric, metricEventOf } from "../src/domain/metric.js"
 
 const PASSING: ReportResult = { found: true, failures: [] }
 
@@ -203,5 +203,25 @@ describe("fileMetrics", () => {
     fileMetrics(stateDir, () => at)(projectDir, [])
 
     expect(readdirSync(stateDir)).toEqual([])
+  })
+})
+
+describe("the metrics of a SpotBugs check", () => {
+  it("are read back with the rule type spotbugs", () => {
+    const event = metricEventOf({
+      v: 1,
+      at: "2026-11-12T10:00:00.000Z",
+      interlint: "1.16.0",
+      projectKey: "k",
+      project: "shop",
+      when: "task-end",
+      check: "spotbugs",
+      report: "maven",
+      result: "violations",
+      durationMs: 13000,
+      violations: [{ rule: "COMMAND_INJECTION", type: "spotbugs", file: "src/main/java/shop/Order.java" }],
+    })
+
+    expect(event?.violations).toEqual([{ rule: "COMMAND_INJECTION", type: "spotbugs", file: "src/main/java/shop/Order.java" }])
   })
 })

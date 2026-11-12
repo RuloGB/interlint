@@ -37,9 +37,10 @@ mvn verify run by the agent, left all the reports it writes and they list no fai
 integrations pass the files a subagent changed, so it gets the failures of its own projects.
 
 init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn), when: edit and every: 3, and a checkstyle check (report: maven, when: edit) and a
-pmd check (report: maven, when: edit, every: 3) for the plugins in the build of pom.xml and its modules, and a
-coverage check (report: jacoco, when: task-end) when the build runs jacoco-maven-plugin's check
+Wrapper (or mvn), when: edit, every: 5 and lines: 100, and a checkstyle check (report: maven,
+when: edit) and a pmd check (report: maven, when: edit, every: 5, lines: 100) for the plugins in
+the build of pom.xml and its modules, a spotbugs check (report: maven, when: edit, every: 5,
+lines: 100) when the build runs spotbugs-maven-plugin's check goal, and a coverage check (report: jacoco, when: task-end) when the build runs jacoco-maven-plugin's check
 goal. In an npm project with eslint in package.json and an eslint.config file it writes an
 eslint check (report: eslint, when: edit). In a directory without pom.xml it writes
 the checks of each Maven project and each such npm project below it, with their dir. It never
@@ -47,9 +48,9 @@ replaces a different interlint.yaml without --force: without --agent it writes n
 with --agent it keeps that file and still writes the agent's files.
 
 A report: maven check fails only when Maven fails, and shows the most severe level in the
-Checkstyle and PMD reports, so nothing the project's build accepts is shown. At edit it shows
-only the failures of the changed files, and a run with checkstyle:check gets
--Dcheckstyle.includes so Checkstyle checks only those files; PMD checks the whole project.
+Checkstyle, PMD and SpotBugs reports, so nothing the project's build accepts is shown. At edit it
+shows only the failures of the changed files, and a run with checkstyle:check gets
+-Dcheckstyle.includes so Checkstyle checks only those files; PMD and SpotBugs check the whole project.
 A report: eslint check reads the JSON report of ESLint, which its run writes with -f json -o to
 node_modules/.cache/interlint/eslint.json, and fails only when ESLint fails: it shows the
 errors, or the warnings when ESLint fails on them alone. At edit the " ." its run ends with

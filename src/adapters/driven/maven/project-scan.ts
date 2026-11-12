@@ -1,7 +1,14 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { basename, join, relative, sep } from "node:path"
 import type { ProjectScanner } from "../../../application/setup/ports.js"
-import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, TEST_SOURCES } from "../../../domain/project-facts.js"
+import {
+  NEEDS_CHECK_EXECUTION,
+  type ProjectFacts,
+  QUALITY_PLUGIN_ARTIFACTS,
+  QUALITY_PLUGINS,
+  type QualityPlugin,
+  TEST_SOURCES,
+} from "../../../domain/project-facts.js"
 import { MAX_PROJECT_DEPTH, NOT_PROJECT_DIRS } from "../../../domain/workspace.js"
 import { declaredModules } from "./modules.js"
 
@@ -14,10 +21,15 @@ const COMMENTS_AND_STRINGS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\\n])*"|'(
 
 const XML_COMMENTS = /<!--[\s\S]*?-->/g
 /**
- * Sections where a Checkstyle or PMD artifactId does not declare a plugin the `check` goals use: a profile may be
+ * Sections where a Checkstyle, PMD or SpotBugs artifactId does not declare a plugin the `check` goals use: a profile may be
  * off, reporting is for the site, and a dependency is a jar on a classpath, not a plugin of the build.
  */
 const UNUSED_SECTIONS = /<(profiles|reporting|dependencyManagement|dependencies)>[\s\S]*?<\/\1>/g
+/**
+ * A plugin's or an execution's settings. They never say which executions run `check`, and SpotBugs lists its own
+ * plugins there (`<plugins><plugin>findsecbugs-plugin</plugin></plugins>`), which would end its `<plugin>` early.
+ */
+const CONFIGURATION = /<configuration>[\s\S]*?<\/configuration>/g
 const PLUGIN_MANAGEMENT = /<pluginManagement>[\s\S]*?<\/pluginManagement>/g
 /** A `<plugin>` element, never running into the next one. */
 const PLUGIN_ELEMENT = /<plugin>((?:(?!<\/plugin>)[\s\S])*)<\/plugin>/g
@@ -83,7 +95,7 @@ export function scanProject(projectDir: string): ProjectFacts {
 }
 
 /**
- * The Checkstyle and PMD plugins the build runs, and the ids of the executions that run their `check` goal, or
+ * The Checkstyle, PMD and SpotBugs plugins the build runs, and the ids of the executions that run their `check` goal, or
  * JaCoCo's `check` goal, which holds the coverage rules.
  * A plugin counts when a POM of the project declares it in `<build><plugins>`. In a project without modules it
  * also counts when its `pom.xml` only manages it in `pluginManagement`; in a reactor a managed plugin counts only
@@ -100,13 +112,18 @@ function scanQualityPlugins(
   const counted = modules.length > 1 ? active : declared
   const declarationsOf = (plugins: string[], artifactId: string) =>
     plugins.filter((body) => new RegExp(`<artifactId>\\s*${artifactId}\\s*</artifactId>`).test(body))
-  const qualityPlugin = (plugin: QualityPlugin) => `maven-${plugin}-plugin`
   const checkExecutions = Object.fromEntries(
-    QUALITY_PLUGINS.map((plugin) => [plugin, checkExecutionIds(declarationsOf(declared, qualityPlugin(plugin)))]),
+    QUALITY_PLUGINS.map((plugin) => [
+      plugin,
+      checkExecutionIds(declarationsOf(declared, QUALITY_PLUGIN_ARTIFACTS[plugin])),
+    ]),
   ) as Record<QualityPlugin, string[]>
+  const counts = (plugin: QualityPlugin) =>
+    declarationsOf(counted, QUALITY_PLUGIN_ARTIFACTS[plugin]).length > 0 &&
+    (!NEEDS_CHECK_EXECUTION[plugin] || checkExecutions[plugin].length > 0)
   const jacoco = declarationsOf(counted, JACOCO_PLUGIN).length > 0
   return {
-    qualityPlugins: QUALITY_PLUGINS.filter((plugin) => declarationsOf(counted, qualityPlugin(plugin)).length > 0),
+    qualityPlugins: QUALITY_PLUGINS.filter(counts),
     checkExecutions,
     coverageExecutions: jacoco ? checkExecutionIds(declarationsOf(declared, JACOCO_PLUGIN)) : [],
   }
@@ -114,7 +131,8 @@ function scanQualityPlugins(
 
 /** The `<build>` part of a POM that can declare a plugin the `check` goals use, or nothing without a POM. */
 function readBuild(pom: string): string {
-  return existsSync(pom) ? readFileSync(pom, "utf8").replace(XML_COMMENTS, " ").replace(UNUSED_SECTIONS, " ") : ""
+  if (!existsSync(pom)) return ""
+  return readFileSync(pom, "utf8").replace(XML_COMMENTS, " ").replace(UNUSED_SECTIONS, " ").replace(CONFIGURATION, " ")
 }
 
 function pluginsIn(xml: string): string[] {

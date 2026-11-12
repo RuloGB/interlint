@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -841,7 +841,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. Nothing was written.\n",
     )
   })
 })
@@ -910,8 +910,134 @@ describe("interlint init with JaCoCo", () => {
   })
 })
 
+describe("interlint init with SpotBugs", () => {
+  const execution = (id: string | undefined, goal = "check", phase?: string) =>
+    `          <execution>\n${id === undefined ? "" : `            <id>${id}</id>\n`}${phase === undefined ? "" : `            <phase>${phase}</phase>\n`}            <goals>\n              <goal>${goal}</goal>\n            </goals>\n          </execution>\n`
+  const spotbugs = (executions: string) =>
+    `      <plugin>\n        <groupId>com.github.spotbugs</groupId>\n        <artifactId>spotbugs-maven-plugin</artifactId>\n        <configuration>\n          <threshold>Low</threshold>\n        </configuration>\n        <executions>\n${executions}        </executions>\n      </plugin>\n`
+  const plugin = (artifactId: string) => `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
+  const jacoco = `      <plugin>\n        <artifactId>jacoco-maven-plugin</artifactId>\n        <executions>\n${execution("check")}        </executions>\n      </plugin>\n`
+
+  function pom(build: string) {
+    writeFile("pom.xml", `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n</project>\n`)
+  }
+
+  it("adds a spotbugs check that compiles first and skips Checkstyle and PMD, and the other checks skip SpotBugs", async () => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom(plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") + spotbugs(execution("spotbugs")) + jacoco)
+
+    const { exitCode, stderr } = await run("init")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(loadConfig(projectDir).checks).toEqual([
+      {
+        name: "architecture",
+        run: "./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip -Dspotbugs.skip",
+        report: "archunit",
+        when: "edit",
+        every: 5,
+        lines: 100,
+      },
+      { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" },
+      {
+        name: "pmd",
+        run: "./mvnw -q compile pmd:check -Dcheckstyle.skip -Dspotbugs.skip",
+        report: "maven",
+        when: "edit",
+        every: 5,
+        lines: 100,
+      },
+      {
+        name: "spotbugs",
+        run: "./mvnw -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip",
+        report: "maven",
+        when: "edit",
+        every: 5,
+        lines: 100,
+      },
+      {
+        name: "coverage",
+        run: "./mvnw test jacoco:check@check -fae -Djacoco.append=false -Dcheckstyle.skip -Dpmd.skip -Dspotbugs.skip",
+        report: "jacoco",
+        when: "task-end",
+      },
+    ])
+  })
+
+  it("finds the check execution of a plugin that adds SpotBugs plugins, such as Find Security Bugs, in its configuration", async () => {
+    const findSecBugs =
+      "      <plugin>\n        <artifactId>spotbugs-maven-plugin</artifactId>\n        <configuration>\n          <plugins>\n            <plugin>\n              <groupId>com.h3xstream.findsecbugs</groupId>\n              <artifactId>findsecbugs-plugin</artifactId>\n            </plugin>\n          </plugins>\n        </configuration>\n        <executions>\n" +
+      execution("spotbugs") +
+      "        </executions>\n      </plugin>\n"
+    pom(findSecBugs)
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip",
+    ])
+  })
+
+  it("calls an execution without id `default`", async () => {
+    pom(spotbugs(execution(undefined)))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@default -Dcheckstyle.skip -Dpmd.skip",
+    ])
+  })
+
+  it("adds none when no execution runs check, or the one that does is turned off, and the other checks stay as they were", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom(plugin("maven-pmd-plugin") + spotbugs(execution("analyze", "spotbugs") + execution("inherited", "check", "none")))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q test -Dtest=ArchitectureRulesTest -Dpmd.skip",
+      "mvn -q compile pmd:check -Dcheckstyle.skip",
+    ])
+  })
+
+  it("says what it detected", async () => {
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    pom(plugin("maven-checkstyle-plugin") + spotbugs(execution("spotbugs")))
+    installMavenDaemon()
+
+    const { stdout } = await run("init")
+
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  ArchUnit tests: ArchitectureRulesTest",
+        "  Checkstyle: maven-checkstyle-plugin in pom.xml",
+        "  SpotBugs: spotbugs-maven-plugin check in pom.xml",
+        "  Maven: mvn (no Maven Wrapper)",
+        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and SpotBugs checks run after every 5 edited files or 100 written lines",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("says what it looks for when it finds nothing to check", async () => {
+    pom(spotbugs(execution("analyze", "spotbugs")))
+
+    const { exitCode, stderr } = await run("init")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toBe(
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+    )
+  })
+})
+
 describe("interlint init in a multi-module project", () => {
-  const managed = (artifactId: string, executionId: string) =>
+  const managed =(artifactId: string, executionId: string) =>
     `        <plugin>\n          <artifactId>${artifactId}</artifactId>\n          <executions>\n            <execution>\n              <id>${executionId}</id>\n              <goals>\n                <goal>check</goal>\n              </goals>\n            </execution>\n          </executions>\n        </plugin>\n`
   const activated = (artifactId: string) => `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n      </plugin>\n`
 
@@ -982,6 +1108,19 @@ describe("interlint init in a multi-module project", () => {
     await run("init")
 
     expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["checkstyle"])
+  })
+
+  it("runs the SpotBugs execution the parent manages when a module turns SpotBugs on, and none when no module does", async () => {
+    reactor("", { managed: [managed("spotbugs-maven-plugin", "spotbugs")], modules: { domain: ["spotbugs-maven-plugin"], launcher: [] } })
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks.map(({ name, run }) => [name, run])).toEqual([
+      ["spotbugs", "./mvnw -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip"],
+    ])
+
+    reactor("", { managed: [managed("spotbugs-maven-plugin", "spotbugs")], modules: { domain: [], launcher: [] } })
+
+    expect((await run("init", "--force")).exitCode).toBe(2)
   })
 
   it("counts a plugin a module turns on without the parent managing it", async () => {
@@ -1059,7 +1198,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1071,7 +1210,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: orders). No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin, a spotbugs-maven-plugin check or a jacoco-maven-plugin check in its build (found: orders). No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
   })
 })
@@ -1134,7 +1273,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1229,7 +1368,7 @@ describe("interlint init with ESLint", () => {
     eslintProject("")
 
     expect((await run("init")).stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. Nothing was written.\n",
+      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. Nothing was written.\n",
     )
   })
 
@@ -1304,7 +1443,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
+        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
     })
   })
 

@@ -6,6 +6,7 @@ import {
   mavenQualityReader,
   parseCheckstyleXml,
   parsePmdXml,
+  parseSpotBugsXml,
   readFreshQualityReports,
   readQualityReports,
   snapshotQualityReports,
@@ -431,5 +432,262 @@ describe("readFreshQualityReports", () => {
       found: true,
       failures: [],
     })
+  })
+})
+
+/** A SpotBugs report as `spotbugs-maven-plugin` writes it: source dirs in `<Project>`, then one `<BugInstance>` per bug. */
+function spotbugsXml(srcDirs: string[], bugs: string[]) {
+  const dirs = srcDirs.map((dir) => `<SrcDir>${dir}</SrcDir>`).join("")
+  return `<?xml version="1.0" encoding="utf-8"?>
+<BugCollection sequence='0' release='' version='4.9.8'><Project projectName='shop'><Jar>target/classes</Jar>${dirs}</Project>${bugs.join("")}<Errors missingClasses='0' errors='0'></Errors><FindBugsSummary total_bugs='${bugs.length}'></FindBugsSummary><ClassFeatures></ClassFeatures><History></History></BugCollection>`
+}
+
+/** A bug with the class's source lines, the method's and the bug's own line, as SpotBugs nests them. */
+function spotbugsBug(line: number, priority: number, type: string, message: string, sourcepath = "shop/Order.java") {
+  const file = sourcepath.split("/").at(-1)
+  const at = (start: number, end: number, primary = "") =>
+    `<SourceLine classname='shop.Order' start='${start}' end='${end}' sourcepath='${sourcepath}' sourcefile='${file}'${primary}><Message>At ${file}</Message></SourceLine>`
+  return `<BugInstance rank='12' abbrev='SEC' category='SECURITY' priority='${priority}' type='${type}'><ShortMessage>Short</ShortMessage><LongMessage>${message}</LongMessage><Class classname='shop.Order' primary='true'>${at(1, 40)}<Message>In class shop.Order</Message></Class><Method classname='shop.Order' name='run' primary='true'>${at(line - 1, line + 1)}</Method>${at(line, line, " primary='true'")}</BugInstance>`
+}
+
+/** The line Maven prints when SpotBugs' `check` goal fails. */
+const SPOTBUGS_FAILED =
+  "[ERROR] Failed to execute goal com.github.spotbugs:spotbugs-maven-plugin:4.9.8.3:check (spotbugs) on project shop: failed with 2 bugs and 0 errors -> [Help 1]"
+
+describe("parseSpotBugsXml", () => {
+  const srcDir = join(PROJECT, "src", "main", "java")
+
+  it("returns one failure per bug type with its message and file:line, resolved from the report's source dirs", () => {
+    const xml = spotbugsXml(
+      [srcDir],
+      [
+        spotbugsBug(19, 2, "COMMAND_INJECTION", "This usage of Runtime.exec(String) can be vulnerable to Command Injection"),
+        spotbugsBug(11, 2, "PREDICTABLE_RANDOM", "This random generator (java.util.Random) is predictable"),
+        spotbugsBug(7, 2, "COMMAND_INJECTION", "This usage of ProcessBuilder can be vulnerable to Command Injection", "shop/Customer.java"),
+      ],
+    )
+
+    expect(parseSpotBugsXml(xml, PROJECT)).toEqual([
+      {
+        title: "COMMAND_INJECTION",
+        type: "spotbugs",
+        violations: [
+          {
+            text: "This usage of Runtime.exec(String) can be vulnerable to Command Injection",
+            file: "Order.java",
+            line: 19,
+            path: "src/main/java/shop/Order.java",
+          },
+          {
+            text: "This usage of ProcessBuilder can be vulnerable to Command Injection",
+            file: "Customer.java",
+            line: 7,
+            path: "src/main/java/shop/Customer.java",
+          },
+        ],
+      },
+      {
+        title: "PREDICTABLE_RANDOM",
+        type: "spotbugs",
+        violations: [
+          {
+            text: "This random generator (java.util.Random) is predictable",
+            file: "Order.java",
+            line: 11,
+            path: "src/main/java/shop/Order.java",
+          },
+        ],
+      },
+    ])
+  })
+
+  it("keeps only the most severe priority, so bugs under the build's failThreshold never show", () => {
+    const xml = spotbugsXml(
+      [srcDir],
+      [
+        spotbugsBug(5, 3, "DM_DEFAULT_ENCODING", "Found reliance on default encoding"),
+        spotbugsBug(19, 1, "COMMAND_INJECTION", "Command Injection"),
+        spotbugsBug(11, 2, "PREDICTABLE_RANDOM", "Predictable"),
+      ],
+    )
+
+    expect(parseSpotBugsXml(xml, PROJECT).map((failure) => failure.title)).toEqual(["COMMAND_INJECTION"])
+  })
+
+  it("gives no path when the report names no source dir and src/main/java does not hold the source", () => {
+    const xml = spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")])
+
+    expect(parseSpotBugsXml(xml, PROJECT)[0]?.violations).toEqual([{ text: "Command Injection", file: "Order.java", line: 19 }])
+  })
+
+  it("prefers the primary field, method or class, and one whose source line has a line number", () => {
+    const line = (start?: number) =>
+      `<SourceLine classname='shop.Order'${start === undefined ? "" : ` start='${start}' end='${start}'`} sourcepath='shop/Order.java' sourcefile='Order.java'/>`
+    const bug = (type: string, inner: string) =>
+      `<BugInstance type='${type}' priority='2'><LongMessage>${type}</LongMessage>${inner}</BugInstance>`
+    const xml = spotbugsXml(
+      [srcDir],
+      [
+        bug("SE_BAD_FIELD", `<Class classname='shop.Order' primary='true'>${line(3)}</Class><Field name='lock' primary='true'>${line()}</Field>`),
+        bug("UWF_FIELD", `<Field name='other'>${line(9)}</Field><Method name='run' primary='true'>${line(14)}</Method>`),
+      ],
+    )
+
+    expect(parseSpotBugsXml(xml, PROJECT).map((failure) => failure.violations[0]?.line)).toEqual([3, 14])
+  })
+
+  it("places a bug without its own source line by its field's, method's or class's", () => {
+    const sourceLine = (start: number) =>
+      `<SourceLine classname='shop.Order' start='${start}' end='${start + 20}' sourcepath='shop/Order.java' sourcefile='Order.java'/>`
+    const classLevel = `<BugInstance type='SE_BAD_FIELD' priority='2'><LongMessage>Non-serializable field</LongMessage><Class classname='shop.Order' primary='true'>${sourceLine(3)}</Class><Field classname='shop.Order' name='lock' primary='true'>${sourceLine(9)}</Field></BugInstance>`
+    const onlyClass = `<BugInstance type='CN_IDIOM' priority='2'><LongMessage>Clone without super.clone</LongMessage><Class classname='shop.Order' primary='true'>${sourceLine(3)}</Class></BugInstance>`
+
+    expect(parseSpotBugsXml(spotbugsXml([srcDir], [classLevel, onlyClass]), PROJECT).map((failure) => failure.violations)).toEqual([
+      [{ text: "Non-serializable field", file: "Order.java", line: 9, path: "src/main/java/shop/Order.java" }],
+      [{ text: "Clone without super.clone", file: "Order.java", line: 3, path: "src/main/java/shop/Order.java" }],
+    ])
+  })
+
+  it("returns nothing for a report without bugs", () => {
+    expect(parseSpotBugsXml(spotbugsXml([srcDir], []), PROJECT)).toEqual([])
+  })
+})
+
+describe("readQualityReports with SpotBugs", () => {
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-spotbugs-"))
+    writeFileSync(join(projectDir, "pom.xml"), "<project/>")
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  function write(path: string, content: string) {
+    mkdirSync(dirname(join(projectDir, path)), { recursive: true })
+    writeFileSync(join(projectDir, path), content)
+  }
+
+  /** Writes a module's source and returns the module's source dir, as the report lists it. */
+  function sourceIn(module: string, file: string) {
+    write(join(module, "src/main/java/shop", file), "class X {}")
+    return join(projectDir, module, "src", "main", "java")
+  }
+
+  it("reads the reports of every module, with paths from the directory Interlint started in", () => {
+    write("api/pom.xml", "<project/>")
+    write("api/domain/pom.xml", "<project/>")
+    const before = snapshotQualityReports(projectDir)
+    const generated = join(projectDir, "api", "domain", "target", "generated-sources", "annotations")
+    write(
+      "api/domain/target/spotbugsXml.xml",
+      spotbugsXml([sourceIn("api/domain", "Order.java"), generated], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")]),
+    )
+
+    expect(readQualityReports(projectDir, before, SPOTBUGS_FAILED).failures).toEqual([
+      {
+        title: "COMMAND_INJECTION",
+        type: "spotbugs",
+        violations: [{ text: "Command Injection", file: "Order.java", line: 19, path: "api/domain/src/main/java/shop/Order.java" }],
+      },
+    ])
+  })
+
+  it("looks for the source in the module of the report when it names no source dir", () => {
+    write("api/pom.xml", "<project/>")
+    sourceIn("api", "Order.java")
+    const before = snapshotQualityReports(projectDir)
+    write("api/target/spotbugsXml.xml", spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")]))
+
+    expect(readQualityReports(projectDir, before, SPOTBUGS_FAILED).failures[0]?.violations[0]?.path).toBe(
+      "api/src/main/java/shop/Order.java",
+    )
+  })
+
+  it("resolves a source in the second source dir, such as a generated one", () => {
+    const before = snapshotQualityReports(projectDir)
+    write("target/generated-sources/annotations/shop/OrderMapperImpl.java", "class X {}")
+    write(
+      "target/spotbugsXml.xml",
+      spotbugsXml(
+        [join(projectDir, "src", "main", "java"), join(projectDir, "target", "generated-sources", "annotations")],
+        [spotbugsBug(9, 2, "PREDICTABLE_RANDOM", "Predictable", "shop/OrderMapperImpl.java")],
+      ),
+    )
+
+    expect(readQualityReports(projectDir, before, SPOTBUGS_FAILED).failures[0]?.violations[0]?.path).toBe(
+      "target/generated-sources/annotations/shop/OrderMapperImpl.java",
+    )
+  })
+
+  it("shows nothing from the report when Maven failed for another reason, such as a module that does not compile", () => {
+    const before = snapshotQualityReports(projectDir)
+    write("target/spotbugsXml.xml", spotbugsXml([sourceIn("", "Order.java")], [spotbugsBug(5, 2, "PREDICTABLE_RANDOM", "Predictable")]))
+    const output =
+      "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile (default-compile) on project api: Compilation failure"
+
+    expect(readQualityReports(projectDir, before, output)).toEqual({ found: true, failures: [] })
+  })
+
+  it("keeps SpotBugs' report out when only PMD's check failed", () => {
+    const before = snapshotQualityReports(projectDir)
+    write("target/spotbugsXml.xml", spotbugsXml([sourceIn("", "Order.java")], [spotbugsBug(5, 2, "PREDICTABLE_RANDOM", "Predictable")]))
+
+    expect(readQualityReports(projectDir, before, failedGoal("pmd")).failures).toEqual([])
+  })
+
+  it("skips a report cut short, so Maven's output shows instead", () => {
+    const before = snapshotQualityReports(projectDir)
+    const full = spotbugsXml([sourceIn("", "Order.java")], [spotbugsBug(5, 2, "PREDICTABLE_RANDOM", "Predictable")])
+    write("target/spotbugsXml.xml", full.slice(0, full.indexOf("<LongMessage>") + 20))
+
+    expect(readQualityReports(projectDir, before, SPOTBUGS_FAILED)).toEqual({ found: true, failures: [] })
+  })
+})
+
+describe("readFreshQualityReports with SpotBugs", () => {
+  const SINCE_MS = 1_000_000
+  const AFTER = 2000
+  const SPOTBUGS = "./mvnw -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip"
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-fresh-spotbugs-"))
+    writeFileSync(join(projectDir, "pom.xml"), "<project/>")
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  function report(xml: string, writtenAt = AFTER) {
+    const file = join(projectDir, "target", "spotbugsXml.xml")
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, xml)
+    utimesSync(file, writtenAt, writtenAt)
+  }
+
+  it("passes when the build the agent ran after its last change left a SpotBugs report without bugs", () => {
+    report(spotbugsXml([], []))
+
+    expect(readFreshQualityReports(projectDir, SPOTBUGS, SINCE_MS)).toEqual({ found: true, failures: [] })
+  })
+
+  it("gives every bug as a failure, since it has no exit code to tell what the build accepts", () => {
+    report(spotbugsXml([], [spotbugsBug(5, 3, "DM_DEFAULT_ENCODING", "Found reliance on default encoding")]))
+
+    expect(readFreshQualityReports(projectDir, SPOTBUGS, SINCE_MS)?.failures.map((failure) => failure.title)).toEqual([
+      "DM_DEFAULT_ENCODING",
+    ])
+  })
+
+  it("reads nothing when the report is older than the last change or cut short", () => {
+    report(spotbugsXml([], []), SINCE_MS / 1000)
+    expect(readFreshQualityReports(projectDir, SPOTBUGS, SINCE_MS)).toBeUndefined()
+
+    report(spotbugsXml([], []).slice(0, 80))
+    expect(readFreshQualityReports(projectDir, SPOTBUGS, SINCE_MS)).toBeUndefined()
   })
 })

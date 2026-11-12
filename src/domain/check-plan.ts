@@ -4,14 +4,16 @@ import { mavenCommand } from "./maven-command.js"
 import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
 /**
- * PMD resolves types from the compiled classes, so its check compiles first. Compiling runs the lifecycle, and a
- * build may bind `checkstyle:check` to an early phase such as `validate`: skipping Checkstyle there keeps a
- * Checkstyle failure out of the `pmd` check, which the `checkstyle` check already reports. Checkstyle reads only
- * the sources and runs no lifecycle.
+ * PMD resolves types from the compiled classes and SpotBugs analyses them, so their checks compile first. Compiling
+ * runs the lifecycle, and a build may bind a `check` goal to an early phase such as `validate`: skipping the other
+ * plugins there keeps their failures out of the check, since their own checks already report them. The `pmd` check
+ * skips SpotBugs only when the build declares it, so it stays as it was in a build without SpotBugs. Checkstyle
+ * reads only the sources and runs no lifecycle.
  */
-const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string) => string> = {
+const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string, facts: ProjectFacts) => string> = {
   checkstyle: (goal) => goal,
-  pmd: (goal) => `compile ${goal} -Dcheckstyle.skip`,
+  pmd: (goal, facts) => `compile ${goal} -Dcheckstyle.skip${facts.qualityPlugins.includes("spotbugs") ? " -Dspotbugs.skip" : ""}`,
+  spotbugs: (goal) => `compile ${goal} -Dcheckstyle.skip -Dpmd.skip`,
 }
 
 /**
@@ -27,8 +29,15 @@ export const SLOW_CHECK_EVERY = 5
  */
 export const SLOW_CHECK_LINES = 100
 
-/** The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none. */
-export const QUALITY_EVERY: Record<QualityPlugin, number | undefined> = { checkstyle: undefined, pmd: SLOW_CHECK_EVERY }
+/**
+ * The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none.
+ * PMD and SpotBugs compile and analyse every module.
+ */
+export const QUALITY_EVERY: Record<QualityPlugin, number | undefined> = {
+  checkstyle: undefined,
+  pmd: SLOW_CHECK_EVERY,
+  spotbugs: SLOW_CHECK_EVERY,
+}
 
 /** Every check `init` writes runs after edits; `every` and `lines`, when there is an `every`, space the slow ones out. */
 function afterEdits(every: number | undefined): Pick<Check, "when" | "every" | "lines"> {
@@ -62,7 +71,7 @@ function reactorArgs(facts: ProjectFacts): string {
   return onlyModules ? ` -pl ${[...modules].sort().join(",")} -am` : ""
 }
 
-/** Skips the Checkstyle and PMD plugins the build declares, for a check that runs the lifecycle for something else. */
+/** Skips the Checkstyle, PMD and SpotBugs plugins the build declares, for a check that runs the lifecycle for something else. */
 function qualitySkips(facts: ProjectFacts): string {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin))
     .map((plugin) => ` -D${plugin}.skip`)
@@ -72,7 +81,7 @@ function qualitySkips(facts: ProjectFacts): string {
 /**
  * The check that runs only the ArchUnit test classes, or nothing when there are none. It builds the project, so it
  * runs after every `SLOW_CHECK_EVERY` edited files or `SLOW_CHECK_LINES` written lines.
- * `test` runs the lifecycle, so it skips the Checkstyle and PMD plugins the build declares: bound to an early
+ * `test` runs the lifecycle, so it skips the Checkstyle, PMD and SpotBugs plugins the build declares: bound to an early
  * phase, their failure would stop the build before ArchUnit runs, and their own checks already report it.
  */
 export function architectureCheck(facts: ProjectFacts): Check | undefined {
@@ -88,14 +97,14 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
 }
 
 /**
- * One check per Checkstyle or PMD plugin the build declares. Each runs its own goal: in one Maven call the
+ * One check per Checkstyle, PMD or SpotBugs plugin the build declares. Each runs its own goal: in one Maven call the
  * first failing goal stops the rest. Each runs after edits, as often as `QUALITY_EVERY` says; the file is the same
  * with or without mvnd, since without it an `edit` check waits for task end anyway.
  */
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
-    run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin))}`,
+    run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin), facts)}`,
     report: "maven",
     ...afterEdits(QUALITY_EVERY[plugin]),
   }))
@@ -108,7 +117,7 @@ export function qualityChecks(facts: ProjectFacts): Check[] {
  * - Without `-q`: Maven hides the broken rules with it, and prints only that coverage checks have not been met.
  * - `-fae` gives the broken rules of every module that can be built, not only of the first one.
  * - `-Djacoco.append=false` drops the coverage of earlier runs, such as that of tests deleted since.
- * - The Checkstyle and PMD plugins are skipped, as in the architecture check: their own checks report them.
+ * - The Checkstyle, PMD and SpotBugs plugins are skipped, as in the architecture check: their own checks report them.
  */
 export function coverageCheck(facts: ProjectFacts): Check | undefined {
   const ids = facts.coverageExecutions.filter((id) => PLAIN_EXECUTION_ID.test(id))
