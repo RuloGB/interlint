@@ -9,7 +9,7 @@ export interface Violation {
 }
 
 /** The kind of rule, by the tool that checks it. */
-export type RuleType = "architecture" | "checkstyle" | "pmd" | "coverage" | "eslint"
+export type RuleType = "architecture" | "checkstyle" | "pmd" | "spotbugs" | "coverage" | "eslint"
 
 export interface RuleFailure {
   /** The rule as the team wrote it, with its ID when it has one. */

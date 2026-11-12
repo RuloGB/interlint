@@ -22,7 +22,7 @@ export const TASK_END_ONLY: Partial<Record<Report, string>> = { jacoco: "coverag
 /** The tools behind each report format, as the output names them. */
 export const REPORT_TOOLS: Record<Report, string> = {
   archunit: "ArchUnit",
-  maven: "Checkstyle or PMD",
+  maven: "Checkstyle, PMD or SpotBugs",
   jacoco: "JaCoCo",
   eslint: "ESLint",
 }
@@ -30,7 +30,7 @@ export const REPORT_TOOLS: Record<Report, string> = {
 /** What a run that exits 0 without a result of its tool did not do, as the output says it. */
 export const NO_RESULT: Record<Report, string> = {
   archunit: "wrote no ArchUnit report",
-  maven: "wrote no Checkstyle or PMD report",
+  maven: "wrote no Checkstyle, PMD or SpotBugs report",
   jacoco: "JaCoCo checked no coverage rule",
   eslint: "wrote no ESLint report",
 }
