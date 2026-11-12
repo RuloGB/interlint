@@ -13,7 +13,9 @@ import {
 } from "../../../domain/check-plan.js"
 import { mavenCommand, usesMaven } from "../../../domain/maven-command.js"
 import {
+  NEEDS_CHECK_EXECUTION,
   type ProjectFacts,
+  QUALITY_PLUGIN_ARTIFACTS,
   QUALITY_PLUGINS,
   type QualityPlugin,
   runnableClasses,
@@ -21,7 +23,7 @@ import {
 } from "../../../domain/project-facts.js"
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 
-const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD" }
+const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD", spotbugs: "SpotBugs" }
 /** What `init` looks for besides Maven projects, said when it looked for one and found nothing at all. */
 const NO_NPM_PROJECT = " No npm project with ESLint (eslint in package.json and an eslint.config file) was found either"
 
@@ -41,11 +43,11 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
     if (result.projects[0]?.dir === undefined) {
       throw new UsageError(
-        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin or jacoco-maven-plugin check.${noNpmProject} Nothing was written.`,
+        `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check.${noNpmProject} Nothing was written.`,
       )
     }
     throw new UsageError(
-      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin or a jacoco-maven-plugin check in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}).${noNpmProject} Nothing was written.`,
+      `nothing to check: no Maven project has a file under ${TEST_SOURCES} with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin, a spotbugs-maven-plugin check or a jacoco-maven-plugin check in its build (found: ${result.projects.map(({ dir }) => dir).join(", ")}).${noNpmProject} Nothing was written.`,
     )
   }
   if (result.status === "conflicts") {
@@ -150,7 +152,10 @@ function detectedLines(project: ScannedProject, indent: string): string[] {
   const modules = facts.archTestModules.filter((module) => module !== "")
   return [
     `${indent}ArchUnit tests: ${runnableClasses(facts).join(", ") || "none"}${modules.length > 0 ? ` (in ${modules.join(", ")})` : ""}`,
-    ...facts.qualityPlugins.map((plugin) => `${indent}${QUALITY_TOOLS[plugin]}: maven-${plugin}-plugin in pom.xml`),
+    ...facts.qualityPlugins.map(
+      (plugin) =>
+        `${indent}${QUALITY_TOOLS[plugin]}: ${QUALITY_PLUGIN_ARTIFACTS[plugin]}${NEEDS_CHECK_EXECUTION[plugin] ? " check" : ""} in pom.xml`,
+    ),
     ...(coverageCheck(facts) === undefined
       ? []
       : [`${indent}JaCoCo: jacoco-maven-plugin check in pom.xml, so the coverage check runs at task end`]),

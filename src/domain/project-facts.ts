@@ -1,5 +1,18 @@
-export const QUALITY_PLUGINS = ["checkstyle", "pmd"] as const
+export const QUALITY_PLUGINS = ["checkstyle", "pmd", "spotbugs"] as const
 export type QualityPlugin = (typeof QUALITY_PLUGINS)[number]
+
+/** The artifactId of each quality plugin in a `pom.xml`. SpotBugs' does not follow the `maven-*-plugin` pattern. */
+export const QUALITY_PLUGIN_ARTIFACTS: Record<QualityPlugin, string> = {
+  checkstyle: "maven-checkstyle-plugin",
+  pmd: "maven-pmd-plugin",
+  spotbugs: "spotbugs-maven-plugin",
+}
+
+/**
+ * The quality plugins that count only when an execution runs their `check` goal. SpotBugs is often in a build only
+ * to write reports, and its `check` without an execution would run with settings the build never applies.
+ */
+export const NEEDS_CHECK_EXECUTION: Record<QualityPlugin, boolean> = { checkstyle: false, pmd: false, spotbugs: true }
 
 /** Where a Maven project keeps its test classes, and so its `@ArchTest` classes. */
 export const TEST_SOURCES = "src/test/java"
@@ -19,7 +32,7 @@ export interface ProjectFacts {
   /** Whether the project is a reactor: its `pom.xml` declares modules. */
   hasModules: boolean
   hasMavenWrapper: boolean
-  /** The Checkstyle and PMD plugins the project's own build declares. */
+  /** The Checkstyle and PMD plugins the project's own build declares, and SpotBugs when an execution runs its `check`. */
   qualityPlugins: QualityPlugin[]
   /** The ids of the build's executions that run each plugin's `check` goal. */
   checkExecutions: Record<QualityPlugin, string[]>
