@@ -2,7 +2,10 @@
 
 Interlint works with GitHub Copilot through three hooks in the repository. Copilot CLI, the GitHub Copilot app and the Copilot agent in VS Code share one hook system, so one setup covers them.
 
-Copilot's hooks are in preview and may change. This page was tested with Copilot CLI 1.0.110, run by the GitHub Copilot app on Windows, on a Copilot Free plan, with edits by the main agent and by a subagent, through `edit`, `create` and `apply_patch`.
+Copilot's hooks are in preview and may change. This page was tested on Windows, on a Copilot Free plan, with edits by the main agent and by a subagent, through `edit`, `create` and `apply_patch`:
+
+- Copilot CLI 1.0.110, run by the GitHub Copilot app.
+- The Copilot agent in VS Code 1.145.3, with **Copilot** as the Session Target. VS Code's older **Local** target, which VS Code removes in February 2027, was not tested and is not supported.
 
 ## Set it up
 
@@ -61,7 +64,6 @@ Copilot also runs the hooks in `.claude/settings.json`. There they could not blo
 
 ## Not tested yet
 
-- The Copilot agent in VS Code. It reads `.github/hooks/` too, and should work the same.
 - Copilot in other IDEs, such as IntelliJ.
 - The Copilot cloud agent. It reads only `.github/hooks/`, but needs `interlint`, Node and Maven in its container.
 
