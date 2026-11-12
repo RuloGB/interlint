@@ -3,17 +3,11 @@ import { afterEdit, type FeedbackDeps, mainStop, subagentStop } from "../../../a
 import type { AgentContext } from "../../../domain/metric.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
+import { editNote, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type HookInput, parseHookInput } from "./hook-input.js"
 
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
 export const HOOK_EXIT = { pass: 0, error: 1, block: 2 } as const
-
-const HOOK_EVENTS = ["post-edit", "stop", "subagent-stop"] as const
-
-/** What the post-edit hook sends to Claude when the checks fail. */
-function editNote(report: string): string {
-  return `Interlint: the checks fail after this edit.\n\n${report}`
-}
 
 /** What the post-edit hook shows the user when the checks fail: Claude Code shows the user none of what Claude gets. */
 function failedLine(failed: string[]): string {
@@ -36,17 +30,6 @@ function contextOf(input: HookInput, deps: FeedbackDeps): AgentContext {
   }
 }
 
-function withNotice(text: string, notice: string): string {
-  if (notice === "") return text
-  return text === "" ? notice : `${text.trimEnd()}\n\n${notice}`
-}
-
-/** The text with the line of the checks that passed after it, on its own line. */
-function withPassed(text: string, passed: string): string {
-  if (passed === "") return text
-  return text === "" ? passed.trimEnd() : `${text.trimEnd()}\n${passed.trimEnd()}`
-}
-
 /** Shows the text to the user only, as Claude Code reads the JSON of a hook that exits 0. Nothing when it is empty. */
 function tellUser(io: Io, text: string): void {
   if (text !== "") io.stdout(`${JSON.stringify({ systemMessage: text })}\n`)
@@ -59,12 +42,15 @@ function tellUser(io: Io, text: string): void {
 export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<number> {
   try {
     const [agent, event, ...extra] = args
-    if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code (got "${agent ?? ""}")`)
-    if (!(HOOK_EVENTS as readonly (string | undefined)[]).includes(event) || extra.length > 0) {
-      const names = `${HOOK_EVENTS.slice(0, -1).join(", ")} and ${HOOK_EVENTS.at(-1)}`
-      throw new UsageError(`claude-code hooks are ${names} (got "${args.slice(1).join(" ")}")`)
+    if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code or copilot (got "${agent ?? ""}")`)
+    if (!isHookEvent(event) || extra.length > 0) {
+      throw new UsageError(`claude-code hooks are ${HOOK_EVENT_NAMES} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseHookInput(io.stdin ? await io.stdin() : "")
+    // Copilot also runs the hooks in .claude/settings.json, where it can neither block nor give the edited file: its
+    // own hooks, from `init --agent copilot`, run the checks once. A Claude Code started from a Copilot shell inherits
+    // COPILOT_CLI, but its input has no timestamp.
+    if (process.env.COPILOT_CLI === "1" && input.copilotFormat) return HOOK_EXIT.pass
     const projectDir = resolve(io.cwd, process.env.CLAUDE_PROJECT_DIR || input.cwd || ".")
     const context = () => contextOf(input, deps)
 

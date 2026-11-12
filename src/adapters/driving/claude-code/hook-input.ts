@@ -20,6 +20,8 @@ export interface HookInput {
   agentType?: string
   /** The session's transcript, also in a subagent's hooks. */
   transcriptPath?: string
+  /** Whether the input has the `timestamp` GitHub Copilot adds when it runs Claude Code hooks. Claude Code gives none. */
+  copilotFormat: boolean
 }
 
 export class HookInputError extends UserFacingError {}
@@ -34,7 +36,7 @@ export function parseHookInput(text: string): HookInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new HookInputError("the hook input on stdin is not a JSON object")
   }
-  const { session_id, cwd, tool_input, stop_hook_active, agent_id, agent_type, transcript_path } = value as Record<
+  const { session_id, cwd, tool_input, stop_hook_active, agent_id, agent_type, transcript_path, timestamp } = value as Record<
     string,
     unknown
   >
@@ -49,6 +51,7 @@ export function parseHookInput(text: string): HookInput {
     agentId: nonEmpty(agent_id),
     agentType: nonEmpty(agent_type),
     transcriptPath: nonEmpty(transcript_path),
+    copilotFormat: timestamp !== undefined,
   }
 }
 

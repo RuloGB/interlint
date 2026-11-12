@@ -441,6 +441,36 @@ describe("interlint hook claude-code subagent-stop", () => {
   })
 })
 
+describe("interlint hook claude-code run by GitHub Copilot", () => {
+  /** Copilot runs the hooks in .claude/settings.json with COPILOT_CLI set and a timestamp in their input. */
+  const fromCopilot = (input: string) => JSON.stringify({ ...JSON.parse(input), timestamp: "2026-11-12T07:33:47.107Z" })
+
+  beforeEach(() => {
+    writeCheck("task-end", VIOLATIONS_XML)
+  })
+
+  it("does nothing, so Interlint runs once, through the hooks of init --agent copilot", async () => {
+    vi.stubEnv("COPILOT_CLI", "1")
+    await hook("post-edit", fromCopilot(postToolUse(join(projectDir, "README.md"))))
+
+    expect(await hook("stop", fromCopilot(stopInput(false)))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
+  })
+
+  it("still blocks for a Claude Code started from a Copilot shell, whose input has no timestamp", async () => {
+    vi.stubEnv("COPILOT_CLI", "1")
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+
+    expect((await hook("stop", stopInput(false))).exitCode).toBe(2)
+  })
+
+  it("still blocks without COPILOT_CLI, whatever the input has", async () => {
+    await hook("post-edit", fromCopilot(postToolUse(join(projectDir, "README.md"))))
+
+    expect((await hook("stop", fromCopilot(stopInput(false)))).exitCode).toBe(2)
+  })
+})
+
 describe("interlint hook", () => {
   it("exits 1 for an unknown event, so a typo never blocks the agent", async () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
