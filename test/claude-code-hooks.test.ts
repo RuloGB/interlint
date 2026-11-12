@@ -449,11 +449,22 @@ describe("interlint hook claude-code run by GitHub Copilot", () => {
     writeCheck("task-end", VIOLATIONS_XML)
   })
 
-  it("does nothing, so Interlint runs once, through the hooks of init --agent copilot", async () => {
-    vi.stubEnv("COPILOT_CLI", "1")
-    await hook("post-edit", fromCopilot(postToolUse(join(projectDir, "README.md"))))
+  /** What the skipped hook leaves in Copilot's log, so a missing check run can be traced. */
+  const SKIPPED = "interlint: GitHub Copilot ran a Claude Code hook, which does nothing there: Copilot runs Interlint through .github/hooks/interlint.json (interlint init --agent copilot)\n"
 
-    expect(await hook("stop", fromCopilot(stopInput(false)))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  it("runs no check at post-edit, and says why in Copilot's log", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+    vi.stubEnv("COPILOT_CLI", "1")
+
+    expect(await hook("post-edit", fromCopilot(postToolUse(JAVA_FILE())))).toEqual({ exitCode: 0, stdout: "", stderr: SKIPPED })
+    expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
+  })
+
+  it("runs no check at stop, though a project changed, so Interlint runs once, through the hooks of init --agent copilot", async () => {
+    await hook("post-edit", postToolUse(join(projectDir, "README.md")))
+    vi.stubEnv("COPILOT_CLI", "1")
+
+    expect(await hook("stop", fromCopilot(stopInput(false)))).toEqual({ exitCode: 0, stdout: "", stderr: SKIPPED })
     expect(existsSync(join(projectDir, "target", "ran"))).toBe(false)
   })
 

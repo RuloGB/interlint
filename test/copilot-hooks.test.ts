@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { copilotHookFiles } from "../src/adapters/driven/agents/copilot-hooks.js"
+import { EDIT_TOOLS, parseCopilotHookInput } from "../src/adapters/driving/copilot/hook-input.js"
 import { main } from "../src/main.js"
 
 const VIOLATIONS_XML = readFileSync(
@@ -160,6 +162,17 @@ describe("interlint hook copilot post-edit", () => {
     })
 
     expect(JSON.parse((await hook("post-edit", create)).stdout).additionalContext).toContain("ARCH-01")
+  })
+
+  it("runs nothing when str_replace_editor only views a file, and the checks when it changes one", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+    const editor = (args: Record<string, unknown>) => postToolUse(JAVA_FILE(), { toolName: "str_replace_editor", toolArgs: { path: JAVA_FILE(), ...args } })
+
+    expect(await hook("post-edit", editor({ command: "view" }))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(ran()).toBe(false)
+
+    const replace = await hook("post-edit", editor({ command: "str_replace", old_str: "a", new_str: "b" }))
+    expect(JSON.parse(replace.stdout).additionalContext).toContain("ARCH-01")
   })
 
   it("reads the files a patch adds or updates", async () => {
@@ -374,6 +387,43 @@ describe("the metrics of the Copilot hooks", () => {
     const line = metricLines().at(-1)
     expect(line).toMatchObject({ when: "task-end", agent: "copilot", subagent: true, agentType: "general-purpose" })
     expect(line).not.toHaveProperty("model")
+  })
+})
+
+describe("parseCopilotHookInput", () => {
+  const patchInput = (patch: string) => JSON.stringify({ sessionId: "s", toolName: "apply_patch", toolArgs: patch })
+
+  it("reads every file a patch adds or updates, with the lines it adds to each, and leaves deleted files out", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: src/A.java",
+      "+class A {}",
+      "+",
+      "*** Update File: src/B.java",
+      "@@",
+      "-old",
+      "+new",
+      "*** Delete File: src/C.java",
+      "*** End Patch",
+    ].join("\n")
+
+    expect(parseCopilotHookInput(patchInput(patch)).edits).toEqual([
+      { path: "src/A.java", linesWritten: 2 },
+      { path: "src/B.java", linesWritten: 1 },
+    ])
+  })
+
+  it("gives a moved file its new path, with the lines written before and after the move", () => {
+    const patch = ["*** Begin Patch", "*** Update File: src/Old.java", "+one", "*** Move to: src/New.java", "+two", "*** End Patch"].join("\r\n")
+
+    expect(parseCopilotHookInput(patchInput(patch)).edits).toEqual([{ path: "src/New.java", linesWritten: 2 }])
+  })
+
+  it("reads the same tools that the post-edit matcher of init --agent copilot lets through", () => {
+    const [file] = copilotHookFiles(".")
+    const { hooks } = JSON.parse(file?.content ?? "{}")
+
+    expect(hooks.postToolUse[0].matcher.split("|")).toEqual([...EDIT_TOOLS])
   })
 })
 

@@ -45,7 +45,7 @@ Copilot Business and Enterprise can turn hooks off for an organization. Then Int
 
 ## What the hooks do
 
-- **After a tool changes a file** (`edit`, `create`, `str_replace_editor` or `apply_patch`), `post-edit` runs the `edit` checks for that file. Copilot adds the failures to the tool's result, so the agent reads them right after the edit. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines. The hook counts the lines each `edit` adds or changes, every line of a `create`, and the added lines of a patch.
+- **After a tool changes a file** (`edit`, `create`, `str_replace_editor` or `apply_patch`; a `str_replace_editor` that only views a file runs nothing), `post-edit` runs the `edit` checks for that file. Copilot adds the failures to the tool's result, so the agent reads them right after the edit. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines. The hook counts the lines each `edit` adds or changes, every line of a `create`, and the added lines of a patch.
 - **When the agent finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, the agent cannot stop: Copilot gives it the failures as its next prompt. After 3 blocks in a row it lets the task end; it does not block again until the next turn. Copilot itself stops after 8 blocks in a row.
 - **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed. A subagent that changed no file runs nothing. If a check fails, the subagent cannot stop and gets the failures. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 
@@ -57,7 +57,7 @@ Each check the hooks run is kept in your [metrics](usage.md#metrics) with `agent
 
 ## With Claude Code in the same project
 
-Copilot also runs the hooks in `.claude/settings.json`. There they could not block, and `post-edit` could not see the edited file. So when Copilot runs `interlint hook claude-code`, it does nothing, and the checks run once, through `.github/hooks/interlint.json`. A project can keep both setups: Claude Code runs its own hooks, and Copilot runs its own.
+Copilot also runs the hooks in `.claude/settings.json`. There they could not block, and `post-edit` could not see the edited file. So when Copilot runs `interlint hook claude-code`, it runs no check and leaves a line in Copilot's log that says why. The checks run once, through `.github/hooks/interlint.json`. A project can keep both setups: Claude Code runs its own hooks, and Copilot runs its own.
 
 ## Not tested yet
 

@@ -9,6 +9,10 @@ import { type HookInput, parseHookInput } from "./hook-input.js"
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
 export const HOOK_EXIT = { pass: 0, error: 1, block: 2 } as const
 
+/** Why a Claude Code hook that GitHub Copilot runs does nothing. */
+const COPILOT_SKIPPED =
+  "GitHub Copilot ran a Claude Code hook, which does nothing there: Copilot runs Interlint through .github/hooks/interlint.json (interlint init --agent copilot)"
+
 /** What the post-edit hook shows the user when the checks fail: Claude Code shows the user none of what Claude gets. */
 function failedLine(failed: string[]): string {
   return `✗ Interlint · checks failed after this edit: ${failed.join(", ")}`
@@ -50,7 +54,11 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
     // Copilot also runs the hooks in .claude/settings.json, where it can neither block nor give the edited file: its
     // own hooks, from `init --agent copilot`, run the checks once. A Claude Code started from a Copilot shell inherits
     // COPILOT_CLI, but its input has no timestamp.
-    if (process.env.COPILOT_CLI === "1" && input.copilotFormat) return HOOK_EXIT.pass
+    if (process.env.COPILOT_CLI === "1" && input.copilotFormat) {
+      // Copilot keeps stderr in its log, so a missing check run can be traced there.
+      io.stderr(`interlint: ${COPILOT_SKIPPED}\n`)
+      return HOOK_EXIT.pass
+    }
     const projectDir = resolve(io.cwd, process.env.CLAUDE_PROJECT_DIR || input.cwd || ".")
     const context = () => contextOf(input, deps)
 

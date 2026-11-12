@@ -29,8 +29,14 @@ export interface FileEdit {
 
 export class CopilotHookInputError extends UserFacingError {}
 
-/** Copilot's tools that change files. `view`, `bash` and the others change none, or none Interlint can name. */
-const EDIT_TOOLS = new Set(["edit", "create", "str_replace_editor", "apply_patch"])
+/**
+ * Copilot's tools that change files. `view`, `bash` and the others change none, or none Interlint can name. The
+ * post-edit matcher that `init --agent copilot` writes lists the same tools.
+ */
+export const EDIT_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"] as const
+
+/** The `str_replace_editor` commands that change the file; `view` and `undo_edit` do not run the checks. */
+const EDITOR_WRITES = new Set(["create", "str_replace", "insert"])
 
 export function parseCopilotHookInput(text: string): CopilotHookInput {
   let value: unknown
@@ -46,7 +52,7 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
   return {
     sessionId: session ?? (typeof sessionId === "string" ? sessionId : ""),
     cwd: nonEmpty(cwd),
-    edits: typeof toolName === "string" && EDIT_TOOLS.has(toolName) ? editsOf(toolArgs) : [],
+    edits: (EDIT_TOOLS as readonly unknown[]).includes(toolName) ? editsOf(toolArgs) : [],
     stopHookActive: stop_hook_active === true,
     agentId: nonEmpty(agentId),
     agentType: nonEmpty(agentType) ?? nonEmpty(agentName),
@@ -62,7 +68,8 @@ function editsOf(toolArgs: unknown): FileEdit[] {
   const args = typeof toolArgs === "string" ? parsedOr(toolArgs) : toolArgs
   if (typeof args === "string") return patchEdits(args)
   if (!isObject(args)) return []
-  const { path, old_str, new_str, file_text, input, patch } = args
+  const { path, old_str, new_str, file_text, input, patch, command } = args
+  if (typeof command === "string" && !EDITOR_WRITES.has(command)) return []
   const patchText = typeof input === "string" ? input : patch
   if (typeof patchText === "string") return patchEdits(patchText)
   if (typeof path !== "string" || path === "") return []
