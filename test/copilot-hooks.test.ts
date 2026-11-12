@@ -171,8 +171,21 @@ describe("interlint hook copilot post-edit", () => {
     expect(await hook("post-edit", editor({ command: "view" }))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
     expect(ran()).toBe(false)
 
-    const replace = await hook("post-edit", editor({ command: "str_replace", old_str: "a", new_str: "b" }))
-    expect(JSON.parse(replace.stdout).additionalContext).toContain("ARCH-01")
+    for (const args of [
+      { command: "str_replace", old_str: "a", new_str: "b" },
+      { command: "insert", insert_line: 1, new_str: "b" },
+      // It puts back an earlier version of the file, which may bring back a fixed violation.
+      { command: "undo_edit" },
+    ]) {
+      expect(JSON.parse((await hook("post-edit", editor(args))).stdout).additionalContext).toContain("ARCH-01")
+    }
+  })
+
+  it("reads the edit of another tool whatever command its arguments name", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+    const edit = postToolUse(JAVA_FILE(), { toolArgs: { path: JAVA_FILE(), command: "view", old_str: "a", new_str: "b" } })
+
+    expect(JSON.parse((await hook("post-edit", edit)).stdout).additionalContext).toContain("ARCH-01")
   })
 
   it("reads the files a patch adds or updates", async () => {

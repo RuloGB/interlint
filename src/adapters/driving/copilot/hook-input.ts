@@ -35,8 +35,8 @@ export class CopilotHookInputError extends UserFacingError {}
  */
 export const EDIT_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"] as const
 
-/** The `str_replace_editor` commands that change the file; `view` and `undo_edit` do not run the checks. */
-const EDITOR_WRITES = new Set(["create", "str_replace", "insert"])
+/** The one `str_replace_editor` command that changes no file. `undo_edit` puts back an earlier version, so it counts. */
+const EDITOR_VIEW = "view"
 
 export function parseCopilotHookInput(text: string): CopilotHookInput {
   let value: unknown
@@ -52,7 +52,7 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
   return {
     sessionId: session ?? (typeof sessionId === "string" ? sessionId : ""),
     cwd: nonEmpty(cwd),
-    edits: (EDIT_TOOLS as readonly unknown[]).includes(toolName) ? editsOf(toolArgs) : [],
+    edits: (EDIT_TOOLS as readonly unknown[]).includes(toolName) ? editsOf(toolName, toolArgs) : [],
     stopHookActive: stop_hook_active === true,
     agentId: nonEmpty(agentId),
     agentType: nonEmpty(agentType) ?? nonEmpty(agentName),
@@ -64,12 +64,12 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
  * The files in a tool's arguments: `path` with `old_str` and `new_str` (`edit`, `str_replace_editor`) or `file_text`
  * (`create`), or the files a patch adds or updates (`apply_patch`). Copilot may give the arguments as a JSON string.
  */
-function editsOf(toolArgs: unknown): FileEdit[] {
+function editsOf(toolName: unknown, toolArgs: unknown): FileEdit[] {
   const args = typeof toolArgs === "string" ? parsedOr(toolArgs) : toolArgs
   if (typeof args === "string") return patchEdits(args)
   if (!isObject(args)) return []
   const { path, old_str, new_str, file_text, input, patch, command } = args
-  if (typeof command === "string" && !EDITOR_WRITES.has(command)) return []
+  if (toolName === "str_replace_editor" && command === EDITOR_VIEW) return []
   const patchText = typeof input === "string" ? input : patch
   if (typeof patchText === "string") return patchEdits(patchText)
   if (typeof path !== "string" || path === "") return []
