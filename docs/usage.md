@@ -61,6 +61,7 @@ checks:
 - With no `@ArchTest` classes, no Checkstyle or PMD plugin, no JaCoCo `check` goal and no npm project with ESLint it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
+- `--agent copilot` also writes Interlint's hooks to `.github/hooks/interlint.json`. See [GitHub Copilot](copilot.md).
 - At the end it prints what it detected and which files it wrote, left unchanged or kept. `--cwd <dir>` runs it on another directory.
 
 The generated file is yours: edit it to change `when` or the command.
@@ -417,7 +418,7 @@ Options, for both `interlint metrics` and `interlint metrics report`:
 |---|---|
 | `--all` | Every project of the user, not only the current one |
 | `--since <YYYY-MM-DD>` | Only the events from that day on, in UTC |
-| `--agent claude-code\|opencode` | Only the events of that agent |
+| `--agent claude-code\|copilot\|opencode` | Only the events of that agent |
 | `--cwd <dir>` | The project to read, instead of the current directory |
 
 Without metrics, it says so and where they are kept, and exits with 0. A line of a metrics file that is not an event, such as one edited by hand, is skipped, and the output says how many were.

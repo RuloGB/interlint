@@ -40,6 +40,8 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hook
 
 `interlint` must be on the `PATH` that Claude Code runs hooks with.
 
+GitHub Copilot also runs the hooks in `.claude/settings.json`. When it does, `interlint hook claude-code` does nothing: set up Copilot with `init --agent copilot` (see [GitHub Copilot](copilot.md)).
+
 ## What the hooks do
 
 - **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit, and you see a line that names the checks that failed, such as `✗ Interlint · checks failed after this edit: architecture`. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines, on all of them; Claude and its subagents add to the same count. The hook counts the lines each `Edit` adds or changes, and every line of a `Write`.
