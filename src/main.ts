@@ -3,6 +3,8 @@ import { realpathSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { claudeCodeSettingsFiles } from "./adapters/driven/agents/claude-code-settings.js"
 import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript.js"
+import { copilotHookFiles } from "./adapters/driven/agents/copilot-hooks.js"
+import { copilotTranscriptModel } from "./adapters/driven/agents/copilot-transcript.js"
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
 import { scanEslintProjects } from "./adapters/driven/eslint/project-scan.js"
@@ -48,12 +50,13 @@ const checking: CheckProjectDeps = {
 const DEPS: CliDeps = {
   checking,
   feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter, transcriptModel },
+  copilotTranscriptModel,
   setup: {
     scan: scanMavenProjects,
     scanNpm: scanEslintProjects,
     files: diskProjectFiles,
     config: yamlConfigFile,
-    agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles },
+    agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles, copilot: copilotHookFiles },
     hasExecutable: lookupExecutable,
   },
   metrics: { source: fileMetricsSource(), reportFile: diskReportFile, pdf: headlessPdf(), now: () => new Date() },

@@ -151,7 +151,7 @@ describe("interlint metrics", () => {
   it.each([
     [["--since", "yesterday"], '--since must be a date as YYYY-MM-DD (got "yesterday")'],
     [["--since", "2026-02-30"], '--since must be a date as YYYY-MM-DD (got "2026-02-30")'],
-    [["--agent", "cursor"], '--agent must be claude-code or opencode (got "cursor")'],
+    [["--agent", "cursor"], '--agent must be claude-code, copilot or opencode (got "cursor")'],
     [["--out", "x.md"], "--out is only valid with metrics report"],
     [["--force"], "--force is only valid with metrics report"],
     [["export"], 'unknown metrics command "export"'],
@@ -469,7 +469,7 @@ describe("the usage", () => {
     let stdout = ""
     await main(["--help"], { cwd: projectDir, stdout: (text) => void (stdout += text), stderr: () => {} })
 
-    expect(stdout).toContain("interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|opencode] [--cwd <dir>]")
+    expect(stdout).toContain("interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|copilot|opencode] [--cwd <dir>]")
     expect(stdout).toContain("interlint metrics report [--out <path>] [--force] [--format md|html|pdf]")
   })
 })

@@ -29,7 +29,7 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
   const { values } = parseInitArgs(args)
   const agent = values.agent
   if (agent !== undefined && !(AGENTS as readonly string[]).includes(agent)) {
-    throw new UsageError(`--agent must be ${AGENTS.join(" or ")} (got "${agent}")`)
+    throw new UsageError(`--agent must be ${AGENTS.slice(0, -1).join(", ")} or ${AGENTS.at(-1)} (got "${agent}")`)
   }
 
   const projectDir = resolve(io.cwd, values.cwd ?? ".")

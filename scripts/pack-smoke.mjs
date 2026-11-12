@@ -10,6 +10,7 @@ const ROOT = join(import.meta.dirname, "..")
 const AGENTS = {
   opencode: ".opencode/plugins/interlint/index.ts",
   "claude-code": ".claude/settings.json",
+  copilot: ".github/hooks/interlint.json",
 }
 
 const scratch = mkdtempSync(join(tmpdir(), "interlint-pack-"))

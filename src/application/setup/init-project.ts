@@ -15,7 +15,7 @@ import type {
   ScannedProject,
 } from "./ports.js"
 
-export const AGENTS = ["opencode", "claude-code"] as const
+export const AGENTS = ["opencode", "claude-code", "copilot"] as const
 export type Agent = (typeof AGENTS)[number]
 
 export interface InitDeps {
