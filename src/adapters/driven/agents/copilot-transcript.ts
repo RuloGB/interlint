@@ -1,5 +1,5 @@
 import type { TranscriptModel } from "../../../application/feedback/ports.js"
-import { lastModelIn } from "./claude-code-transcript.js"
+import { lastModelIn } from "./transcript-tail.js"
 
 /**
  * The model of the last answer in a GitHub Copilot session's `events.jsonl`: its `assistant.message` events carry it in
