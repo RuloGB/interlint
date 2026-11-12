@@ -305,6 +305,10 @@ console.log("[ERROR] Failed to execute goal com.github.spotbugs:spotbugs-maven-p
 process.exit(1)
 `,
     )
+    for (const file of [ORDER, CUSTOMER]) {
+      mkdirSync(join(projectDir, file, ".."), { recursive: true })
+      writeFileSync(join(projectDir, file), "class X {}")
+    }
     writeConfig({ name: "spotbugs", run: "node spotbugs.mjs compile spotbugs:check@spotbugs", report: "maven", when: "edit" })
 
     const { exitCode, stdout } = await run("check", "--when", "edit", "--file", ORDER)

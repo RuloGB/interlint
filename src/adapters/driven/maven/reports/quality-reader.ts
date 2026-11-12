@@ -59,6 +59,7 @@ interface ReportFile {
 
 /** An element of a bug that SpotBugs places with source lines: the bug itself, or its field, method or class. */
 interface Located {
+  primary?: string
   SourceLine?: Record<string, string>[]
 }
 
@@ -211,21 +212,27 @@ function pmdFindings(xml: string, projectDir: string): Finding[] {
 }
 
 /**
- * Where a bug is: its own primary source line, or else the line of the field, method or class it is about, in that
- * order. Bugs about a class's design or serialization have no source line of their own.
+ * Where a bug is, as the first source line with a line number among, in order: the bug's own lines (its primary one
+ * first), then the lines of its primary field, method and class, then those of the others. Bugs about a class's design
+ * or serialization have no line of their own, and SpotBugs writes some lines, such as a field annotation's, without a
+ * number. When no line has a number, the first one still gives the file.
  */
 function sourceLineOf(bug: BugInstance): Record<string, string> | undefined {
-  const own = bug.SourceLine?.find((line) => line.primary === "true") ?? bug.SourceLine?.[0]
-  if (own) return own
-  const linesOf = (elements: { SourceLine?: Record<string, string>[] }[] | undefined) =>
-    (elements ?? []).flatMap((element) => element.SourceLine ?? [])
-  return [...linesOf(bug.Field), ...linesOf(bug.Method), ...linesOf(bug.Class)][0]
+  const own = [...(bug.SourceLine ?? [])].sort((a, b) => Number(b.primary === "true") - Number(a.primary === "true"))
+  const members = [bug.Field, bug.Method, bug.Class].map((elements) => elements ?? [])
+  const linesOf = (primary: boolean) =>
+    members.flatMap((elements) =>
+      elements.filter((element) => (element.primary === "true") === primary).flatMap((element) => element.SourceLine ?? []),
+    )
+  const lines = [...own, ...linesOf(true), ...linesOf(false)]
+  return lines.find((line) => Number(line.start) > 0) ?? lines[0]
 }
 
 /**
  * SpotBugs reads bytecode and names each source by its path below a source dir (`shop/Order.java`), so the source is
  * the first of the report's source dirs that holds it, or below the first one when none does. A report that lists
- * none is taken to use the module's `src/main/java`, so the bug still has a path an edit check can match.
+ * none is taken to use the module's `src/main/java` when the source is there; elsewhere, as with Kotlin or a custom
+ * `sourceDirectory`, the bug has no path rather than one to a file that does not exist.
  * A report cut short throws, as one that is not well-formed: the parser would read the bugs before the cut.
  */
 function spotbugsFindings(xml: string, projectDir: string, moduleDir = projectDir): Finding[] {
@@ -239,7 +246,7 @@ function spotbugsFindings(xml: string, projectDir: string, moduleDir = projectDi
     const at = sourceLineOf(bug)
     const sourcepath = at?.sourcepath
     const candidates = sourcepath ? srcDirs.map((dir) => join(dir, sourcepath)) : []
-    const source = candidates.find((path) => existsSync(path)) ?? candidates[0]
+    const source = candidates.find((path) => existsSync(path)) ?? (listed.length > 0 ? candidates[0] : undefined)
     const line = Number(at?.start)
     return {
       rule: bug.type ?? "SpotBugs",

@@ -514,12 +514,26 @@ describe("parseSpotBugsXml", () => {
     expect(parseSpotBugsXml(xml, PROJECT).map((failure) => failure.title)).toEqual(["COMMAND_INJECTION"])
   })
 
-  it("looks for the source in src/main/java when the report names no source dir", () => {
+  it("gives no path when the report names no source dir and src/main/java does not hold the source", () => {
     const xml = spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")])
 
-    expect(parseSpotBugsXml(xml, PROJECT)[0]?.violations).toEqual([
-      { text: "Command Injection", file: "Order.java", line: 19, path: "src/main/java/shop/Order.java" },
-    ])
+    expect(parseSpotBugsXml(xml, PROJECT)[0]?.violations).toEqual([{ text: "Command Injection", file: "Order.java", line: 19 }])
+  })
+
+  it("prefers the primary field, method or class, and one whose source line has a line number", () => {
+    const line = (start?: number) =>
+      `<SourceLine classname='shop.Order'${start === undefined ? "" : ` start='${start}' end='${start}'`} sourcepath='shop/Order.java' sourcefile='Order.java'/>`
+    const bug = (type: string, inner: string) =>
+      `<BugInstance type='${type}' priority='2'><LongMessage>${type}</LongMessage>${inner}</BugInstance>`
+    const xml = spotbugsXml(
+      [srcDir],
+      [
+        bug("SE_BAD_FIELD", `<Class classname='shop.Order' primary='true'>${line(3)}</Class><Field name='lock' primary='true'>${line()}</Field>`),
+        bug("UWF_FIELD", `<Field name='other'>${line(9)}</Field><Method name='run' primary='true'>${line(14)}</Method>`),
+      ],
+    )
+
+    expect(parseSpotBugsXml(xml, PROJECT).map((failure) => failure.violations[0]?.line)).toEqual([3, 14])
   })
 
   it("places a bug without its own source line by its field's, method's or class's", () => {
@@ -583,6 +597,7 @@ describe("readQualityReports with SpotBugs", () => {
 
   it("looks for the source in the module of the report when it names no source dir", () => {
     write("api/pom.xml", "<project/>")
+    sourceIn("api", "Order.java")
     const before = snapshotQualityReports(projectDir)
     write("api/target/spotbugsXml.xml", spotbugsXml([], [spotbugsBug(19, 2, "COMMAND_INJECTION", "Command Injection")]))
 
