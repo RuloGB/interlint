@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../../application/checking/ports.js"
 import { DEPCRUISE_REPORT } from "../../../domain/depcruise-command.js"
