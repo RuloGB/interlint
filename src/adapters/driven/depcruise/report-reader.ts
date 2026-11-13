@@ -38,13 +38,13 @@ function fingerprint(path: string): string | undefined {
  * coarse clock's same time cannot pass for the old one. Only a report that cannot be deleted is fingerprinted.
  *
  * Also creates the report's directory: with `--output-to` in a directory that does not exist, dependency-cruiser
- * fails without a report. Only when `node_modules` is there: without it the dependencies are not installed, the run
- * fails anyway, and a `node_modules` holding only the cache would look installed.
+ * fails without a report. Even without a `node_modules` of the project's own: in an npm workspace that hoists its
+ * dependencies, npx runs the dependency-cruiser of the root's.
  */
 function snapshotDepcruiseReport(projectDir: string): ReportSnapshot {
   const path = reportPath(projectDir)
   try {
-    if (existsSync(join(projectDir, "node_modules"))) mkdirSync(dirname(path), { recursive: true })
+    mkdirSync(dirname(path), { recursive: true })
     rmSync(path, { force: true })
   } catch {
     // The run shows why it could not write the report, and a report left in place is fingerprinted.

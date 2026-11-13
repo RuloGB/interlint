@@ -278,7 +278,7 @@ Each forbidden dependency shows its rule, with the rule's `comment` when it has 
 Fix these problems before continuing.
 ```
 
-- The report must go to `node_modules/.cache/interlint/depcruise.json`, relative to the directory the check runs in, with `-T json --output-to`: that is where Interlint reads it. dependency-cruiser does not create the directory, so Interlint creates it before the check runs, when `node_modules` is there. It also deletes the report of the previous run, so the one it reads is always new.
+- The report must go to `node_modules/.cache/interlint/depcruise.json`, relative to the directory the check runs in, with `-T json --output-to`: that is where Interlint reads it. dependency-cruiser does not create the directory, so Interlint creates it before the check runs, even in a package whose dependencies an npm workspace keeps in the root's `node_modules`. It also deletes the report of the previous run, so the one it reads is always new.
 - `npx --no` runs the dependency-cruiser installed in the project and never downloads one.
 - Your rules decide, not Interlint. Interlint has none of its own: write them in your configuration, for example from the layers your `AGENTS.md` describes. Only violations of severity `error` block. Those of severity `warn` or `info` do not block and are not shown.
 - dependency-cruiser gives no line number, so a violation shows its file alone. A rule about a module, such as `no-orphans`, shows the module. A cycle shows its path. The paths in the message are relative to the check's `dir`; the `at` line is relative to `interlint.yaml`.

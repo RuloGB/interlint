@@ -189,10 +189,10 @@ describe("depcruiseReader", () => {
     expect(existsSync(dirname(join(dir, ...DEPCRUISE_REPORT.split("/"))))).toBe(true)
   })
 
-  it("creates no node_modules in a project whose dependencies are not installed", () => {
+  it("creates the report's directory without a node_modules of the project's own, as in a hoisted npm workspace", () => {
     depcruiseReader.snapshot(dir)
 
-    expect(existsSync(join(dir, "node_modules"))).toBe(false)
+    expect(existsSync(dirname(join(dir, ...DEPCRUISE_REPORT.split("/"))))).toBe(true)
   })
 
   it("reads a report the run rewrote with the same size and time as the earlier one", () => {
