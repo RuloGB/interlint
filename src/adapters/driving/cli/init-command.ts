@@ -25,7 +25,8 @@ import { EXIT, type Io, UsageError } from "./cli-io.js"
 
 const QUALITY_TOOLS: Record<QualityPlugin, string> = { checkstyle: "Checkstyle", pmd: "PMD", spotbugs: "SpotBugs" }
 /** What `init` looks for besides Maven projects, said when it looked for one and found nothing at all. */
-const NO_NPM_PROJECT = " No npm project with ESLint (eslint in package.json and an eslint.config file) was found either"
+const NO_NPM_PROJECT =
+  " No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either"
 
 export function init(args: string[], io: Io, deps: InitDeps): number {
   const { values } = parseInitArgs(args)
@@ -149,7 +150,17 @@ function listOf(items: string[]): string {
 /** What `init` found in one project. In a workspace, a Maven project with nothing to check says so. */
 function detectedLines(project: ScannedProject, indent: string): string[] {
   if ("npm" in project) {
-    return [`${indent}ESLint: eslint in package.json and ${project.npm.eslintConfig}, so the eslint check runs after each edit`]
+    const { eslintConfig, depcruiseConfig } = project.npm
+    return [
+      ...(eslintConfig === undefined
+        ? []
+        : [`${indent}ESLint: eslint in package.json and ${eslintConfig}, so the eslint check runs after each edit`]),
+      ...(depcruiseConfig === undefined
+        ? []
+        : [
+            `${indent}dependency-cruiser: dependency-cruiser in package.json and ${depcruiseConfig}, so the depcruise check runs after each edit`,
+          ]),
+    ]
   }
   const { facts } = project
   if (projectChecks(facts).length === 0 && facts.archTestModules.length === 0) return [`${indent}nothing to check`]

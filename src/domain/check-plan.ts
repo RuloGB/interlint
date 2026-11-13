@@ -1,7 +1,8 @@
 import type { Check } from "./check.js"
+import { DEPCRUISE_COMMAND } from "./depcruise-command.js"
 import { ESLINT_COMMAND } from "./eslint-command.js"
 import { mavenCommand } from "./maven-command.js"
-import { type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
+import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
 
 /**
  * PMD resolves types from the compiled classes and SpotBugs analyses them, so their checks compile first. Compiling
@@ -142,11 +143,14 @@ export function projectChecks(facts: ProjectFacts, dir?: string): Check[] {
 }
 
 /**
- * The check of an npm project that runs ESLint, named and run in its `dir` as those of a Maven project. It runs
- * after each edit: ESLint on the edited files starts no build.
+ * The checks of an npm project, one for ESLint and one for dependency-cruiser when it runs them, named and run in its
+ * `dir` as those of a Maven project. They run after each edit: neither starts a build.
  */
-export function npmChecks(dir?: string): Check[] {
-  return inDir([{ name: "eslint", run: ESLINT_COMMAND, report: "eslint", when: "edit" }], dir)
+export function npmChecks(facts: NpmFacts, dir?: string): Check[] {
+  const eslint: Check[] = facts.eslintConfig === undefined ? [] : [{ name: "eslint", run: ESLINT_COMMAND, report: "eslint", when: "edit" }]
+  const depcruise: Check[] =
+    facts.depcruiseConfig === undefined ? [] : [{ name: "depcruise", run: DEPCRUISE_COMMAND, report: "depcruise", when: "edit" }]
+  return inDir([...eslint, ...depcruise], dir)
 }
 
 function inDir(checks: Check[], dir: string | undefined): Check[] {

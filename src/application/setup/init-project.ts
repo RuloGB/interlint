@@ -87,7 +87,7 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
 }
 
 function checksOf(project: ScannedProject): Check[] {
-  return "npm" in project ? npmChecks(project.dir) : projectChecks(project.facts, project.dir)
+  return "npm" in project ? npmChecks(project.npm, project.dir) : projectChecks(project.facts, project.dir)
 }
 
 /**

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { depcruiseReader, parseDepcruiseJson } from "../src/adapters/driven/depcruise/report-reader.js"
+import { eslintReader } from "../src/adapters/driven/eslint/report-reader.js"
 import { loadConfig } from "../src/adapters/driven/yaml-config/config.js"
 import { formatOutcomes } from "../src/application/checking/format-outcomes.js"
 import type { PendingEdit, ReportReader } from "../src/application/checking/ports.js"
@@ -10,6 +11,7 @@ import { type CheckDeps, runEditChecks, runTaskEndChecks } from "../src/applicat
 import { recordRun } from "../src/application/checking/check-metrics.js"
 import { type Check, isSourceOf } from "../src/domain/check.js"
 import { DEPCRUISE_COMMAND, DEPCRUISE_REPORT } from "../src/domain/depcruise-command.js"
+import { ESLINT_COMMAND, ESLINT_REPORT } from "../src/domain/eslint-command.js"
 import { type CheckMetric, metricEventOf } from "../src/domain/metric.js"
 import { summarize } from "../src/domain/metric-summary.js"
 
@@ -336,6 +338,32 @@ describe("a depcruise check at task end", () => {
 
     expect(formatOutcomes(outcomes)).toContain(
       "✗ depcruise · the command exited 0 but dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports",
+    )
+  })
+})
+
+describe("a project with an eslint and a depcruise check", () => {
+  it("shows a failure of each tool in its own check", async () => {
+    const eslint: Check = { name: "eslint", run: ESLINT_COMMAND, report: "eslint", when: "edit" }
+    const { deps } = depcruiseDeps({ exitCode: 0 })
+    deps.readers.eslint = eslintReader
+    deps.run = async (command, cwd) => {
+      if (command.includes(" eslint ")) {
+        const path = join(cwd, ...ESLINT_REPORT.split("/"))
+        mkdirSync(dirname(path), { recursive: true })
+        const messages = [{ ruleId: "no-var", severity: 2, message: "Unexpected var, use let or const instead.", line: 3 }]
+        writeFileSync(path, JSON.stringify([{ filePath: join(cwd, "src", "domain", "order.ts"), messages }]))
+        return { exitCode: 1, output: "" }
+      }
+      writeReport(report([domainToInfra]), cwd)
+      return { exitCode: 0, output: "" }
+    }
+
+    const text = formatOutcomes(await runEditChecks(dir, { checks: [eslint, depcruiseEdit] }, ["src/domain/order.ts"], deps))
+
+    expect(text).toContain("✗ eslint · no-var\n\n  Unexpected var, use let or const instead.\n    at src/domain/order.ts:3")
+    expect(text).toContain(
+      "✗ depcruise · domain-not-to-infrastructure\n\n  src/domain/order.ts depends on src/infrastructure/order-repository.ts",
     )
   })
 })

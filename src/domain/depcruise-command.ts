@@ -1,3 +1,8 @@
+/** The names of dependency-cruiser's configuration file it finds on its own, the ones `init` detects. */
+export const DEPCRUISE_CONFIGS = ["js", "cjs", "mjs", "ts", "cts", "mts", "json"].map(
+  (extension) => `.dependency-cruiser.${extension}`,
+)
+
 /**
  * Where a dependency-cruiser check writes its JSON report, `/`-separated and relative to its project. The reader is
  * not told the command, so the path is fixed. dependency-cruiser does not create its directory: the reader does.

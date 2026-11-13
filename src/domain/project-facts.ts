@@ -17,10 +17,12 @@ export const NEEDS_CHECK_EXECUTION: Record<QualityPlugin, boolean> = { checkstyl
 /** Where a Maven project keeps its test classes, and so its `@ArchTest` classes. */
 export const TEST_SOURCES = "src/test/java"
 
-/** What `interlint init` found in an npm project that runs ESLint. */
+/** What `interlint init` found in an npm project that runs ESLint, dependency-cruiser or both: at least one of them. */
 export interface NpmFacts {
-  /** The name of its flat ESLint configuration file, such as `eslint.config.js`. */
-  eslintConfig: string
+  /** The name of its flat ESLint configuration file, such as `eslint.config.js`, when it runs ESLint. */
+  eslintConfig?: string
+  /** The name of its dependency-cruiser configuration file, such as `.dependency-cruiser.cjs`, when it runs it. */
+  depcruiseConfig?: string
 }
 
 /** What `interlint init` found in a Maven project. */

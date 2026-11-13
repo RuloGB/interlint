@@ -8,7 +8,6 @@ import { copilotTranscriptModel } from "./adapters/driven/agents/copilot-transcr
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
 import { depcruiseReader } from "./adapters/driven/depcruise/report-reader.js"
 import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
-import { scanEslintProjects } from "./adapters/driven/eslint/project-scan.js"
 import { eslintReader } from "./adapters/driven/eslint/report-reader.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
@@ -19,6 +18,7 @@ import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
 import { archUnitReader } from "./adapters/driven/maven/reports/archunit-reader.js"
 import { jacocoReader } from "./adapters/driven/maven/reports/jacoco-reader.js"
 import { mavenQualityReader } from "./adapters/driven/maven/reports/quality-reader.js"
+import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { runCommand } from "./adapters/driven/process/command-runner.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
@@ -54,7 +54,7 @@ const DEPS: CliDeps = {
   copilotTranscriptModel,
   setup: {
     scan: scanMavenProjects,
-    scanNpm: scanEslintProjects,
+    scanNpm: scanNpmProjects,
     files: diskProjectFiles,
     config: yamlConfigFile,
     agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles, copilot: copilotHookFiles },

@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+      "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1226,7 +1226,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1238,7 +1238,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin, a spotbugs-maven-plugin check or a jacoco-maven-plugin check in its build (found: orders). No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no Maven project has a file under src/test/java with @ArchTest, or maven-checkstyle-plugin, maven-pmd-plugin, a spotbugs-maven-plugin check or a jacoco-maven-plugin check in its build (found: orders). No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n",
     })
   })
 })
@@ -1301,7 +1301,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1409,7 +1409,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n",
     })
 
     eslintProject("packages/web")
@@ -1489,7 +1489,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
     })
   })
 
@@ -1500,5 +1500,95 @@ describe("interlint init with ESLint", () => {
 
     expect((await run("init")).exitCode).toBe(0)
     expect(loadConfig(projectDir).checks.map(({ name }) => name)).toEqual(["web/eslint"])
+  })
+})
+
+describe("interlint init with dependency-cruiser", () => {
+  const DEPCRUISE_RUN = "npx --no -- depcruise . -T json --output-to node_modules/.cache/interlint/depcruise.json"
+  const ESLINT_RUN = "npx --no -- eslint -f json -o node_modules/.cache/interlint/eslint.json ."
+  const NOTHING_TO_CHECK =
+    "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint or dependency-cruiser (eslint in package.json and an eslint.config file, or dependency-cruiser in package.json and a .dependency-cruiser file) was found either. Nothing was written.\n"
+
+  /** An npm project that lists dependency-cruiser and has its configuration, in `dir` (`""` is the root). */
+  function depcruiseProject(dir: string, config = ".dependency-cruiser.cjs", devDependencies: Record<string, string> = {}) {
+    const at = (path: string) => (dir === "" ? path : `${dir}/${path}`)
+    writeFile(
+      at("package.json"),
+      JSON.stringify({ name: "web", devDependencies: { "dependency-cruiser": "^18.7.0", typescript: "^5.9.0", ...devDependencies } }),
+    )
+    writeFile(at(config), "module.exports = { forbidden: [] }\n")
+  }
+
+  it("writes a depcruise check that runs the project's dependency-cruiser after each edit", async () => {
+    depcruiseProject("")
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([{ name: "depcruise", run: DEPCRUISE_RUN, report: "depcruise", when: "edit" }])
+    expect(stdout).toBe(
+      [
+        "Detected:",
+        "  dependency-cruiser: dependency-cruiser in package.json and .dependency-cruiser.cjs, so the depcruise check runs after each edit",
+        "",
+        "Wrote:",
+        "  interlint.yaml",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it.each([
+    [".dependency-cruiser.js"],
+    [".dependency-cruiser.mjs"],
+    [".dependency-cruiser.ts"],
+    [".dependency-cruiser.cts"],
+    [".dependency-cruiser.mts"],
+    [".dependency-cruiser.json"],
+  ])("finds the configuration in %s", async (config) => {
+    depcruiseProject("", config)
+
+    expect((await run("init")).stdout).toContain(`  dependency-cruiser: dependency-cruiser in package.json and ${config}, so`)
+  })
+
+  it("writes the eslint and depcruise checks of a project with both", async () => {
+    depcruiseProject("web", ".dependency-cruiser.cjs", { eslint: "^10.0.0" })
+    writeFile("web/eslint.config.js", "export default []\n")
+
+    const { exitCode, stdout } = await run("init")
+
+    expect(exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "web/eslint", dir: "web", run: ESLINT_RUN, report: "eslint", when: "edit" },
+      { name: "web/depcruise", dir: "web", run: DEPCRUISE_RUN, report: "depcruise", when: "edit" },
+    ])
+    expect(stdout).toContain(
+      [
+        "  web",
+        "    ESLint: eslint in package.json and eslint.config.js, so the eslint check runs after each edit",
+        "    dependency-cruiser: dependency-cruiser in package.json and .dependency-cruiser.cjs, so the depcruise check runs after each edit",
+      ].join("\n"),
+    )
+  })
+
+  it.each([
+    [
+      "package.json does not list dependency-cruiser",
+      () => (writeFile("package.json", '{"devDependencies":{"typescript":"^5.9.0"}}'), writeFile(".dependency-cruiser.cjs", "")),
+    ],
+    ["there is no configuration", () => writeFile("package.json", '{"devDependencies":{"dependency-cruiser":"^18.7.0"}}')],
+    ["there is no package.json", () => writeFile(".dependency-cruiser.cjs", "")],
+  ])("writes nothing when %s", async (_case, arrange) => {
+    arrange()
+
+    expect(await run("init")).toEqual({ exitCode: 2, stdout: "", stderr: NOTHING_TO_CHECK })
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
+  })
+
+  it("names a package.json it cannot read next to a dependency-cruiser configuration", async () => {
+    writeFile("package.json", "{")
+    writeFile(".dependency-cruiser.cjs", "")
+
+    expect((await run("init")).stderr).toContain("was found either: package.json is not valid JSON. Nothing was written.")
   })
 })

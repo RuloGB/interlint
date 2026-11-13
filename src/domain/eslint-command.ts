@@ -3,6 +3,9 @@
  * is not told the command, so the path is fixed. `node_modules/.cache` is outside git and outside the files whose
  * change runs the checks again at task end, and ESLint creates it.
  */
+/** The names of ESLint's flat configuration file, the only one `init` detects (decision 57). */
+export const ESLINT_CONFIGS = ["js", "mjs", "cjs", "ts", "mts", "cts"].map((extension) => `eslint.config.${extension}`)
+
 export const ESLINT_REPORT = "node_modules/.cache/interlint/eslint.json"
 
 /**
