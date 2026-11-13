@@ -6,6 +6,7 @@ import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript
 import { copilotHookFiles } from "./adapters/driven/agents/copilot-hooks.js"
 import { copilotTranscriptModel } from "./adapters/driven/agents/copilot-transcript.js"
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
+import { depcruiseReader } from "./adapters/driven/depcruise/report-reader.js"
 import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
 import { scanEslintProjects } from "./adapters/driven/eslint/project-scan.js"
 import { eslintReader } from "./adapters/driven/eslint/report-reader.js"
@@ -36,7 +37,7 @@ import type { CheckProjectDeps } from "./application/checking/check-project.js"
 const checking: CheckProjectDeps = {
   loadConfig,
   run: runCommand,
-  readers: { archunit: archUnitReader, maven: mavenQualityReader, jacoco: jacocoReader, eslint: eslintReader },
+  readers: { archunit: archUnitReader, maven: mavenQualityReader, jacoco: jacocoReader, eslint: eslintReader, depcruise: depcruiseReader },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
   changes: fileChangeTracker(),

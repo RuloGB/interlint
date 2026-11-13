@@ -1,8 +1,11 @@
-export const REPORTS = ["archunit", "maven", "jacoco", "eslint"] as const
+export const REPORTS = ["archunit", "maven", "jacoco", "eslint", "depcruise"] as const
 export const WHENS = ["edit", "task-end"] as const
 
 export type Report = (typeof REPORTS)[number]
 export type When = (typeof WHENS)[number]
+
+/** The TypeScript and JavaScript files. */
+const SCRIPT_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
 
 /**
  * The files whose change makes an `edit` check worth running, by report format. Coverage needs the whole test suite
@@ -13,7 +16,8 @@ const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = {
   archunit: [".java"],
   maven: [".java"],
   jacoco: [],
-  eslint: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+  eslint: SCRIPT_EXTENSIONS,
+  depcruise: SCRIPT_EXTENSIONS,
 }
 
 /** The report formats a check may use only at task end, with the reason `interlint.yaml` gives for it. */
@@ -25,6 +29,7 @@ export const REPORT_TOOLS: Record<Report, string> = {
   maven: "Checkstyle, PMD or SpotBugs",
   jacoco: "JaCoCo",
   eslint: "ESLint",
+  depcruise: "dependency-cruiser",
 }
 
 /** What a run that exits 0 without a result of its tool did not do, as the output says it. */
@@ -33,18 +38,21 @@ export const NO_RESULT: Record<Report, string> = {
   maven: "wrote no Checkstyle, PMD or SpotBugs report",
   jacoco: "JaCoCo checked no coverage rule",
   eslint: "wrote no ESLint report",
+  depcruise: "dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports",
 }
 
 /**
  * Whether an `edit` check shows only the failures of the changed files. Checkstyle, PMD and ESLint rate each file on
  * its own, so another file's failures are not the edit's, and task end reports them. An ArchUnit rule is about how
- * classes relate, so an edit can break it in a class the edit did not change.
+ * classes relate, so an edit can break it in a class the edit did not change. dependency-cruiser gives each violation
+ * at the file that holds the import, so an edit's are in the files it changed.
  */
 export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = {
   archunit: false,
   maven: true,
   jacoco: false,
   eslint: true,
+  depcruise: true,
 }
 
 /** Whether `file`, relative to the project, is a source the check verifies. */

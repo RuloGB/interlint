@@ -14,7 +14,7 @@ function fakeDeps(options: { mvnd: boolean }) {
       launched.push(command)
       return { exitCode: 0, output: "" }
     },
-    readers: { archunit: PASSING_READER, maven: PASSING_READER, jacoco: PASSING_READER, eslint: PASSING_READER },
+    readers: { archunit: PASSING_READER, maven: PASSING_READER, jacoco: PASSING_READER, eslint: PASSING_READER, depcruise: PASSING_READER },
     hasExecutable: (name) => options.mvnd && name === "mvnd",
     lock: (_projectDir, work) => work(),
     changes: {
@@ -328,6 +328,7 @@ describe("the reports a build already left", () => {
       maven: { ...PASSING_READER, alsoListsAccepted: true, readFresh: readFresh("maven") },
       jacoco: PASSING_READER,
       eslint: PASSING_READER,
+      depcruise: PASSING_READER,
     }
     return { deps, launched, accepted, asked }
   }
@@ -391,7 +392,7 @@ describe("a report that also lists what the build accepted", () => {
     const { deps } = fakeDeps({ mvnd: false })
     const reader = { snapshot: () => new Map(), read: () => ({ found: true, failures: [failure] }) }
     deps.run = async () => ({ exitCode, output: "" })
-    deps.readers = { archunit: reader, maven: { ...reader, alsoListsAccepted: true }, jacoco: reader, eslint: reader }
+    deps.readers = { archunit: reader, maven: { ...reader, alsoListsAccepted: true }, jacoco: reader, eslint: reader, depcruise: reader }
     return deps
   }
 
