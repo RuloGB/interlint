@@ -34,6 +34,8 @@ const PLUGIN_MANAGEMENT = /<pluginManagement>[\s\S]*?<\/pluginManagement>/g
 /** A `<plugin>` element, never running into the next one. */
 const PLUGIN_ELEMENT = /<plugin>((?:(?!<\/plugin>)[\s\S])*)<\/plugin>/g
 const EXECUTION_ELEMENT = /<execution>([\s\S]*?)<\/execution>/g
+/** Whether a plugin declares any execution, without the global flag so `test` keeps no state between calls. */
+const ANY_EXECUTION = /<execution>/
 const CHECK_GOAL = /<goal>\s*check\s*<\/goal>/
 /** How a POM turns off an execution it inherits. */
 const TURNED_OFF = /<phase>\s*none\s*<\/phase>/
@@ -100,6 +102,8 @@ export function scanProject(projectDir: string): ProjectFacts {
  * A plugin counts when a POM of the project declares it in `<build><plugins>`. In a project without modules it
  * also counts when its `pom.xml` only manages it in `pluginManagement`; in a reactor a managed plugin counts only
  * when some module turns it on, but the executions the parent manages are the ones the modules run.
+ * A Checkstyle or PMD plugin without executions counts, as the team runs its `check` by hand. One with executions counts
+ * only when one of them runs `check`: a build that only writes a report or runs `cpd-check` does not enforce the rules.
  */
 function scanQualityPlugins(
   modules: string[],
@@ -118,9 +122,11 @@ function scanQualityPlugins(
       checkExecutionIds(declarationsOf(declared, QUALITY_PLUGIN_ARTIFACTS[plugin])),
     ]),
   ) as Record<QualityPlugin, string[]>
+  const hasExecutions = (plugin: QualityPlugin) =>
+    declarationsOf(declared, QUALITY_PLUGIN_ARTIFACTS[plugin]).some((body) => ANY_EXECUTION.test(body))
   const counts = (plugin: QualityPlugin) =>
     declarationsOf(counted, QUALITY_PLUGIN_ARTIFACTS[plugin]).length > 0 &&
-    (!NEEDS_CHECK_EXECUTION[plugin] || checkExecutions[plugin].length > 0)
+    (checkExecutions[plugin].length > 0 || (!NEEDS_CHECK_EXECUTION[plugin] && !hasExecutions(plugin)))
   const jacoco = declarationsOf(counted, JACOCO_PLUGIN).length > 0
   return {
     qualityPlugins: QUALITY_PLUGINS.filter(counts),
