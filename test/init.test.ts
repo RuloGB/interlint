@@ -746,20 +746,38 @@ describe("interlint init with Checkstyle and PMD", () => {
       expect(runs()).toEqual(["mvn -q checkstyle:check@style"])
     })
 
-    it("runs the plain goal when no execution runs check, one is turned off, or an id could mean something to the shell", async () => {
-      const cpdOnly =
-        "          <execution>\n            <id>cpd</id>\n            <goals>\n              <goal>cpd-check</goal>\n            </goals>\n          </execution>\n"
+    it("runs the plain goal when the execution that runs check has an id that could mean something to the shell", async () => {
       pom({
-        build:
-          withExecutions(
-            "maven-checkstyle-plugin",
-            execution("            <id>inherited</id>\n            <phase>none</phase>\n") + execution("            <id>a;rm</id>\n"),
-          ) + withExecutions("maven-pmd-plugin", cpdOnly),
+        build: withExecutions(
+          "maven-checkstyle-plugin",
+          execution("            <id>inherited</id>\n            <phase>none</phase>\n") + execution("            <id>a;rm</id>\n"),
+        ),
       })
 
       await run("init")
 
-      expect(runs()).toEqual(["mvn -q checkstyle:check", "mvn -q compile pmd:check -Dcheckstyle.skip"])
+      expect(runs()).toEqual(["mvn -q checkstyle:check"])
+    })
+
+    it("leaves out a plugin whose executions never run check: a report, cpd-check only, or a check turned off", async () => {
+      archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+      const goalOnly = (id: string, goal: string) =>
+        `          <execution>\n            <id>${id}</id>\n            <goals>\n              <goal>${goal}</goal>\n            </goals>\n          </execution>\n`
+      pom({
+        build:
+          withExecutions("maven-checkstyle-plugin", goalOnly("report", "checkstyle")) +
+          withExecutions("maven-pmd-plugin", goalOnly("cpd", "cpd-check")),
+      })
+
+      await run("init")
+
+      expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
+
+      pom({ build: withExecutions("maven-pmd-plugin", execution("            <id>inherited</id>\n            <phase>none</phase>\n")) })
+
+      await run("init", "--force")
+
+      expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["architecture"])
     })
   })
 
@@ -1121,6 +1139,16 @@ describe("interlint init in a multi-module project", () => {
     reactor("", { managed: [managed("spotbugs-maven-plugin", "spotbugs")], modules: { domain: [], launcher: [] } })
 
     expect((await run("init", "--force")).exitCode).toBe(2)
+  })
+
+  it("leaves out a plugin a module turns on when the parent's executions of it only write a report", async () => {
+    const reportOnly =
+      "        <plugin>\n          <artifactId>maven-checkstyle-plugin</artifactId>\n          <executions>\n            <execution>\n              <id>report</id>\n              <goals>\n                <goal>checkstyle</goal>\n              </goals>\n            </execution>\n          </executions>\n        </plugin>\n"
+    reactor("", { managed: [reportOnly, managed("maven-pmd-plugin", "pmd")], modules: { domain: BOTH } })
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.name)).toEqual(["pmd"])
   })
 
   it("counts a plugin a module turns on without the parent managing it", async () => {
