@@ -1405,7 +1405,17 @@ describe("interlint init with ESLint", () => {
     eslintProject("packages/ui/build")
     eslintProject("coverage")
 
-    expect((await run("init")).exitCode).toBe(2)
+    expect(await run("init")).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+    })
+
+    eslintProject("packages/web")
+
+    expect((await run("init")).exitCode).toBe(0)
+    expect(loadConfig(projectDir).checks.map(({ name }) => name)).toEqual(["packages/web/eslint"])
   })
 
   it("looks for an npm project up to three levels down, and never in a hidden directory", async () => {
