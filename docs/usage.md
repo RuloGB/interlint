@@ -285,7 +285,7 @@ Fix these problems before continuing.
 - When dependency-cruiser fails, as with a broken configuration or without `node_modules`, the check shows the last lines of its output instead, and still blocks.
 - dependency-cruiser 18 does not support TypeScript 7 yet. With it, dependency-cruiser leaves out the TypeScript files and finds nothing. The check then blocks and says `dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports`. Install TypeScript 5 in the project (`npm install --save-dev typescript@5`).
 - The check needs no `mvnd`. After an edit, dependency-cruiser still analyzes the whole project, since a rule about who imports a file needs all of it, and only the violations of the edited files are shown: those whose importing file is one of them. Task end shows the rest.
-- `init` looks for npm projects with dependency-cruiser as it does for ESLint. A project with both gets both checks, such as `eslint` and `depcruise`.
+- `init` looks for npm projects with dependency-cruiser as it does for ESLint. A project with both gets both checks, such as `eslint` and `depcruise`. Below a project with dependency-cruiser alone, such as the root of a monorepo, `init` still looks for packages with ESLint and writes their `eslint` checks. They get no `depcruise` check of their own, since the one above already analyzes them.
 
 ## After each edit
 

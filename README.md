@@ -155,7 +155,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 Known limits:
 
-- Only Maven projects and npm projects with ESLint or dependency-cruiser. On npm projects there is no `tsc` check and no coverage check yet. In a monorepo whose root has ESLint or dependency-cruiser, `init` writes one check for the root and does not look for a configuration in each package.
+- Only Maven projects and npm projects with ESLint or dependency-cruiser. On npm projects there is no `tsc` check and no coverage check yet. In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package. Below a root with dependency-cruiser alone, it still writes each package's ESLint check.
 - `init` finds ESLint only with its flat configuration (`eslint.config.*`). With `.eslintrc`, [write the check yourself](docs/usage.md#eslint).
 - dependency-cruiser 18 does not support TypeScript 7 yet. With it, the `depcruise` check blocks and says it analyzed no source: [use TypeScript 5](docs/usage.md#dependency-cruiser).
 - PMD and SpotBugs cannot be limited to one file from the command line, so they check the whole project each time they run. `init` gives them [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so they wait for 5 edited files or 100 written lines and shows the failures of all of them.

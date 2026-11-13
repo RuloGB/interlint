@@ -20,25 +20,32 @@ type Found = { facts: NpmFacts } | { unreadable: true } | undefined
  * The npm projects with ESLint or dependency-cruiser `init` writes checks for: the root itself, or else each directory below it, up to
  * three levels down, that is not inside another one or in build output. A Maven project is never one, and none is
  * looked for inside it: at a Maven root nothing is searched.
+ *
+ * A project with dependency-cruiser alone does not hide the ESLint projects below it, such as the packages of a
+ * monorepo whose root has only dependency-cruiser: they are still found, for their ESLint only, since the
+ * dependency-cruiser above already analyzes them.
  */
 export const scanNpmProjects: NpmProjectScanner = (rootDir) => {
   if (existsSync(join(rootDir, MAVEN_BUILD_FILE))) return { searched: false, projects: [], unreadable: [] }
   const projects: NpmProject[] = []
   const unreadable: string[] = []
-  const visit = (dir: string, depth: number): void => {
+  const visit = (dir: string, depth: number, belowDepcruise: boolean): void => {
     const found = inspect(dir)
     const path = relative(rootDir, dir).split(sep).join("/")
-    if (found !== undefined && "facts" in found) {
-      projects.push({ ...(path === "" ? {} : { dir: path }), npm: found.facts })
-      return
+    const facts = found !== undefined && "facts" in found ? (belowDepcruise ? eslintOnly(found.facts) : found.facts) : undefined
+    if (facts !== undefined) {
+      projects.push({ ...(path === "" ? {} : { dir: path }), npm: facts })
+      if (facts.eslintConfig !== undefined) return
+    } else if (found !== undefined && "unreadable" in found) {
+      unreadable.push(path === "" ? MANIFEST : `${path}/${MANIFEST}`)
     }
-    if (found !== undefined) unreadable.push(path === "" ? MANIFEST : `${path}/${MANIFEST}`)
     if (depth >= MAX_PROJECT_DEPTH) return
+    const nowBelowDepcruise = belowDepcruise || facts?.depcruiseConfig !== undefined
     for (const child of childDirs(dir)) {
-      if (!existsSync(join(child, MAVEN_BUILD_FILE))) visit(child, depth + 1)
+      if (!existsSync(join(child, MAVEN_BUILD_FILE))) visit(child, depth + 1, nowBelowDepcruise)
     }
   }
-  visit(rootDir, 0)
+  visit(rootDir, 0, false)
   return { searched: true, projects, unreadable }
 }
 
@@ -84,6 +91,11 @@ function inspect(dir: string): Found {
     ...(depcruiseConfig !== undefined && lists("dependency-cruiser") ? { depcruiseConfig } : {}),
   }
   return facts.eslintConfig === undefined && facts.depcruiseConfig === undefined ? undefined : { facts }
+}
+
+/** The facts of a project's ESLint alone, or nothing when it has none. */
+function eslintOnly({ eslintConfig }: NpmFacts): NpmFacts | undefined {
+  return eslintConfig === undefined ? undefined : { eslintConfig }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

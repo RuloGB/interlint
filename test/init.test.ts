@@ -1585,6 +1585,22 @@ describe("interlint init with dependency-cruiser", () => {
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 
+  it("still writes the eslint checks of the packages below a root with dependency-cruiser alone", async () => {
+    depcruiseProject("")
+    writeFile("packages/web/package.json", JSON.stringify({ devDependencies: { eslint: "^10.0.0" } }))
+    writeFile("packages/web/eslint.config.js", "export default []\n")
+    depcruiseProject("packages/admin", ".dependency-cruiser.cjs", { eslint: "^10.0.0" })
+    writeFile("packages/admin/eslint.config.js", "export default []\n")
+
+    expect((await run("init")).exitCode).toBe(0)
+    // The root's dependency-cruiser analyzes the packages too, so a package gets no depcruise check of its own.
+    expect(loadConfig(projectDir).checks).toEqual([
+      { name: "depcruise", run: DEPCRUISE_RUN, report: "depcruise", when: "edit" },
+      { name: "packages/admin/eslint", dir: "packages/admin", run: ESLINT_RUN, report: "eslint", when: "edit" },
+      { name: "packages/web/eslint", dir: "packages/web", run: ESLINT_RUN, report: "eslint", when: "edit" },
+    ])
+  })
+
   it("names a package.json it cannot read next to a dependency-cruiser configuration", async () => {
     writeFile("package.json", "{")
     writeFile(".dependency-cruiser.cjs", "")
