@@ -42,6 +42,10 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
     const noNpmProject = noNpmProjectNote(result.npm)
     // The root itself when it has a pom.xml, or else each Maven project of the workspace, in its own directory.
     if (result.projects[0]?.dir === undefined) {
+      // npm projects are looked for only at a root without pom.xml, so there was no Maven build to speak of.
+      if (result.npm.searched) {
+        throw new UsageError(`nothing to check: no pom.xml was found here or up to three levels below.${noNpmProject} Nothing was written.`)
+      }
       throw new UsageError(
         `nothing to check: no file under ${TEST_SOURCES} contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check.${noNpmProject} Nothing was written.`,
       )

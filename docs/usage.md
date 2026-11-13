@@ -250,7 +250,7 @@ Fix these problems before continuing.
 - The check needs no `mvnd`. After an edit, the ` .` at the end of the command is replaced with the edited files, so ESLint checks only them, and only their failures are shown. With a flat configuration the command also gets `--no-warn-ignored`, so editing a file ESLint ignores does not fail under `--max-warnings 0`.
 - After an edit, ESLint checks the whole project, and still shows only the failures of the edited files, when the command does not end with ` .` (such as `npm run lint -- …`), when it is more than one program (`&&`, `|`, `>`…), when more than 50 files are pending, or when a path has characters other than ASCII letters, digits, `_`, `.`, `-`, `/`, `@` and `+` (such as `[id].tsx`). When another file then has errors, a warning in the edited file that fails `--max-warnings` shows at task end, not after the edit.
 - With the older configuration (`.eslintrc*`), `init` writes no check. Write it yourself, and name the extensions as that ESLint needs: `npx --no -- eslint --ext .ts -f json -o node_modules/.cache/interlint/eslint.json .`
-- `init` looks for npm projects with ESLint in the root and, when the root is not one, up to three levels below it. In a monorepo whose root has ESLint it writes one check for the root and does not look for a configuration in each package: add those checks yourself, each with its `dir`.
+- `init` looks for npm projects with ESLint in the root and, when the root is not one, up to three levels below it, skipping `node_modules`, `dist`, `build` and `coverage`. In a monorepo whose root has ESLint it writes one check for the root and does not look for a configuration in each package: add those checks yourself, each with its `dir`.
 - A `package.json` that is not valid JSON next to an ESLint configuration is not a project for `init`. When it then finds nothing to check, it names that file.
 - Not checked yet on npm projects: `tsc` and coverage.
 
@@ -371,7 +371,7 @@ checks:
 
 - `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` does not exist, a typo or a removed Git submodule, fails at every task end with `✗ <check> · its dir "<dir>" does not exist`, changed or not, so the agent and you always see it; the other projects still run. After an edit it is left to task end, so it does not block every edit.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
-- A workspace can mix Maven projects and npm projects with [ESLint](#eslint): `init` writes the checks of each, such as `web/eslint` with `dir: web`. It looks for an npm project in the root and up to three levels below it, never inside a Maven project.
+- A workspace can mix Maven projects and npm projects with [ESLint](#eslint): `init` writes the checks of each, such as `web/eslint` with `dir: web`. It looks for an npm project in the root and up to three levels below it, never inside a Maven project or in `node_modules`, `dist`, `build` or `coverage`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
 

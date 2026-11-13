@@ -283,7 +283,7 @@ describe("interlint init", () => {
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
     expect(stderr).toBe(
-      "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+      "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     )
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1226,7 +1226,7 @@ describe("interlint init in a multi-module project", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1301,7 +1301,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either. Nothing was written.\n",
     })
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
@@ -1400,6 +1400,14 @@ describe("interlint init with ESLint", () => {
     )
   })
 
+  it("never looks for an npm project in dist, build or coverage", async () => {
+    eslintProject("dist")
+    eslintProject("packages/ui/build")
+    eslintProject("coverage")
+
+    expect((await run("init")).exitCode).toBe(2)
+  })
+
   it("looks for an npm project up to three levels down, and never in a hidden directory", async () => {
     eslintProject("a/b/c/d")
     eslintProject(".tools/web")
@@ -1471,7 +1479,7 @@ describe("interlint init with ESLint", () => {
       exitCode: 2,
       stdout: "",
       stderr:
-        "interlint: nothing to check: no file under src/test/java contains @ArchTest, and the build in pom.xml has no maven-checkstyle-plugin, maven-pmd-plugin, spotbugs-maven-plugin or jacoco-maven-plugin check. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
+        "interlint: nothing to check: no pom.xml was found here or up to three levels below. No npm project with ESLint (eslint in package.json and an eslint.config file) was found either: package.json and apps/web/package.json are not valid JSON. Nothing was written.\n",
     })
   })
 
