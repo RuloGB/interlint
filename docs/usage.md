@@ -59,7 +59,8 @@ checks:
 - When the build runs `spotbugs:check`, it adds a `spotbugs` check that runs after 5 edited files or 100 written lines, as `pmd`. A SpotBugs plugin without an execution that runs `check` gets no check: the build only uses it for reports. See [SpotBugs](#spotbugs).
 - When the build runs `jacoco:check`, it adds a `coverage` check that runs at task end only. See [JaCoCo coverage](#jacoco-coverage).
 - In an npm project with ESLint, it writes an `eslint` check that runs after each edit. See [ESLint](#eslint).
-- With no `@ArchTest` classes, no Checkstyle or PMD plugin, no SpotBugs or JaCoCo `check` goal and no npm project with ESLint it says so, writes nothing and exits with 2.
+- In an npm project with dependency-cruiser, it writes a `depcruise` check that runs after each edit. See [dependency-cruiser](#dependency-cruiser).
+- With no `@ArchTest` classes, no Checkstyle or PMD plugin, no SpotBugs or JaCoCo `check` goal and no npm project with ESLint or dependency-cruiser it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
 - `--agent copilot` also writes Interlint's hooks to `.github/hooks/interlint.json`. See [GitHub Copilot](copilot.md).
@@ -254,6 +255,38 @@ Fix these problems before continuing.
 - A `package.json` that is not valid JSON next to an ESLint configuration is not a project for `init`. When it then finds nothing to check, it names that file.
 - Not checked yet on npm projects: `tsc` and coverage.
 
+## dependency-cruiser
+
+A check with `report: depcruise` runs the project's own [dependency-cruiser](https://github.com/sverweij/dependency-cruiser), with its rules, and reads its JSON report. It is the architecture check of a TypeScript or JavaScript project, as ArchUnit is in a Maven one. `init` writes it for an npm project that lists `dependency-cruiser` in the `dependencies` or `devDependencies` of its `package.json` and has a configuration file (`.dependency-cruiser.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, `.mts` or `.json`):
+
+```yaml
+checks:
+  - name: depcruise
+    run: npx --no -- depcruise . -T json --output-to node_modules/.cache/interlint/depcruise.json
+    report: depcruise
+    when: edit
+```
+
+Each forbidden dependency shows its rule, with the rule's `comment` when it has one, the file that imports and the module it imports:
+
+```text
+✗ depcruise · domain-not-to-infrastructure: domain must not depend on infrastructure
+
+  src/domain/order.ts depends on src/infrastructure/order-repository.ts
+    at src/domain/order.ts
+
+Fix these problems before continuing.
+```
+
+- The report must go to `node_modules/.cache/interlint/depcruise.json`, relative to the directory the check runs in, with `-T json --output-to`: that is where Interlint reads it. dependency-cruiser does not create the directory, so Interlint creates it before the check runs.
+- `npx --no` runs the dependency-cruiser installed in the project and never downloads one.
+- Your rules decide, not Interlint. Interlint has none of its own: write them in your configuration, for example from the layers your `AGENTS.md` describes. Only violations of severity `error` block. Those of severity `warn` or `info` do not block and are not shown.
+- dependency-cruiser gives no line number, so a violation shows its file alone. A rule about a module, such as `no-orphans`, shows the module. A cycle shows its path.
+- When dependency-cruiser fails, as with a broken configuration or without `node_modules`, the check shows the last lines of its output instead, and still blocks.
+- dependency-cruiser 18 does not support TypeScript 7 yet. With it, dependency-cruiser leaves out the TypeScript files and finds nothing. The check then blocks and says `dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports`. Install TypeScript 5 in the project (`npm install --save-dev typescript@5`).
+- The check needs no `mvnd`. After an edit, dependency-cruiser still analyzes the whole project, since a rule about who imports a file needs all of it, and only the violations of the edited files are shown: those whose importing file is one of them. Task end shows the rest.
+- `init` looks for npm projects with dependency-cruiser as it does for ESLint. A project with both gets both checks, such as `eslint` and `depcruise`.
+
 ## After each edit
 
 A check with `when: edit` also runs after the agent changes one of its sources:
@@ -262,11 +295,11 @@ A check with `when: edit` also runs after the agent changes one of its sources:
 interlint check --when edit --file src/main/java/shop/Order.java
 ```
 
-- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`, and `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `*.js`, `*.jsx`, `*.mjs` and `*.cjs` for `report: eslint`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
+- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`, and `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `*.js`, `*.jsx`, `*.mjs` and `*.cjs` for `report: eslint` and `report: depcruise`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
 - The output and exit codes are the same as at task end. `--file` can be repeated.
 - `--lines <n>` gives the lines the edit wrote in a file, for checks with [`lines`](#every-n-files-or-lines). Give one `--lines` after each `--file`, as in `--file A.java --lines 12 --file B.java --lines 0`, or none at all: files without it wrote no lines. The agent integrations always give it.
 - With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
-- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end. Other `edit` checks, such as an [ESLint](#eslint) check, run after edits with or without it.
+- Without `mvnd`, Maven `edit` checks do not run after edits, because a cold Maven build takes several seconds; they still run at task end. Other `edit` checks, such as an [ESLint](#eslint) or [dependency-cruiser](#dependency-cruiser) check, run after edits with or without it.
 - A `report: maven` check shows only the failures of the changed files: Checkstyle, PMD and SpotBugs rate each file on its own, so another file's failures are not the edit's, and task end shows them. When Maven failed only because of other files, the check passes after the edit. An ArchUnit check shows every failure, because an edit can break a rule in a class it did not change.
 - A `run` with `checkstyle:check` gets `-Dcheckstyle.includes` with the changed files' paths from their source root, such as `shop/Order.java`, and `-Dcheckstyle.includeResources=false -Dcheckstyle.includeTestResources=false`, so Checkstyle checks only those files, still with the build's configuration. PMD and SpotBugs cannot be limited from the command line, so they check the whole project.
 - Checkstyle also checks the whole project when the `run` sets `checkstyle.includes` itself or is more than one program (`&&`, `|`, `>`…), when a path is not plain ASCII, when a `pom.xml` of the project or `.mvn/maven.config` names `checkstyle.includes` (the `-D` would replace it, and the edit would check files the build never checks), or when the plugin's configuration in `pom.xml` sets `<includes>`, which Maven applies over `-D`.
@@ -371,7 +404,7 @@ checks:
 
 - `dir` is the directory the check runs in, relative to `interlint.yaml`, so each check uses its own project's `pom.xml`, Maven Wrapper and configuration. Without `dir`, a check runs where `interlint.yaml` is. A `dir` outside that directory is an error. A check whose `dir` does not exist, a typo or a removed Git submodule, fails at every task end with `✗ <check> · its dir "<dir>" does not exist`, changed or not, so the agent and you always see it; the other projects still run. After an edit it is left to task end, so it does not block every edit.
 - Violations show their path from the workspace root, such as `orders/infrastructure/src/main/java/com/acme/Order.java:12`.
-- A workspace can mix Maven projects and npm projects with [ESLint](#eslint): `init` writes the checks of each, such as `web/eslint` with `dir: web`. It looks for an npm project in the root and up to three levels below it, never inside a Maven project or in `node_modules`, `dist`, `build` or `coverage`.
+- A workspace can mix Maven projects and npm projects with [ESLint](#eslint) or [dependency-cruiser](#dependency-cruiser): `init` writes the checks of each, such as `web/eslint` with `dir: web`. It looks for an npm project in the root and up to three levels below it, never inside a Maven project or in `node_modules`, `dist`, `build` or `coverage`.
 - After an edit, only the `edit` checks of the project that holds the file run. A file outside every project runs nothing.
 - At the agent's task end, only the projects it changed run (see [At task end](#at-task-end)).
 
@@ -393,7 +426,7 @@ Each line is a JSON object:
 - `v` is the version of the line format. `project` is the folder name of the project, not its path.
 - `when` is `edit` or `task-end`. `report` is the check's `report`.
 - `result` is `passed`, `violations`, `failed` (the command failed without a report that explains it), `missing-dir`, `broken-build` or `skipped`. A skipped check has `skipped`: `pending` (it waits for more edits, see [Every N files or lines](#every-n-files-or-lines)), `unchanged` (its project did not change since its checks passed, with `--changed`) or `build` (it passed on the reports of the agent's own build).
-- `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle`, `pmd`, `spotbugs`, `coverage` or `eslint`) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
+- `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle`, `pmd`, `spotbugs`, `coverage` or `eslint`; dependency-cruiser's are `architecture`, as ArchUnit's) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
 - `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
 
 The lines are plain text: you can read them with any tool, and they never leave your machine. Interlint has no telemetry, no account and no server, and makes no network calls: `interlint metrics` and `interlint metrics report` read these files on your machine, and the HTML and PDF reports load nothing from the internet. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
