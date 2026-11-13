@@ -44,8 +44,10 @@ export const NO_RESULT: Record<Report, string> = {
 /**
  * Whether an `edit` check shows only the failures of the changed files. Checkstyle, PMD and ESLint rate each file on
  * its own, so another file's failures are not the edit's, and task end reports them. An ArchUnit rule is about how
- * classes relate, so an edit can break it in a class the edit did not change. dependency-cruiser gives each violation
- * at the file that holds the import, so an edit's are in the files it changed.
+ * classes relate, so an edit can break it in a class the edit did not change. dependency-cruiser gives a violation
+ * at the file that holds the import, with the other modules of a cycle, so the forbidden imports an edit adds show
+ * at once. A violation an edit causes in a file it did not change, such as an orphan left by a removed import, is
+ * left to task end, as with ESLint.
  */
 export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = {
   archunit: false,

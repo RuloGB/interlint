@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -141,6 +141,20 @@ describe("parseDepcruiseJson", () => {
     expect(texts).toEqual(["Module src/infrastructure/orphan.ts", "src/a.ts depends on src/b.ts (cycle: src/a.ts → src/b.ts → src/a.ts)"])
   })
 
+  it("names the other modules of a cycle, so an edit of any of them shows it", () => {
+    const cycle: Violation = {
+      type: "cycle",
+      from: "src/a.ts",
+      to: "src/b.ts",
+      rule: { name: "no-circular", severity: "error" },
+      cycle: [{ name: "src/b.ts" }, { name: "src/c.ts" }, { name: "src/a.ts" }],
+    }
+
+    const [violation] = parseDepcruiseJson(JSON.stringify(report([cycle]))).failures[0]?.violations ?? []
+
+    expect(violation).toMatchObject({ path: "src/a.ts", related: ["src/b.ts", "src/c.ts"] })
+  })
+
   it("groups the violations of one rule", () => {
     const other = { ...domainToInfra, from: "src/domain/invoice.ts" }
 
@@ -168,9 +182,30 @@ describe("parseDepcruiseJson", () => {
 
 describe("depcruiseReader", () => {
   it("creates the report's directory before the run, since dependency-cruiser does not", () => {
+    mkdirSync(join(dir, "node_modules"))
+
     depcruiseReader.snapshot(dir)
 
     expect(existsSync(dirname(join(dir, ...DEPCRUISE_REPORT.split("/"))))).toBe(true)
+  })
+
+  it("creates no node_modules in a project whose dependencies are not installed", () => {
+    depcruiseReader.snapshot(dir)
+
+    expect(existsSync(join(dir, "node_modules"))).toBe(false)
+  })
+
+  it("reads a report the run rewrote with the same size and time as the earlier one", () => {
+    const path = join(dir, ...DEPCRUISE_REPORT.split("/"))
+    const content = report([domainToInfra])
+    const time = new Date("2026-11-13T10:00:00.000Z")
+    writeReport(content)
+    utimesSync(path, time, time)
+    const before = depcruiseReader.snapshot(dir)
+    writeReport(content)
+    utimesSync(path, time, time)
+
+    expect(depcruiseReader.read(dir, before, "")).toMatchObject({ found: true, failures: [{ title: "domain-not-to-infrastructure" }] })
   })
 
   it("reads the report the run wrote", () => {
@@ -276,6 +311,23 @@ describe("a depcruise check at edit", () => {
     const outcomes = await runEditChecks(dir, { checks: [depcruiseEdit] }, ["src/application/place-order.ts"], deps)
 
     expect(outcomes.map((outcome) => outcome.status)).toEqual(["passed"])
+  })
+
+  it("shows a cycle after an edit of any of its modules, not only the one dependency-cruiser names", async () => {
+    const cycle: Violation = {
+      type: "cycle",
+      from: "src/a.ts",
+      to: "src/b.ts",
+      rule: { name: "no-circular", severity: "error" },
+      cycle: [{ name: "src/b.ts" }, { name: "src/a.ts" }],
+    }
+    const web: Check = { ...depcruiseEdit, name: "web/depcruise", dir: "web" }
+    const { deps } = depcruiseDeps({ exitCode: 0, report: report([cycle]) })
+
+    const outcomes = await runEditChecks(dir, { checks: [web] }, ["web/src/b.ts"], deps)
+
+    expect(formatOutcomes(outcomes)).toContain("✗ web/depcruise · no-circular")
+    expect(formatOutcomes(outcomes)).toContain("    at web/src/a.ts")
   })
 
   it("gives the paths from interlint.yaml in a project of a workspace", async () => {

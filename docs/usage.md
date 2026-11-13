@@ -278,13 +278,14 @@ Each forbidden dependency shows its rule, with the rule's `comment` when it has 
 Fix these problems before continuing.
 ```
 
-- The report must go to `node_modules/.cache/interlint/depcruise.json`, relative to the directory the check runs in, with `-T json --output-to`: that is where Interlint reads it. dependency-cruiser does not create the directory, so Interlint creates it before the check runs.
+- The report must go to `node_modules/.cache/interlint/depcruise.json`, relative to the directory the check runs in, with `-T json --output-to`: that is where Interlint reads it. dependency-cruiser does not create the directory, so Interlint creates it before the check runs, when `node_modules` is there. It also deletes the report of the previous run, so the one it reads is always new.
 - `npx --no` runs the dependency-cruiser installed in the project and never downloads one.
 - Your rules decide, not Interlint. Interlint has none of its own: write them in your configuration, for example from the layers your `AGENTS.md` describes. Only violations of severity `error` block. Those of severity `warn` or `info` do not block and are not shown.
-- dependency-cruiser gives no line number, so a violation shows its file alone. A rule about a module, such as `no-orphans`, shows the module. A cycle shows its path.
+- dependency-cruiser gives no line number, so a violation shows its file alone. A rule about a module, such as `no-orphans`, shows the module. A cycle shows its path. The paths in the message are relative to the check's `dir`; the `at` line is relative to `interlint.yaml`.
 - When dependency-cruiser fails, as with a broken configuration or without `node_modules`, the check shows the last lines of its output instead, and still blocks.
 - dependency-cruiser 18 does not support TypeScript 7 yet. With it, dependency-cruiser leaves out the TypeScript files and finds nothing. The check then blocks and says `dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports`. Install TypeScript 5 in the project (`npm install --save-dev typescript@5`).
-- The check needs no `mvnd`. After an edit, dependency-cruiser still analyzes the whole project, since a rule about who imports a file needs all of it, and only the violations of the edited files are shown: those whose importing file is one of them. Task end shows the rest.
+- The check needs no `mvnd`. After an edit, dependency-cruiser still analyzes the whole project, since a rule about who imports a file needs all of it, and only the violations of the edited files are shown: those whose importing file is one of them, and the cycles that go through one of them. Task end shows the rest, such as a module an edit left orphaned.
+- dependency-cruiser analyzes the whole project after each edit, which takes longer as the project grows: about 2 seconds on a small one. When it slows the agent down, give the check [`every` or `lines`](#every-n-files-or-lines), as `init` does for PMD.
 - `init` looks for npm projects with dependency-cruiser as it does for ESLint. A project with both gets both checks, such as `eslint` and `depcruise`. Below a project with dependency-cruiser alone, such as the root of a monorepo, `init` still looks for packages with ESLint and writes their `eslint` checks. They get no `depcruise` check of their own, since the one above already analyzes them.
 
 ## After each edit

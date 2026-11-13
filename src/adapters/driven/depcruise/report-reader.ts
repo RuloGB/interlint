@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../../application/checking/ports.js"
 import { DEPCRUISE_REPORT } from "../../../domain/depcruise-command.js"
@@ -23,31 +23,48 @@ function reportPath(projectDir: string): string {
   return join(projectDir, ...DEPCRUISE_REPORT.split("/"))
 }
 
-/** Size as well as time: coarse filesystem clocks can give a rewritten report the same mtime. */
-function fingerprint(path: string): string {
-  const { mtimeMs, size } = statSync(path)
-  return `${mtimeMs}:${size}`
+/** Size as well as time, or nothing when the report is gone. Kept only for a report that could not be deleted. */
+function fingerprint(path: string): string | undefined {
+  try {
+    const { mtimeMs, size } = statSync(path)
+    return `${mtimeMs}:${size}`
+  } catch {
+    return undefined
+  }
 }
 
 /**
+ * Deletes the report of an earlier run, so the one the run leaves is its own: a rewrite with the same size and a
+ * coarse clock's same time cannot pass for the old one. Only a report that cannot be deleted is fingerprinted.
+ *
  * Also creates the report's directory: with `--output-to` in a directory that does not exist, dependency-cruiser
- * fails without a report. When it cannot be created, the run fails and the check shows its output.
+ * fails without a report. Only when `node_modules` is there: without it the dependencies are not installed, the run
+ * fails anyway, and a `node_modules` holding only the cache would look installed.
  */
 function snapshotDepcruiseReport(projectDir: string): ReportSnapshot {
   const path = reportPath(projectDir)
   try {
-    mkdirSync(dirname(path), { recursive: true })
+    if (existsSync(join(projectDir, "node_modules"))) mkdirSync(dirname(path), { recursive: true })
+    rmSync(path, { force: true })
   } catch {
-    // The run shows why it could not write the report.
+    // The run shows why it could not write the report, and a report left in place is fingerprinted.
   }
-  return new Map(existsSync(path) ? [[path, fingerprint(path)]] : [])
+  const left = fingerprint(path)
+  return new Map(left === undefined ? [] : [[path, left]])
 }
 
 /** Reads the report when the run wrote or rewrote it and analyzed the sources. */
 function readDepcruiseReport(projectDir: string, before: ReportSnapshot): ReportResult {
   const path = reportPath(projectDir)
-  if (!existsSync(path) || before.get(path) === fingerprint(path)) return { found: false, failures: [] }
-  const { cruised, failures } = parseDepcruiseJson(readFileSync(path, "utf8"))
+  const now = fingerprint(path)
+  if (now === undefined || before.get(path) === now) return { found: false, failures: [] }
+  let json: string
+  try {
+    json = readFileSync(path, "utf8")
+  } catch {
+    return { found: false, failures: [] }
+  }
+  const { cruised, failures } = parseDepcruiseJson(json)
   return cruised ? { found: true, failures } : { found: false, failures: [] }
 }
 
@@ -116,7 +133,8 @@ function violationOf(from: string, to: unknown, cycle: unknown): Violation {
     ? cycle.flatMap((step: unknown) => (isRecord(step) && typeof step.name === "string" ? [step.name] : []))
     : []
   const through = steps.length > 0 ? ` (cycle: ${[path, ...steps].join(" → ")})` : ""
-  return { text: `${path} depends on ${to}${through}`, file, path }
+  const related = [...new Set(steps)].filter((step) => step !== path)
+  return { text: `${path} depends on ${to}${through}`, file, path, ...(related.length > 0 ? { related } : {}) }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
