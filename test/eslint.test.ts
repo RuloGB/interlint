@@ -257,7 +257,7 @@ function eslintDeps(fake: FakeRun, options: { mvnd?: boolean } = {}) {
       if (fake.report !== undefined) writeReport(fake.report, cwd)
       return { exitCode: fake.exitCode, output: fake.output ?? "" }
     },
-    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: eslintReader },
+    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: eslintReader, depcruise: unused },
     hasExecutable: (name) => options.mvnd === true && name === "mvnd",
     lock: (_projectDir, work) => work(),
     changes: {

@@ -6,6 +6,11 @@ export interface Violation {
   line?: number
   /** Source path relative to the project root, when the file was found. */
   path?: string
+  /**
+   * Other source paths, relative to the project root, the violation also involves, such as the other modules of a
+   * cycle. An edit of one of them shows the violation too.
+   */
+  related?: string[]
 }
 
 /** The kind of rule, by the tool that checks it. */

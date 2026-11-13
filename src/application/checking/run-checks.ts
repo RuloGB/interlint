@@ -11,7 +11,7 @@ import {
 } from "../../domain/check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
 import type { AgentContext } from "../../domain/metric.js"
-import type { RuleFailure } from "../../domain/violation.js"
+import type { RuleFailure, Violation } from "../../domain/violation.js"
 import { recordRun, type RunEntry } from "./check-metrics.js"
 import type {
   BrokenClassRemover,
@@ -397,19 +397,23 @@ function agentOutcomeOf(
 function withPathsFromRoot(check: Check, failure: RuleFailure): RuleFailure {
   return {
     ...failure,
-    violations: failure.violations.map((violation) =>
-      violation.path === undefined ? violation : { ...violation, path: fromRoot(check, violation.path) },
-    ),
+    violations: failure.violations.map(({ path, related, ...violation }) => ({
+      ...violation,
+      ...(path === undefined ? {} : { path: fromRoot(check, path) }),
+      ...(related === undefined ? {} : { related: related.map((other) => fromRoot(check, other)) }),
+    })),
   }
 }
 
-/** The failures with only their violations in `files`, leaving out the failures left with none. */
+/**
+ * The failures with only their violations in `files`, or that also involve one of them, leaving out the failures
+ * left with none.
+ */
 function inFiles(failures: RuleFailure[], files: string[]): RuleFailure[] {
+  const involves = ({ path, related = [] }: Violation) =>
+    [...(path === undefined ? [] : [path]), ...related].some((file) => files.includes(file))
   return failures
-    .map((failure) => ({
-      ...failure,
-      violations: failure.violations.filter((violation) => violation.path !== undefined && files.includes(violation.path)),
-    }))
+    .map((failure) => ({ ...failure, violations: failure.violations.filter(involves) }))
     .filter((failure) => failure.violations.length > 0)
 }
 

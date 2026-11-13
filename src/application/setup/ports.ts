@@ -23,7 +23,7 @@ export interface MavenProject {
   facts: ProjectFacts
 }
 
-/** One npm project with ESLint `init` found, with its `dir` as a Maven project's. */
+/** One npm project with ESLint or dependency-cruiser `init` found, with its `dir` as a Maven project's. */
 export interface NpmProject {
   dir?: string
   npm: NpmFacts
@@ -37,14 +37,14 @@ export type ScannedProject = MavenProject | NpmProject
  */
 export type ProjectScanner = (rootDir: string) => MavenProject[]
 
-/** What looking for npm projects with ESLint gave. */
+/** What looking for npm projects with ESLint or dependency-cruiser gave. */
 export interface NpmScan {
   /** False when the root is a Maven project: none is looked for inside one (decision 55). */
   searched: boolean
   /** The root itself when it is one, or else each one below it, sorted by directory. */
   projects: NpmProject[]
   /**
-   * The `package.json` files that are not valid JSON next to an ESLint configuration, `/`-separated and relative
+   * The `package.json` files that are not valid JSON next to an ESLint or dependency-cruiser configuration, `/`-separated and relative
    * to the root: their directories may be projects `init` could not tell.
    */
   unreadable: string[]

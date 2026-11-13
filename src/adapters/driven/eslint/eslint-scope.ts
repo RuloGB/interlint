@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import type { EditScope } from "../../../application/checking/ports.js"
+import { ESLINT_CONFIGS } from "../../../domain/eslint-command.js"
 
 /** `eslint` as a word of the command, as in `npx --no -- eslint` or `node_modules/.bin/eslint`. */
 const ESLINT = /(?:^|[\s/\\])eslint(?=\s)/
@@ -13,8 +14,6 @@ const SHELL_OPERATORS = /[&|;<>`$()]/
  * could mean something to the shell or to ESLint, which reads its arguments as glob patterns and options.
  */
 const PLAIN_PATH = /^(?!-)[\w.\-/@+]+$/
-/** The names of ESLint's flat configuration file. */
-export const FLAT_CONFIGS = ["js", "mjs", "cjs", "ts", "mts", "cts"].map((extension) => `eslint.config.${extension}`)
 /** More files than this make a command line some shells cut: ESLint then checks the whole project. */
 const MAX_FILES = 50
 /**
@@ -35,6 +34,6 @@ export const eslintOnFiles: EditScope = (command, files, dir) => {
   const present = [...new Set(files)].filter((file) => existsSync(join(dir, file)))
   if (present.length === 0 || present.length > MAX_FILES) return command
   if (!present.every((file) => PLAIN_PATH.test(file))) return command
-  const flat = FLAT_CONFIGS.some((name) => existsSync(join(dir, name)))
+  const flat = ESLINT_CONFIGS.some((name) => existsSync(join(dir, name)))
   return [command.replace(WHOLE_PROJECT, ""), ...(flat ? [NO_WARN_IGNORED] : []), ...present].join(" ")
 }
