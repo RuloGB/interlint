@@ -41,7 +41,7 @@ function tellUser(io: Io, text: string): void {
 export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<number> {
   try {
     const [agent, event, ...extra] = args
-    if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code or copilot (got "${agent ?? ""}")`)
+    if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code, copilot or codex (got "${agent ?? ""}")`)
     if (!isHookEvent(event) || extra.length > 0) {
       throw new UsageError(`claude-code hooks are ${HOOK_EVENT_NAMES} (got "${args.slice(1).join(" ")}")`)
     }

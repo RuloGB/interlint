@@ -1,0 +1,75 @@
+import { writtenLines } from "../../../domain/written-lines.js"
+import { UserFacingError } from "../cli/cli-io.js"
+import { type FileEdit, patchEdits } from "../hooks/patch-edits.js"
+
+/** The fields of a Codex hook's JSON input, in its snake_case format, that Interlint reads. */
+export interface CodexHookInput {
+  /** The session. A subagent's hooks give the session of the agent that started it. */
+  sessionId: string
+  /** The session's working directory, where Codex runs the hook. */
+  cwd?: string
+  /** The files an edit tool changed, as it gives them (relative to `cwd` in a patch), each with the lines it wrote. */
+  edits: FileEdit[]
+  /** Whether Codex is already continuing because a stop hook blocked. */
+  stopHookActive: boolean
+  /** The subagent the hook fires in. */
+  agentId?: string
+  /** The kind of that subagent, as Codex names it. */
+  agentType?: string
+  /** The active model, which Codex gives in every hook. */
+  model?: string
+}
+
+export class CodexHookInputError extends UserFacingError {}
+
+/** Codex's edit tool, as the input always names it, though the matcher also takes `Edit` and `Write`. */
+const PATCH_TOOL = "apply_patch"
+
+export function parseCodexHookInput(text: string): CodexHookInput {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    throw new CodexHookInputError("the hook input on stdin is not JSON")
+  }
+  if (!isObject(value)) throw new CodexHookInputError("the hook input on stdin is not a JSON object")
+  const { session_id, cwd, tool_name, tool_input, stop_hook_active, agent_id, agent_type, model } = value
+  return {
+    sessionId: typeof session_id === "string" ? session_id : "",
+    cwd: nonEmpty(cwd),
+    edits: editsOf(tool_name, tool_input),
+    stopHookActive: stop_hook_active === true,
+    agentId: nonEmpty(agent_id),
+    agentType: nonEmpty(agent_type),
+    model: nonEmpty(model),
+  }
+}
+
+/**
+ * The files in a tool's input: those the patch in `command` adds or updates for `apply_patch`, or `file_path` with
+ * the lines of `new_string` or `content` for `Edit` and `Write`.
+ */
+function editsOf(toolName: unknown, toolInput: unknown): FileEdit[] {
+  if (toolName === PATCH_TOOL) {
+    if (typeof toolInput === "string") return patchEdits(toolInput)
+    if (!isObject(toolInput)) return []
+    const patch = [toolInput.command, toolInput.input, toolInput.patch].find((field) => typeof field === "string")
+    return typeof patch === "string" ? patchEdits(patch) : []
+  }
+  if (toolName !== "Edit" && toolName !== "Write") return []
+  if (!isObject(toolInput)) return []
+  const { file_path, old_string, new_string, content } = toolInput
+  if (typeof file_path !== "string" || file_path === "") return []
+  if (typeof new_string === "string") {
+    return [{ path: file_path, linesWritten: writtenLines(typeof old_string === "string" ? old_string : "", new_string) }]
+  }
+  return [{ path: file_path, linesWritten: typeof content === "string" ? writtenLines("", content) : 0 }]
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}

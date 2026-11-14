@@ -18,7 +18,7 @@
 
 **Interlint runs the checks your project already has inside your AI agent's session.** When the agent breaks a rule, it hears about it right away and fixes it before it moves on. Not in CI. Not by hand.
 
-Works with **[Claude Code](docs/claude-code.md)**, **[GitHub Copilot](docs/copilot.md)** and **[OpenCode](docs/opencode.md)**, on Maven projects that use **ArchUnit, Checkstyle, PMD, SpotBugs or JaCoCo** coverage rules, and on TypeScript and JavaScript projects that use **ESLint** or **dependency-cruiser** architecture rules.
+Works with **[Claude Code](docs/claude-code.md)**, **[GitHub Copilot](docs/copilot.md)**, **[Codex](docs/codex.md)** and **[OpenCode](docs/opencode.md)**, on Maven projects that use **ArchUnit, Checkstyle, PMD, SpotBugs or JaCoCo** coverage rules, and on TypeScript and JavaScript projects that use **ESLint** or **dependency-cruiser** architecture rules.
 
 The agent puts infrastructure code in the domain. Interlint tells it right away, with the rule, the file and the line. The agent fixes it and carries on:
 
@@ -92,7 +92,7 @@ Requires Node 22 or later and one of these:
 2. In the root of your project, or of a workspace that holds several projects, set up your agent:
 
    ```bash
-   interlint init --agent claude-code   # or: --agent copilot, --agent opencode
+   interlint init --agent claude-code   # or: --agent copilot, --agent codex, --agent opencode
    ```
 
 3. Commit the generated `interlint.yaml` (and `.claude/settings.json`, `.github/hooks/interlint.json` or `.opencode/`), then start your agent as usual.
@@ -148,7 +148,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 | | |
 |---|---|
-| Agents | Claude Code, GitHub Copilot (hooks in preview), OpenCode V2 |
+| Agents | Claude Code, GitHub Copilot (hooks in preview), Codex CLI (not yet tested in a real session), OpenCode V2 |
 | Checks | ArchUnit, Checkstyle, PMD, [SpotBugs](docs/usage.md#spotbugs), JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint), [dependency-cruiser](docs/usage.md#dependency-cruiser) |
 | Build | Maven, with or without the Maven Wrapper, and `mvnd` for checks after each edit; npm with the project's own ESLint and dependency-cruiser |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven and npm projects |
@@ -165,6 +165,7 @@ Known limits:
 - [Using Interlint](docs/usage.md): `init`, `interlint.yaml`, `check`, `metrics` and exit codes.
 - [Claude Code](docs/claude-code.md): the hooks, their exit codes, the retry limit and subagents.
 - [GitHub Copilot](docs/copilot.md): the hooks, trusting the folder, and what was tested.
+- [Codex](docs/codex.md): the hooks, trusting them, and what is not tested yet.
 - [OpenCode](docs/opencode.md): the plugin, what it does after edits and at turn end, and subagents.
 - [Development](docs/development.md): building, testing and packing Interlint.
 

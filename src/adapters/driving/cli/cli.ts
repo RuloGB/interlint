@@ -4,6 +4,7 @@ import type { TranscriptModel } from "../../../application/feedback/ports.js"
 import type { MetricsDeps } from "../../../application/metrics/show-metrics.js"
 import type { InitDeps } from "../../../application/setup/init-project.js"
 import { hook } from "../claude-code/hook-command.js"
+import { codexHook } from "../codex/hook-command.js"
 import { copilotHook } from "../copilot/hook-command.js"
 import { check } from "./check-command.js"
 import { EXIT, type Io, reportError, UsageError } from "./cli-io.js"
@@ -11,15 +12,15 @@ import { init } from "./init-command.js"
 import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
-  interlint init [--agent opencode|claude-code|copilot] [--force] [--cwd <dir>]
+  interlint init [--agent opencode|claude-code|copilot|codex] [--force] [--cwd <dir>]
       Detect the project's checks, write interlint.yaml and set up the agent
   interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
       Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]
       Run the edit checks for the changed files
-  interlint hook claude-code|copilot post-edit|stop|subagent-stop
+  interlint hook claude-code|copilot|codex post-edit|stop|subagent-stop
       Agent hook: reads the hook's JSON on stdin
-  interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|copilot|opencode] [--cwd <dir>]
+  interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|codex|copilot|opencode] [--cwd <dir>]
       Sum up the metrics of the checks
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
       Write the full metrics report, with charts
@@ -60,6 +61,8 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
     if (command === "hook" && rest[0] === "copilot") {
       return await copilotHook(rest, io, { ...deps.feedback, transcriptModel: deps.copilotTranscriptModel })
     }
+    // Codex gives the model in the hook's input, so it reads no transcript.
+    if (command === "hook" && rest[0] === "codex") return await codexHook(rest, io, deps.feedback)
     if (command === "hook") return await hook(rest, io, deps.feedback)
     if (command === "metrics") return metrics(rest, io, deps.metrics)
     throw new UsageError(`unknown command "${command}"\n\n${USAGE}`)
