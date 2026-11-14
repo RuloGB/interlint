@@ -621,7 +621,22 @@ describe("interlint usage", () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain("interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]")
     expect(stdout).toContain("interlint check --when edit --file <path>... [--cwd <dir>]")
-    expect(stdout).toContain("metrics: false in interlint.yaml keeps none.")
+    expect(stdout).toContain("Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.")
+  })
+
+  it("keeps the usage short and points to the docs for the details", async () => {
+    const { stdout } = await run("--help")
+
+    expect(stdout.trimEnd().split("\n").length).toBeLessThanOrEqual(25)
+    expect(stdout).toContain("https://github.com/RuloGB/interlint/blob/main/docs/usage.md")
+    expect(stdout).not.toContain("metrics: false in interlint.yaml keeps none.")
+  })
+
+  it("prints the same usage with no command and with -h", async () => {
+    const help = (await run("--help")).stdout
+
+    expect((await run()).stdout).toBe(help)
+    expect((await run("-h")).stdout).toBe(help)
   })
 
   it("exits 2 for an unknown command", async () => {
