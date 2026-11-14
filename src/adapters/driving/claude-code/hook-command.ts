@@ -3,7 +3,7 @@ import { afterEdit, type FeedbackDeps, mainStop, subagentStop } from "../../../a
 import type { AgentContext } from "../../../domain/metric.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import { editNote, failedLine, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type HookInput, parseHookInput } from "./hook-input.js"
 
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
@@ -12,11 +12,6 @@ export const HOOK_EXIT = { pass: 0, error: 1, block: 2 } as const
 /** Why a Claude Code hook that GitHub Copilot runs does nothing. */
 const COPILOT_SKIPPED =
   "GitHub Copilot ran a Claude Code hook, which does nothing there: Copilot runs Interlint through .github/hooks/interlint.json (interlint init --agent copilot)"
-
-/** What the post-edit hook shows the user when the checks fail: Claude Code shows the user none of what Claude gets. */
-function failedLine(failed: string[]): string {
-  return `✗ Interlint · checks failed after this edit: ${failed.join(", ")}`
-}
 
 /**
  * Who the hook fires for, for the metrics. The model is the last one in the session's transcript, or in the
