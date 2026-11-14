@@ -2,7 +2,7 @@
 
 Interlint works with Codex CLI, OpenAI's coding agent, through three hooks in the project's `.codex/hooks.json`.
 
-This integration follows the [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks.md). It was built against Codex CLI 0.149 on Windows, but has not yet been tested end to end in a real Codex session. Codex hooks are stable since Codex CLI 0.124.
+This page was tested on Windows with the Codex app (Codex CLI 0.149), with edits by the main agent: feedback after a patch that broke Checkstyle, and a task end blocked by an ArchUnit violation until the agent fixed it. Codex hooks are stable since Codex CLI 0.124. The hooks follow the [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks.md).
 
 ## Set it up
 
@@ -61,9 +61,8 @@ Each check the hooks run is kept in your [metrics](usage.md#metrics) with `agent
 
 ## Not tested yet
 
-- A real Codex session. The hooks follow the documented input and output, and the tests use that format.
-- Whether a subagent's `PostToolUse` input names the subagent. If it does not, a subagent's own stop finds no files to check, and the main agent's `stop` still checks every changed project.
-- The Codex IDE extension and Codex cloud.
+- Subagents, and whether a subagent's `PostToolUse` input names the subagent. If it does not, a subagent's own stop finds no files to check, and the main agent's `stop` still checks every changed project.
+- Codex CLI in a terminal (it shares the hooks with the app), the Codex IDE extension and Codex cloud.
 
 ## `interlint hook codex`
 

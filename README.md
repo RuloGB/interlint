@@ -148,7 +148,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 | | |
 |---|---|
-| Agents | Claude Code, GitHub Copilot (hooks in preview), Codex CLI (not yet tested in a real session), OpenCode V2 |
+| Agents | Claude Code, GitHub Copilot (hooks in preview), Codex, OpenCode V2 |
 | Checks | ArchUnit, Checkstyle, PMD, [SpotBugs](docs/usage.md#spotbugs), JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint), [dependency-cruiser](docs/usage.md#dependency-cruiser) |
 | Build | Maven, with or without the Maven Wrapper, and `mvnd` for checks after each edit; npm with the project's own ESLint and dependency-cruiser |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven and npm projects |
