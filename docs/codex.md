@@ -36,10 +36,14 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this writes `.codex/
 
 ### Trust the hooks
 
-Codex runs a project's hooks only after you trust them:
+Codex runs a project's hooks only after you trust them. **Until you do, Codex skips them without telling you**: the agent edits and finishes as if Interlint were not there, and `interlint metrics --agent codex` shows nothing.
 
 1. Open Codex in the project and trust the project when Codex asks. Codex loads `.codex/` only from a trusted project.
-2. Run `/hooks` and approve Interlint's three hooks. In the Codex app, use **Review hooks** or **Settings > Hooks**.
+2. Approve Interlint's three hooks:
+   - **Codex CLI:** run `/hooks` and trust the hooks from this project.
+   - **Codex app:** open **Review hooks** (or **Settings > Hooks**). It lists the three hooks as **New**, with **This project** as their origin: `PostToolUse` with `interlint hook codex post-edit`, **Subagent stop** with `interlint hook codex subagent-stop` and **Stop** with `interlint hook codex stop`. Choose **Allow all**, or select the three and choose **Allow selected**. **Not now** leaves them off.
+
+To check that they run, ask the agent for an edit that breaks a check. After the edit, Codex shows `✗ Interlint · checks failed after this edit`.
 
 Codex trusts each hook by its content. When a hook changes, for example after a new Interlint version updates `.codex/hooks.json`, Codex skips it until you approve it again. `init` reminds you of this when it writes the file, and never trusts the hooks for you.
 
