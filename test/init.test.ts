@@ -668,9 +668,11 @@ describe("interlint init --agent codex", () => {
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 60 }] }] } }),
     )
 
-    await run("init", "--agent", "codex")
+    const { stdout } = await run("init", "--agent", "codex")
 
     expect(JSON.parse(readHooks()).hooks.Stop).toEqual(INTERLINT_HOOKS.Stop)
+    // A changed hook must be trusted again.
+    expect(stdout).toContain(TRUST_NOTE)
   })
 
   it("stops with an error and writes nothing when .codex/hooks.json is not JSON", async () => {

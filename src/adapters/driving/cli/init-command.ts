@@ -91,14 +91,12 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
         "Kept:",
         result.kept.map((path) => `${path} (differs from what init would write; rerun with --force to replace it)`),
       ),
-      ...(agent === "codex" && result.written.includes(CODEX_HOOKS_FILE) ? ["", CODEX_TRUST_NOTE] : []),
+      // The config is the one file init writes that is not the agent's: any other written file is Codex's hooks.
+      ...(agent === "codex" && result.written.some((path) => path !== deps.config.path) ? ["", CODEX_TRUST_NOTE] : []),
     ].join("\n"),
   )
   return EXIT.passed
 }
-
-/** The file `init --agent codex` writes. */
-const CODEX_HOOKS_FILE = ".codex/hooks.json"
 
 /**
  * Codex skips a project hook until the user trusts it, and again after it changes, so this is said only when `init`

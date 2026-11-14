@@ -12,6 +12,9 @@ import { type CodexHookInput, parseCodexHookInput } from "./hook-input.js"
  */
 export const CODEX_HOOK_EXIT = { pass: 0, error: 1 } as const
 
+/** Why post-edit ran no check for an `apply_patch` whose input it could not read. */
+const UNREADABLE_PATCH = "the apply_patch input has no patch in tool_input.command, so no check ran for this edit"
+
 /** Who the hook fires for, for the metrics. Codex gives the model in the input itself. */
 function contextOf({ sessionId, agentId, agentType, model }: CodexHookInput): AgentContext {
   return {
@@ -46,6 +49,9 @@ export async function codexHook(args: string[], io: Io, deps: FeedbackDeps): Pro
     const context = contextOf(input)
 
     if (event === "post-edit") {
+      // Codex may have changed its input: say why no check ran, rather than skip the edit without a trace.
+      if (input.unreadablePatch) io.stderr(`interlint: ${UNREADABLE_PATCH}
+`)
       if (input.edits.length === 0) return CODEX_HOOK_EXIT.pass
       const linesWritten = new Map<string, number>()
       for (const { path, linesWritten: lines } of input.edits) {

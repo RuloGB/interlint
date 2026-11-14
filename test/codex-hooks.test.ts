@@ -199,6 +199,16 @@ describe("interlint hook codex post-edit", () => {
     expect(contextOf((await hook("post-edit", postToolUse(patch(update(ORDER, "new"))), stateDir)).stdout)).toContain("ARCH-01")
   })
 
+  it("says on stderr why no check ran when an apply_patch input holds no patch it can read, and exits 0", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+
+    const { exitCode, stdout, stderr } = await hook("post-edit", postToolUse("", { tool_input: { changes: {} } }))
+
+    expect({ exitCode, stdout }).toEqual({ exitCode: 0, stdout: "" })
+    expect(stderr).toBe("interlint: the apply_patch input has no patch in tool_input.command, so no check ran for this edit\n")
+    expect(ran()).toBe(false)
+  })
+
   it("exits 1, never 2, when stdin is not a hook's JSON", async () => {
     const { exitCode, stdout, stderr } = await hook("post-edit", "not json")
 
@@ -404,7 +414,17 @@ describe("parseCodexHookInput", () => {
       agentId: "a1",
       agentType: "worker",
       model: "gpt-6-codex-mini",
+      unreadablePatch: false,
     })
+  })
+
+  it("reads a patch given as input, patch or the whole tool input", () => {
+    const command = patch(update("src/A.java", "new"))
+    const edits = [{ path: "src/A.java", linesWritten: 1 }]
+
+    for (const toolInput of [{ input: command }, { patch: command }, command]) {
+      expect(parseCodexHookInput(postToolUse("", { tool_input: toolInput }))).toMatchObject({ edits, unreadablePatch: false })
+    }
   })
 })
 

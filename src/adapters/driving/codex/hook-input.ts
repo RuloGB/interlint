@@ -18,11 +18,16 @@ export interface CodexHookInput {
   agentType?: string
   /** The active model, which Codex gives in every hook. */
   model?: string
+  /** Whether an `apply_patch` input held no patch Interlint can read, so no file could be named. */
+  unreadablePatch: boolean
 }
 
 export class CodexHookInputError extends UserFacingError {}
 
-/** Codex's edit tool, as the input always names it, though the matcher also takes `Edit` and `Write`. */
+/**
+ * Codex's edit tool. Codex documents that the input names every edit `apply_patch`, even when the matcher says `Edit`
+ * or `Write`; an `Edit` or `Write` input is still read, in Claude Code's format, in case a Codex version sends one.
+ */
 const PATCH_TOOL = "apply_patch"
 
 export function parseCodexHookInput(text: string): CodexHookInput {
@@ -34,28 +39,29 @@ export function parseCodexHookInput(text: string): CodexHookInput {
   }
   if (!isObject(value)) throw new CodexHookInputError("the hook input on stdin is not a JSON object")
   const { session_id, cwd, tool_name, tool_input, stop_hook_active, agent_id, agent_type, model } = value
+  const patch = tool_name === PATCH_TOOL ? patchOf(tool_input) : undefined
   return {
     sessionId: typeof session_id === "string" ? session_id : "",
     cwd: nonEmpty(cwd),
-    edits: editsOf(tool_name, tool_input),
+    edits: tool_name === PATCH_TOOL ? (patch === undefined ? [] : patchEdits(patch)) : editsOf(tool_name, tool_input),
     stopHookActive: stop_hook_active === true,
     agentId: nonEmpty(agent_id),
     agentType: nonEmpty(agent_type),
     model: nonEmpty(model),
+    unreadablePatch: tool_name === PATCH_TOOL && patch === undefined,
   }
 }
 
-/**
- * The files in a tool's input: those the patch in `command` adds or updates for `apply_patch`, or `file_path` with
- * the lines of `new_string` or `content` for `Edit` and `Write`.
- */
+/** The patch text of an `apply_patch` input: `command` as documented, or `input` or `patch`, or the input itself. */
+function patchOf(toolInput: unknown): string | undefined {
+  if (typeof toolInput === "string") return toolInput
+  if (!isObject(toolInput)) return undefined
+  const patch = [toolInput.command, toolInput.input, toolInput.patch].find((field) => typeof field === "string")
+  return typeof patch === "string" ? patch : undefined
+}
+
+/** The file of an `Edit` or `Write` input: `file_path`, with the lines of `new_string` or `content`. */
 function editsOf(toolName: unknown, toolInput: unknown): FileEdit[] {
-  if (toolName === PATCH_TOOL) {
-    if (typeof toolInput === "string") return patchEdits(toolInput)
-    if (!isObject(toolInput)) return []
-    const patch = [toolInput.command, toolInput.input, toolInput.patch].find((field) => typeof field === "string")
-    return typeof patch === "string" ? patchEdits(patch) : []
-  }
   if (toolName !== "Edit" && toolName !== "Write") return []
   if (!isObject(toolInput)) return []
   const { file_path, old_string, new_string, content } = toolInput
