@@ -11,88 +11,25 @@ import { init } from "./init-command.js"
 import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
-  interlint --version                                          Print the installed version of Interlint
   interlint init [--agent opencode|claude-code|copilot] [--force] [--cwd <dir>]
-                                                               Detect the project's checks and write interlint.yaml
+      Detect the project's checks, write interlint.yaml and set up the agent
   interlint check [--when task-end] [--changed] [--file <path>...] [--cwd <dir>]
-                                                               Run every check in interlint.yaml
-  interlint check --when edit --file <path>... [--cwd <dir>]   Run the edit checks for the changed files
-  interlint hook claude-code post-edit|stop|subagent-stop      Claude Code hook: reads the hook's JSON on stdin
-  interlint hook copilot post-edit|stop|subagent-stop          GitHub Copilot hook: reads the hook's JSON on stdin
+      Run every check in interlint.yaml
+  interlint check --when edit --file <path>... [--cwd <dir>]
+      Run the edit checks for the changed files
+  interlint hook claude-code|copilot post-edit|stop|subagent-stop
+      Agent hook: reads the hook's JSON on stdin
   interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|copilot|opencode] [--cwd <dir>]
-                                                               Sum up the metrics of the checks
+      Sum up the metrics of the checks
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
-                                                               Write the full metrics report, with charts
-
-A check with dir runs in that directory (one project of a workspace). An edit check runs
-only when a changed file inside its project is one of its sources (*.java for report: archunit
-and maven; *.ts, *.tsx, *.mts, *.cts, *.js, *.jsx, *.mjs and *.cjs for report: eslint and depcruise). With
-mvnd on the PATH, a check whose run starts with mvn, mvnw or ./mvnw runs with mvnd instead;
-without mvnd, Maven edit checks wait for task-end.
-
---changed runs only the checks of the projects that changed since their checks last passed:
-a file changed, or an edit check named one of its files. The agent integrations use it.
-With --changed, a check passes without running when a build since the last change, such as
-mvn verify run by the agent, left all the reports it writes and they list no failure. At task end, --file runs only the checks of the projects that hold one of those files: the agent
-integrations pass the files a subagent changed, so it gets the failures of its own projects.
-
-init writes an architecture check that runs the test classes with @ArchTest, with the Maven
-Wrapper (or mvn), when: edit, every: 5 and lines: 100, and a checkstyle check (report: maven,
-when: edit) and a pmd check (report: maven, when: edit, every: 5, lines: 100) for the plugins in
-the build of pom.xml and its modules, a spotbugs check (report: maven, when: edit, every: 5,
-lines: 100) when the build runs spotbugs-maven-plugin's check goal, and a coverage check (report: jacoco, when: task-end) when the build runs jacoco-maven-plugin's check
-goal. In an npm project with eslint in package.json and an eslint.config file it writes an
-eslint check (report: eslint, when: edit), and with dependency-cruiser in package.json and a
-.dependency-cruiser file a depcruise check (report: depcruise, when: edit). In a directory without pom.xml it writes
-the checks of each Maven project and each such npm project below it, with their dir. It never
-replaces a different interlint.yaml without --force: without --agent it writes nothing, and
-with --agent it keeps that file and still writes the agent's files.
-
-A report: maven check fails only when Maven fails, and shows the most severe level in the
-Checkstyle, PMD and SpotBugs reports, so nothing the project's build accepts is shown. At edit it
-shows only the failures of the changed files, and a run with checkstyle:check gets
--Dcheckstyle.includes so Checkstyle checks only those files; PMD and SpotBugs check the whole project.
-A report: eslint check reads the JSON report of ESLint, which its run writes with -f json -o to
-node_modules/.cache/interlint/eslint.json, and fails only when ESLint fails: it shows the
-errors, or the warnings when ESLint fails on them alone. At edit the " ." its run ends with
-is replaced with the changed files, and only their failures are shown.
-A report: depcruise check reads the JSON report of dependency-cruiser, which its run writes with
--T json --output-to to node_modules/.cache/interlint/depcruise.json, and fails on its violations
-of severity error. It analyzes the whole project, at edit too, and an edit shows only the
-violations of the changed files. A run that analyzes no source, as with TypeScript 7, fails.
-A report: jacoco check reads the coverage rules jacoco:check prints as broken; it runs only at
-task end, without -q, which hides them. With --changed, when every tested module's target/jacoco.exec
-and Surefire reports are newer than the last change and no test failed, the command runs without
-its lifecycle phases, so jacoco:check reads that data and no test runs.
---agent opencode copies the plugin to .opencode/plugins/interlint/; --agent claude-code adds
-the post-edit, stop and subagent-stop hooks to .claude/settings.json and keeps the rest of the file;
---agent copilot writes the same hooks to .github/hooks/interlint.json.
-
-Every check that runs or is skipped keeps one metrics line, with no code or message, in the
-user's state directory (interlint/metrics under %LOCALAPPDATA% on Windows, $XDG_STATE_HOME or
-~/.local/state elsewhere). metrics: false in interlint.yaml keeps none.
-
-interlint metrics sums up the metrics of the project in --cwd (or the current directory), or of
-every project with --all: checks run, violations by type, the top rules, violations per check run
-by model and by agent, sessions, task-end blocks and time spent on checks. A violation counts in
-every run that shows it. --since keeps the events from that day on (UTC) and --agent those of one
-agent. metrics report writes all of it, with tables and charts, to interlint-metrics.md in the
-project, or to --out; it never replaces an existing file without --force. --format html writes one
-page with SVG charts, and --format pdf prints that page with an installed Chrome, Edge or Chromium.
+      Write the full metrics report, with charts
+  interlint --version
+      Print the installed version of Interlint
 
 Exit codes: 0 every check passed, 1 a check failed, 2 configuration or usage error.
+Hooks exit as their agent expects.
 
-A Claude Code hook exits as Claude Code expects instead: 0 nothing to report, 2 a check failed
-(the failures go to the agent on stderr), 1 Interlint could not run (shown to the user, never a
-block). stop blocks at most 3 times in a row, then lets the task end and shows the failures.
-subagent-stop checks only the projects of the files that subagent changed, and runs nothing for
-a subagent that changed none; after 3 blocks it lets the subagent stop, and stop gets the rest.
-Run by GitHub Copilot, a Claude Code hook does nothing: Copilot runs its own hooks.
-
-A GitHub Copilot hook exits 0 when it ran: post-edit gives the agent the failures as
-additionalContext on stdout, and stop and subagent-stop block with {"decision": "block"} and the
-failures as reason. 1 means Interlint could not run; Copilot logs it and the agent goes on.
-The same limit of 3 blocks applies.
+Docs: https://github.com/RuloGB/interlint/blob/main/docs/usage.md
 `
 
 /** The use cases the commands run, with their adapters. */
