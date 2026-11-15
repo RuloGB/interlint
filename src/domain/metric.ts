@@ -6,7 +6,7 @@ import type { RuleType } from "./violation.js"
  * the agent does not give it (decision 36).
  */
 export interface AgentContext {
-  /** `claude-code`, `copilot` or `opencode`. */
+  /** `claude-code`, `codex`, `copilot` or `opencode`. */
   agent?: string
   session?: string
   /** Present, as true, only when a subagent ran the checks. */

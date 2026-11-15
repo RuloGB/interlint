@@ -301,7 +301,7 @@ describe("interlint init", () => {
     const { exitCode, stderr } = await run("init", "--agent", "cursor")
 
     expect(exitCode).toBe(2)
-    expect(stderr).toContain('--agent must be opencode, claude-code or copilot (got "cursor")')
+    expect(stderr).toContain('--agent must be opencode, claude-code, copilot or codex (got "cursor")')
     expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 })
@@ -591,6 +591,98 @@ describe("interlint init --agent copilot", () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain(".github/hooks/interlint.json")
     expect(JSON.parse(readHooks())).toEqual(HOOKS)
+  })
+})
+
+describe("interlint init --agent codex", () => {
+  const HOOKS_FILE = join(".codex", "hooks.json")
+  const readHooks = () => readFileSync(join(projectDir, HOOKS_FILE), "utf8")
+  const TRUST_NOTE =
+    "Codex runs these hooks only once you trust them: open Codex in this project and approve Interlint's hooks in /hooks."
+  const INTERLINT_HOOKS = {
+    PostToolUse: [
+      {
+        matcher: "apply_patch|Edit|Write",
+        hooks: [{ type: "command", command: "interlint hook codex post-edit", timeout: 120 }],
+      },
+    ],
+    Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 600 }] }],
+    SubagentStop: [{ hooks: [{ type: "command", command: "interlint hook codex subagent-stop", timeout: 600 }] }],
+  }
+
+  beforeEach(() => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("writes the post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
+    const { exitCode, stdout, stderr } = await run("init", "--agent", "codex")
+
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    expect(JSON.parse(readHooks())).toEqual({ hooks: INTERLINT_HOOKS })
+    expect(stdout).toContain("Wrote:\n  interlint.yaml\n  .codex/hooks.json\n")
+    expect(stdout.trimEnd().endsWith(TRUST_NOTE)).toBe(true)
+  })
+
+  it("keeps the other hooks of .codex/hooks.json and leaves .codex/config.toml as it is", async () => {
+    const team = {
+      description: "Team hooks",
+      hooks: {
+        SessionStart: [{ matcher: "startup", hooks: [{ type: "command", command: "echo hi", timeout: 30 }] }],
+        Stop: [{ hooks: [{ type: "command", command: "team-telemetry", async: true }] }],
+      },
+    }
+    writeFile(HOOKS_FILE, JSON.stringify(team))
+    const config = 'model = "gpt-6-codex"\n\n[hooks]\n'
+    writeFile(join(".codex", "config.toml"), config)
+
+    await run("init", "--agent", "codex")
+
+    expect(JSON.parse(readHooks())).toEqual({
+      description: "Team hooks",
+      hooks: {
+        SessionStart: team.hooks.SessionStart,
+        Stop: [...team.hooks.Stop, ...INTERLINT_HOOKS.Stop],
+        PostToolUse: INTERLINT_HOOKS.PostToolUse,
+        SubagentStop: INTERLINT_HOOKS.SubagentStop,
+      },
+    })
+    expect(readFileSync(join(projectDir, ".codex", "config.toml"), "utf8")).toBe(config)
+  })
+
+  it("leaves the file byte for byte as it was when it runs twice, so Codex does not ask to trust the hooks again", async () => {
+    await run("init", "--agent", "codex")
+    const first = readHooks()
+
+    const { exitCode, stdout } = await run("init", "--agent", "codex")
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Unchanged:\n  interlint.yaml\n  .codex/hooks.json\n")
+    expect(stdout).not.toContain(TRUST_NOTE)
+    expect(readHooks()).toBe(first)
+  })
+
+  it("replaces an older Interlint hook with a different timeout", async () => {
+    writeFile(
+      HOOKS_FILE,
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 60 }] }] } }),
+    )
+
+    const { stdout } = await run("init", "--agent", "codex")
+
+    expect(JSON.parse(readHooks()).hooks.Stop).toEqual(INTERLINT_HOOKS.Stop)
+    // A changed hook must be trusted again.
+    expect(stdout).toContain(TRUST_NOTE)
+  })
+
+  it("stops with an error and writes nothing when .codex/hooks.json is not JSON", async () => {
+    writeFile(HOOKS_FILE, "{ not json")
+
+    const { exitCode, stderr } = await run("init", "--agent", "codex")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain(".codex/hooks.json is not valid JSON")
+    expect(existsSync(join(projectDir, "interlint.yaml"))).toBe(false)
   })
 })
 

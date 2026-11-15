@@ -7,6 +7,8 @@ Guide for AI coding agents working on this repository. For what Interlint does, 
 Interlint is a Node CLI (`interlint`, TypeScript, ESM) that runs a project's existing checks (ArchUnit, Checkstyle, PMD, SpotBugs and JaCoCo on Maven; ESLint and dependency-cruiser on npm projects) inside an AI agent's session and feeds violations back to the agent. It integrates with:
 
 - **Claude Code** through hooks written to `.claude/settings.json` ([docs/claude-code.md](docs/claude-code.md)).
+- **GitHub Copilot** through hooks written to `.github/hooks/interlint.json` ([docs/copilot.md](docs/copilot.md)).
+- **Codex** through hooks written to `.codex/hooks.json` ([docs/codex.md](docs/codex.md)).
 - **OpenCode** through the plugin in `integrations/opencode/interlint/` ([docs/opencode.md](docs/opencode.md)).
 
 Interlint has no rules of its own. Do not add analysis logic: it runs the user's commands and reads their reports.
@@ -33,7 +35,7 @@ Before you report a change as done, run `npm run typecheck`, `npm run build` and
 |---|---|---|
 | `src/domain/` | Pure model: checks, violations, Maven commands, project facts | Nothing outside `domain` |
 | `src/application/<use-case>/` | Use cases (`checking`, `feedback`, `setup`) and their `ports.ts` | `domain` only |
-| `src/adapters/driving/` | Entry points: the CLI and the Claude Code hook | `domain`, `application` |
+| `src/adapters/driving/` | Entry points: the CLI and the agent hooks (Claude Code, Copilot, Codex) | `domain`, `application` |
 | `src/adapters/driven/<adapter>/` | Implementations of ports: `fs`, `maven`, `eslint`, `depcruise`, `npm`, `process`, `state`, `yaml-config`, `agents` | `domain`, `application`, and its own adapter only |
 | `src/main.ts` | Composition root: wires use cases to adapters | Anything |
 

@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { claudeCodeSettingsFiles } from "./adapters/driven/agents/claude-code-settings.js"
 import { transcriptModel } from "./adapters/driven/agents/claude-code-transcript.js"
+import { codexHookFiles } from "./adapters/driven/agents/codex-hooks.js"
 import { copilotHookFiles } from "./adapters/driven/agents/copilot-hooks.js"
 import { copilotTranscriptModel } from "./adapters/driven/agents/copilot-transcript.js"
 import { openCodePluginFiles } from "./adapters/driven/agents/opencode-plugin-files.js"
@@ -57,7 +58,7 @@ const DEPS: CliDeps = {
     scanNpm: scanNpmProjects,
     files: diskProjectFiles,
     config: yamlConfigFile,
-    agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles, copilot: copilotHookFiles },
+    agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles, copilot: copilotHookFiles, codex: codexHookFiles },
     hasExecutable: lookupExecutable,
   },
   metrics: { source: fileMetricsSource(), reportFile: diskReportFile, pdf: headlessPdf(), now: () => new Date() },

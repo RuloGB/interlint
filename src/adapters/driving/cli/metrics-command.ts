@@ -10,7 +10,7 @@ import {
 } from "../../../application/metrics/show-metrics.js"
 import { EXIT, type Io, UsageError, UserFacingError } from "./cli-io.js"
 
-const AGENTS = ["claude-code", "copilot", "opencode"]
+const AGENTS = ["claude-code", "codex", "copilot", "opencode"]
 
 /** The default report file, in the project's folder, with the format as its extension (decision 48). */
 export const REPORT_NAME = "interlint-metrics"

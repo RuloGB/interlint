@@ -5,11 +5,12 @@ import { type AgentFiles, AgentSetupError } from "../../../application/setup/por
 /** The project's shared Claude Code settings, meant to be committed. */
 export const SETTINGS_FILE = ".claude/settings.json"
 
-interface InterlintHook {
+/** A hook in the format Claude Code and Codex share: matcher groups of handlers, keyed by event. */
+export interface InterlintHook {
   event: "PostToolUse" | "Stop" | "SubagentStop"
   matcher?: string
   command: string
-  /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones, Claude Code's default. */
+  /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones give Maven time. */
   timeout: number
 }
 
@@ -29,7 +30,7 @@ type JsonObject = Record<string, unknown>
 export const claudeCodeSettingsFiles: AgentFiles = (projectDir) => {
   const path = join(projectDir, SETTINGS_FILE)
   const current = existsSync(path) ? readFileSync(path, "utf8") : undefined
-  return [{ path: SETTINGS_FILE, content: withInterlintHooks(current), replace: true }]
+  return [{ path: SETTINGS_FILE, content: withInterlintHooks(current, SETTINGS_FILE, HOOKS), replace: true }]
 }
 
 /**
@@ -38,15 +39,15 @@ export const claudeCodeSettingsFiles: AgentFiles = (projectDir) => {
  * is added when none was the same. Settings that need no change keep their exact text, so a second
  * `init` leaves the file as it is.
  */
-export function withInterlintHooks(current: string | undefined): string {
-  const settings = current === undefined || current.trim() === "" ? {} : parseSettings(current)
+export function withInterlintHooks(current: string | undefined, file: string, interlintHooks: readonly InterlintHook[]): string {
+  const settings = current === undefined || current.trim() === "" ? {} : parseSettings(current, file)
   const hooks = settings.hooks ?? {}
-  if (!isObject(hooks)) throw new AgentSetupError(`${SETTINGS_FILE}: hooks is not an object`)
+  if (!isObject(hooks)) throw new AgentSetupError(`${file}: hooks is not an object`)
 
   let changed = current === undefined
-  for (const hook of HOOKS) {
+  for (const hook of interlintHooks) {
     const groups = hooks[hook.event] ?? []
-    if (!Array.isArray(groups)) throw new AgentSetupError(`${SETTINGS_FILE}: hooks.${hook.event} is not a list`)
+    if (!Array.isArray(groups)) throw new AgentSetupError(`${file}: hooks.${hook.event} is not a list`)
 
     let installed = false
     let removed = false
@@ -76,15 +77,15 @@ export function withInterlintHooks(current: string | undefined): string {
   return `${JSON.stringify(settings, null, 2)}\n`
 }
 
-function parseSettings(text: string): JsonObject {
+function parseSettings(text: string, file: string): JsonObject {
   let value: unknown
   try {
     // Editors on Windows may save the file with a byte order mark, which JSON.parse rejects.
     value = JSON.parse(text.replace(/^﻿/, ""))
   } catch {
-    throw new AgentSetupError(`${SETTINGS_FILE} is not valid JSON`)
+    throw new AgentSetupError(`${file} is not valid JSON`)
   }
-  if (!isObject(value)) throw new AgentSetupError(`${SETTINGS_FILE} is not a JSON object`)
+  if (!isObject(value)) throw new AgentSetupError(`${file} is not a JSON object`)
   return value
 }
 

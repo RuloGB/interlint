@@ -16,6 +16,11 @@ export function editNote(report: string): string {
   return `Interlint: the checks fail after this edit.\n\n${report}`
 }
 
+/** What the post-edit hook shows the user when the checks fail, for agents that show the user none of what the agent gets. */
+export function failedLine(failed: string[]): string {
+  return `✗ Interlint · checks failed after this edit: ${failed.join(", ")}`
+}
+
 export function withNotice(text: string, notice: string): string {
   if (notice === "") return text
   return text === "" ? notice : `${text.trimEnd()}\n\n${notice}`

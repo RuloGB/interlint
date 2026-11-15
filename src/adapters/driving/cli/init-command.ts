@@ -91,10 +91,18 @@ export function init(args: string[], io: Io, deps: InitDeps): number {
         "Kept:",
         result.kept.map((path) => `${path} (differs from what init would write; rerun with --force to replace it)`),
       ),
+      // The config is the one file init writes that is not the agent's: any other written file is Codex's hooks.
+      ...(agent === "codex" && result.written.some((path) => path !== deps.config.path) ? ["", CODEX_TRUST_NOTE] : []),
     ].join("\n"),
   )
   return EXIT.passed
 }
+
+/**
+ * Codex skips a project hook until the user trusts it, and again after it changes, so this is said only when `init`
+ * wrote the file. `init` never trusts the hooks for the user.
+ */
+const CODEX_TRUST_NOTE = `Codex runs these hooks only once you trust them: open Codex in this project and approve Interlint's hooks in /hooks.`
 
 /**
  * That no npm project was found, with the `package.json` files that could not be read, since one of them may be
