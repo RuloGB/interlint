@@ -20,7 +20,8 @@ describe("toPlatformCommand", () => {
   })
 })
 
-describe("cmdFindsCommand", () => {
+// cmd.exe rules: Windows paths, case-insensitive files. Interlint looks commands up this way only on Windows.
+describe.runIf(process.platform === "win32")("cmdFindsCommand", () => {
   let cwd: string
   let bin: string
   const env = () => ({ PATH: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD" })
