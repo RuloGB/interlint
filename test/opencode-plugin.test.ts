@@ -1231,6 +1231,20 @@ describe("OpenCode plugin with protected files", () => {
     expect(read).toEqual(permissionEvent("read", "interlint.yaml"))
   })
 
+  it("tells the CLI the main session when a subagent edits, as the protected files are kept for it", async () => {
+    const { runs, run } = recordingChecks()
+    const fake = fakeContext([], { writer: { parentID: "main" } })
+    await createInterlintPlugin(run).setup(withPermissions(fake.ctx).ctx)
+    await fake.done
+
+    await fake.afterTool("edit", { path: "/repo/src/Order.ts" }, "completed", { sessionID: "writer" })
+    await fake.afterTool("edit", { path: "/repo/src/Order.ts" }, "completed", { sessionID: "main" })
+
+    const edits = runs.filter(({ args }) => args[2] === "edit").map(({ args }) => args)
+    expect(edits[0]).toEqual(expect.arrayContaining(["--root-session", "main"]))
+    expect(edits[1]).not.toContain("--root-session")
+  })
+
   it("tells the CLI that edits were asked about only when OpenCode gives the permission hook", async () => {
     const asking = recordingChecks()
     const fake = fakeContext()

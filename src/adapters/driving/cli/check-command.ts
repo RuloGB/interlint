@@ -18,6 +18,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
   const lines = parseLines(values.lines, files.length, when)
   const asked = values.asked === true
+  const rootSession = values["root-session"]
 
   const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
   const { report, notice, passed } =
@@ -30,6 +31,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
             linesWritten: linesByFile(io.cwd, projectDir, files, lines),
             agent,
             asked,
+            ...(rootSession === undefined ? {} : { rootSession }),
           },
           deps,
         )
@@ -140,6 +142,7 @@ function parseCheckArgs(args: string[]) {
         changed: { type: "boolean" },
         "agent-context": { type: "boolean" },
         asked: { type: "boolean" },
+        "root-session": { type: "string" },
       },
       strict: true,
       allowPositionals: false,

@@ -317,6 +317,16 @@ describe("protected files in Codex", () => {
     expect(block.reason).toContain("If the task needs the change, ask the user whether they want it.")
   })
 
+  it("does not warn about a new file a glob matches: it cannot block the task end", async () => {
+    project()
+    await codex("session-start")
+    writeFile("src/test/java/shop/arch/NewRules.java", "class NewRules {}\n")
+
+    const edit = await codex("post-edit", patch("src/test/java/shop/arch/NewRules.java"))
+
+    expect(edit.stdout).not.toContain("protected files")
+  })
+
   it("has no pre-edit hook: Codex hooks cannot ask the user", async () => {
     project()
 
@@ -390,6 +400,18 @@ describe("interlint check, as the OpenCode plugin runs it for protected files", 
     expect(stdout.startsWith("✗ protected files · changed without the user's approval")).toBe(true)
     expect(stdout).toContain(`  ${CHECKSTYLE} (changed)`)
     expect(stdout).not.toContain(ARCH_TEST)
+  })
+
+  it("renews the main session's fingerprint for an approved edit a subagent made in its own session", async () => {
+    project()
+    await cli(["check", "--when", "session-start", "--agent-context"], context)
+    writeFile(CHECKSTYLE, "approved in a subagent\n")
+    const subagent = JSON.stringify({ agent: "opencode", session: "oc-sub", subagent: true })
+    await cli(["check", "--when", "edit", "--asked", "--root-session", "oc-1", "--file", CHECKSTYLE, "--agent-context"], subagent)
+
+    const { exitCode } = await cli(["check", "--when", "task-end", "--changed", "--asked", "--agent-context"], context)
+
+    expect(exitCode).toBe(0)
   })
 
   it("checks no protected file by hand, without an agent's session", async () => {

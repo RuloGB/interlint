@@ -23,12 +23,13 @@ export interface CheckProjectDeps extends CheckDeps {
  * passed, and `files`, when given, only the projects that hold one of them.
  * Files are `/`-separated and relative to the project. `agent` tells who runs the checks, for their metrics.
  * `asked` tells that the agent's edit tool asks the user before it changes a protected file, so an edit of one was
- * approved.
+ * approved. `rootSession` is the main agent's session, when `agent` names a subagent's own session, as in OpenCode:
+ * the protected files are kept per main session.
  */
 export type CheckRequest = (
   | { when: "edit"; files: string[]; linesWritten?: ReadonlyMap<string, number> }
   | { when: "task-end"; files?: string[]; changedOnly?: boolean }
-) & { agent?: AgentContext; asked?: boolean }
+) & { agent?: AgentContext; asked?: boolean; rootSession?: string }
 
 /**
  * The checks' results, formatted. `report` holds the failures, for the agent: empty when every check passed.
@@ -54,7 +55,7 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
   let outcomes
   if (request.when === "edit") {
     outcomes = await runEditChecks(projectDir, config, request.files, deps, request.linesWritten, request.agent)
-    const unasked = protection ? await protectedEdit(projectDir, config, request.files, request.agent, request.asked === true, protection, deps.lock) : []
+    const unasked = protection ? await protectedEdit(projectDir, config, request.files, request.rootSession ?? request.agent?.session, request.asked === true, protection, deps.lock) : []
     if (unasked.length > 0) first = [formatProtectedEdit(unasked)]
   } else {
     outcomes = await runTaskEndChecks(projectDir, config, deps, {

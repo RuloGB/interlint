@@ -479,6 +479,18 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         return session
       }
 
+      /**
+       * The main session of a session, as far as the lookups made so far tell: no new lookup, which may wait. A parent
+       * not looked up yet is taken as the main session, as a subagent's parent usually is.
+       */
+      const knownRootOf = (sessionID: string) => {
+        let session = sessionID
+        for (let parent = lookups.get(session)?.parent; parent !== undefined; parent = lookups.get(session)?.parent) {
+          session = parent
+        }
+        return session
+      }
+
       const record = (sessionID: string, files: Iterable<string>) => {
         const own = written.get(sessionID) ?? new Set<string>()
         for (const file of files) own.add(file)
@@ -700,7 +712,10 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         await Promise.all(started.values())
         const lines = linesWritten(event.tool, event.input)
         const fileArgs = files.flatMap((file) => ["--file", file, "--lines", `${lines.get(file) ?? 0}`])
-        const args = ["check", "--when", "edit", ...asked(), ...fileArgs]
+        // A subagent runs in its own session, and the protected files are kept for its main one.
+        const root = knownRootOf(event.sessionID)
+        const rootArgs = root === event.sessionID ? [] : ["--root-session", root]
+        const args = ["check", "--when", "edit", ...asked(), ...rootArgs, ...fileArgs]
         const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(event.sessionID))
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)

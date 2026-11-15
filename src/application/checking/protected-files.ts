@@ -3,6 +3,7 @@ import type { AgentContext, CheckMetric } from "../../domain/metric.js"
 import {
   hasProtectedChanges,
   isProtected,
+  normalized,
   PROTECTED_CHECK,
   type ProtectedChanges,
   protectedChanges,
@@ -33,7 +34,8 @@ export function startProtection(projectDir: string, config: Config, session: str
 }
 
 /**
- * After the agent's edit tool changed `files`: the protected ones it changed without asking the user, for a warning.
+ * After the agent's edit tool changed `files`, in the main agent's `session`: the protected ones it changed without
+ * asking the user, for a warning. A file new since the session started is not one: it cannot block the task end.
  * When the tool `asked` the user first, as Interlint's pre-edit hook makes it, the edit ran because the user approved
  * it, so those files' fingerprint is renewed instead.
  */
@@ -41,15 +43,19 @@ export async function protectedEdit(
   projectDir: string,
   config: Config,
   files: readonly string[],
-  agent: AgentContext | undefined,
+  session: string | undefined,
   asked: boolean,
   deps: ProtectionDeps,
   lock: ProjectLock,
 ): Promise<string[]> {
   const edited = protectedAmong(config, files)
   if (edited.length === 0) return []
-  if (!asked) return edited
-  const session = agent?.session
+  if (!asked) {
+    const before = session === undefined ? undefined : deps.baselines.read(projectDir, session)
+    if (before === undefined) return edited
+    const kept = Object.keys(before).map((path) => path.toLowerCase())
+    return edited.filter((file) => kept.includes(normalized(file).toLowerCase()))
+  }
   if (session === undefined) return []
   // Under the lock, so the hooks of two edits in a row never drop each other's renewal.
   await lock(projectDir, async () => {
