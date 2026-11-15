@@ -318,7 +318,7 @@ A failure shows the check, the exit code and the last lines of the command's out
 ```
 
 - The agent gets the last 60 lines of the output, enough for two or three failing tests of Vitest or Jest, or Maven's test results. When the output is longer, its first line says how many earlier lines were cut, such as `… 40 earlier lines cut`.
-- A command that does not exist or cannot start, such as a typo in `run`, does not count as a failure of the check. It says `the command did not run: it was not found or could not start`, with the last lines of its output, and still blocks.
+- A command that does not exist or cannot start, such as a typo in `run`, does not count as a failure of the check. It says `the command did not run: it was not found or could not start`, with the last lines of its output, and still blocks. A command that starts but cannot find a tool it runs, such as `npm test` without its test runner installed, fails the check as usual, with that error in its output.
 - `init` never writes this check: Interlint does not know your commands. Add it to `interlint.yaml` yourself.
 - It works with `when`, `every`, `lines` and `dir`, like any check. At edit, any changed file inside its project counts as one of its sources, since Interlint cannot tell what the command checks.
 - A slow command, such as a whole test suite, belongs in `when: task-end`. In `when: edit` it runs after each edit; give it [`every` or `lines`](#every-n-files-or-lines) if it must run there.

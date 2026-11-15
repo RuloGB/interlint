@@ -19,6 +19,8 @@ export interface CommandResult {
   output: string
   /** Present, as true, only when the command was not found or could not start, so it did not run at all. */
   notFound?: true
+  /** How many lines were left out before `output` to keep it bounded. Present only when some were. */
+  droppedLines?: number
 }
 
 /** Runs a check's `run` command in the project directory. */

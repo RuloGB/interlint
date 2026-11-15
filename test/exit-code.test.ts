@@ -6,6 +6,7 @@ import { exitCodeReader } from "../src/adapters/driven/process/exit-code-reader.
 import type { MetricsSink } from "../src/application/checking/ports.js"
 import { type CheckDeps, runTaskEndChecks } from "../src/application/checking/run-checks.js"
 import type { Check } from "../src/domain/check.js"
+import { outputTail } from "../src/domain/command-output.js"
 import type { CheckMetric } from "../src/domain/metric.js"
 import { main } from "../src/main.js"
 
@@ -136,6 +137,15 @@ describe("a check with report: exit-code", () => {
     expect(stdout).not.toContain("the command failed")
   })
 
+  it("fails the check when its command started and exited 127, as with a tool it runs that is missing", async () => {
+    writeConfig({ name: "tests", run: command("tests", { exitCode: 127, output: "sh: 1: vitest: not found" }) })
+
+    const { stdout } = await run("check", "--when", "task-end")
+
+    expect(stdout).toContain("✗ tests · the command failed (exit code 127)\n")
+    expect(stdout).toContain("    sh: 1: vitest: not found\n")
+  })
+
   it("leaves the message of a check with a report alone when its command does not exist", async () => {
     writeFileSync(
       join(projectDir, "interlint.yaml"),
@@ -242,5 +252,14 @@ describe("metrics of a check with report: exit-code", () => {
   it("keeps a pass, and a command that did not start as failed", async () => {
     expect(await metricsOf(0)).toEqual([expect.objectContaining({ check: "tests", result: "passed" })])
     expect(await metricsOf(1, true)).toEqual([expect.objectContaining({ check: "tests", result: "failed" })])
+  })
+})
+
+describe("outputTail", () => {
+  it("counts the lines dropped before the output as cut", () => {
+
+    expect(outputTail("a\nb\nc", 2, 500)).toBe("… 501 earlier lines cut\nb\nc")
+    expect(outputTail("a\nb", 2, 3)).toBe("… 3 earlier lines cut\na\nb")
+    expect(outputTail("a\nb", 2)).toBe("a\nb")
   })
 })

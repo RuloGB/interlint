@@ -1,5 +1,5 @@
 import type { ReportReader } from "../../../application/checking/ports.js"
-import { outputTail } from "../../../domain/command-output.js"
+import { COMMAND_OUTPUT_LINES, outputTail } from "../../../domain/command-output.js"
 
 /**
  * Reads the result of a team command, such as its tests or `tsc --noEmit`, from its exit code alone: it reads no
@@ -8,10 +8,10 @@ import { outputTail } from "../../../domain/command-output.js"
  */
 export const exitCodeReader: ReportReader = {
   snapshot: () => new Map(),
-  read: (_projectDir, _before, output, { exitCode, notFound }) => {
+  read: (_projectDir, _before, output, { exitCode, notFound, droppedLines }) => {
     if (exitCode === 0) return { found: true, failures: [] }
     if (notFound) return { found: false, failures: [] }
-    const text = output.trim() === "" ? "(it printed nothing)" : outputTail(output)
+    const text = output.trim() === "" ? "(it printed nothing)" : outputTail(output, COMMAND_OUTPUT_LINES, droppedLines)
     return { found: true, failures: [{ title: `the command failed (exit code ${exitCode})`, violations: [{ text }] }] }
   },
 }
