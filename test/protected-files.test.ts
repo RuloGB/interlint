@@ -419,5 +419,7 @@ describe("interlint check, as the OpenCode plugin runs it for protected files", 
     writeFile(ARCH_TEST, "changed\n")
 
     expect((await cli(["check"])).exitCode).toBe(0)
+    expect(await cli(["check", "--when", "edit", "--file", "interlint.yaml"])).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(await cli(["check", "--when", "edit", "--file", ARCH_TEST])).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
 })

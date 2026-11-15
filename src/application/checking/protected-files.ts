@@ -35,7 +35,8 @@ export function startProtection(projectDir: string, config: Config, session: str
 
 /**
  * After the agent's edit tool changed `files`, in the main agent's `session`: the protected ones it changed without
- * asking the user, for a warning. A file new since the session started is not one: it cannot block the task end.
+ * asking the user, for a warning. Only those the session's fingerprint holds can block the task end, so a file new
+ * since the session started, or any file of a session without a fingerprint, is not one.
  * When the tool `asked` the user first, as Interlint's pre-edit hook makes it, the edit ran because the user approved
  * it, so those files' fingerprint is renewed instead.
  */
@@ -51,8 +52,9 @@ export async function protectedEdit(
   const edited = protectedAmong(config, files)
   if (edited.length === 0) return []
   if (!asked) {
+    // Without a fingerprint, as by hand or with hooks from an older init, nothing is protected: the task end never blocks.
     const before = session === undefined ? undefined : deps.baselines.read(projectDir, session)
-    if (before === undefined) return edited
+    if (before === undefined) return []
     const kept = Object.keys(before).map((path) => path.toLowerCase())
     return edited.filter((file) => kept.includes(normalized(file).toLowerCase()))
   }
