@@ -1,9 +1,17 @@
 import { resolve } from "node:path"
-import { afterEdit, type FeedbackDeps, mainStop, subagentStop } from "../../../application/feedback/agent-events.js"
+import {
+  afterEdit,
+  beforeEdit,
+  type FeedbackDeps,
+  mainStop,
+  sessionStart,
+  subagentStop,
+} from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
+import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import { editNote, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type CopilotHookInput, parseCopilotHookInput } from "./hook-input.js"
 
 /**
@@ -38,11 +46,25 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
   try {
     const [, event, ...extra] = args
     if (!isHookEvent(event) || extra.length > 0) {
-      throw new UsageError(`copilot hooks are ${HOOK_EVENT_NAMES} (got "${args.slice(1).join(" ")}")`)
+      throw new UsageError(`copilot hooks are ${hookEventNames()} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseCopilotHookInput(io.stdin ? await io.stdin() : "")
     const projectDir = resolve(io.cwd, process.env.COPILOT_PROJECT_DIR || input.cwd || ".")
     const context = () => contextOf(input, deps)
+
+    if (event === "session-start") {
+      sessionStart(projectDir, context(), deps)
+      return COPILOT_HOOK_EXIT.pass
+    }
+
+    if (event === "pre-edit") {
+      const cwd = input.cwd ?? io.cwd
+      const files = input.edits.flatMap(({ path }) => projectFiles(cwd, projectDir, [path]))
+      const guarded = beforeEdit(projectDir, [...new Set(files)], deps)
+      // Copilot asks the user before the tool runs. In autopilot and in the cloud agent nobody can answer: it denies.
+      if (guarded.length > 0) answer(io, { permissionDecision: "ask", permissionDecisionReason: protectedEditQuestion(guarded) })
+      return COPILOT_HOOK_EXIT.pass
+    }
 
     if (event === "post-edit") {
       if (input.edits.length === 0) return COPILOT_HOOK_EXIT.pass
@@ -53,7 +75,7 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
       }
       const changed = [...linesWritten.keys()]
       if (changed.length === 0) return COPILOT_HOOK_EXIT.pass
-      const { report } = await afterEdit(projectDir, input, changed, deps, linesWritten, context())
+      const { report } = await afterEdit(projectDir, input, changed, deps, linesWritten, context(), true)
       // Copilot appends it to the tool's result, so the agent reads the failures next to the edit that made them.
       if (report !== "") answer(io, { additionalContext: editNote(report) })
       return COPILOT_HOOK_EXIT.pass
@@ -66,7 +88,7 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
     const { decision, notice, passed } =
       event === "subagent-stop"
         ? await subagentStop(projectDir, { sessionId: input.sessionId, agentId: input.agentId, stopHookActive: true }, deps, context())
-        : await mainStop(projectDir, { sessionId: input.sessionId, stopHookActive: input.stopHookActive }, deps, context())
+        : await mainStop(projectDir, { sessionId: input.sessionId, stopHookActive: input.stopHookActive }, deps, context(), true)
     if (decision.action === "block") {
       // Copilot sends the reason to the agent as the next prompt.
       answer(io, { decision: "block", reason: withNotice(decision.text, notice) })

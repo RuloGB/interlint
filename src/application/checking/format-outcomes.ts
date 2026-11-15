@@ -7,8 +7,11 @@ const MAX_VIOLATIONS_PER_RULE = 10
 const MAX_TYPES_SHOWN = 3
 const FOOTER = "Fix these problems before continuing."
 
-/** Formats the outcomes for the agent. Returns an empty string when every check passed. */
-export function formatOutcomes(outcomes: CheckOutcome[]): string {
+/**
+ * Formats the outcomes for the agent, after the failures already formatted in `first`, such as the protected files'.
+ * Returns an empty string when every check passed and `first` is empty.
+ */
+export function formatOutcomes(outcomes: CheckOutcome[], first: readonly string[] = []): string {
   const blocks = outcomes.flatMap((outcome) => {
     if (outcome.status === "violations" && outcome.check.report === "exit-code") {
       return outcome.failures.map((failure) =>
@@ -67,7 +70,8 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
     return []
   })
 
-  return blocks.length === 0 ? "" : `${[...blocks, FOOTER].join("\n\n")}\n`
+  const all = [...first, ...blocks]
+  return all.length === 0 ? "" : `${[...all, FOOTER].join("\n\n")}\n`
 }
 
 /**

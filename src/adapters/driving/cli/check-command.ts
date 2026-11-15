@@ -1,6 +1,8 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { type CheckProjectDeps, checkProject } from "../../../application/checking/check-project.js"
+import { type CheckProjectDeps, checkProject, startSession } from "../../../application/checking/check-project.js"
+import { protectedAmong } from "../../../application/checking/protected-files.js"
+import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 import { projectFiles } from "./project-paths.js"
@@ -9,12 +11,15 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
   const { values } = parseCheckArgs(args)
   const when = values.when ?? "task-end"
   const files = values.file ?? []
+  const projectDir = resolve(io.cwd, values.cwd ?? ".")
+  if (when === "session-start" || when === "pre-edit") return await forPlugin(when, values, io, projectDir, deps)
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
   const lines = parseLines(values.lines, files.length, when)
+  const asked = values.asked === true
+  const rootSession = values["root-session"]
 
-  const projectDir = resolve(io.cwd, values.cwd ?? ".")
   const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
   const { report, notice, passed } =
     when === "edit"
@@ -25,6 +30,8 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
             files: projectFiles(io.cwd, projectDir, files),
             linesWritten: linesByFile(io.cwd, projectDir, files, lines),
             agent,
+            asked,
+            ...(rootSession === undefined ? {} : { rootSession }),
           },
           deps,
         )
@@ -36,6 +43,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
             files: files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined,
             changedOnly: values.changed === true,
             agent,
+            asked,
           },
           deps,
         )
@@ -44,6 +52,31 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps): Pro
   const output = [report, notice, passed].filter((text) => text !== "").join("\n")
   if (output !== "") io.stdout(output)
   return report === "" ? EXIT.passed : EXIT.violations
+}
+
+/**
+ * The steps of the protected files that the OpenCode plugin runs, internal and left out of the usage like
+ * `--agent-context`. `session-start` keeps the protected files as they are for the session in the agent's context and
+ * writes nothing. `pre-edit` writes the question for the user when `--file` names protected files, so the plugin asks
+ * it before its edit tool changes them, and nothing otherwise. Both exit 0.
+ */
+async function forPlugin(
+  when: "session-start" | "pre-edit",
+  values: ReturnType<typeof parseCheckArgs>["values"],
+  io: Io,
+  projectDir: string,
+  deps: CheckProjectDeps,
+): Promise<number> {
+  if (when === "session-start") {
+    const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
+    startSession(projectDir, agent, deps)
+    return EXIT.passed
+  }
+  const files = projectFiles(io.cwd, projectDir, values.file ?? [])
+  if (deps.protection === undefined || files.length === 0) return EXIT.passed
+  const guarded = protectedAmong(deps.loadConfig(projectDir), files)
+  if (guarded.length > 0) io.stdout(`${protectedEditQuestion(guarded)}\n`)
+  return EXIT.passed
 }
 
 /**
@@ -108,6 +141,8 @@ function parseCheckArgs(args: string[]) {
         lines: { type: "string", multiple: true },
         changed: { type: "boolean" },
         "agent-context": { type: "boolean" },
+        asked: { type: "boolean" },
+        "root-session": { type: "string" },
       },
       strict: true,
       allowPositionals: false,

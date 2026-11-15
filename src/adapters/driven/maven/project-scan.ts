@@ -93,7 +93,32 @@ export function scanProject(projectDir: string): ProjectFacts {
     hasModules: modules.length > 1,
     hasMavenWrapper: ["mvnw", "mvnw.cmd"].some((name) => existsSync(join(projectDir, name))),
     ...scanQualityPlugins(modules),
+    ruleFiles: ruleFilesOf(projectDir, modules),
   }
+}
+
+/** The settings of Checkstyle, PMD and SpotBugs that name a rule file: Checkstyle's config and suppressions, PMD's rulesets, SpotBugs' filters. */
+const RULE_FILE_SETTING = /<(configLocation|suppressionsLocation|ruleset|excludeFilterFile|includeFilterFile)>\s*([^<]*?)\s*<\/\1>/g
+/** How a POM names its own directory at the start of a path. */
+const BASEDIR = /^\$\{(?:project\.)?basedir\}[\\/]/
+
+/**
+ * The rule files the builds of the project's modules name and the project holds, sorted. A setting that names a URL,
+ * a resource on the classpath or a property Interlint cannot resolve is left out.
+ */
+function ruleFilesOf(projectDir: string, modules: string[]): string[] {
+  const files = modules.flatMap((module) => {
+    const pom = join(module, "pom.xml")
+    if (!existsSync(pom)) return []
+    const xml = readFileSync(pom, "utf8").replace(XML_COMMENTS, " ").replace(UNUSED_SECTIONS, " ")
+    return [...xml.matchAll(RULE_FILE_SETTING)].flatMap((match) => {
+      const value = (match[2] ?? "").replace(BASEDIR, "")
+      if (value === "" || value.includes("${") || value.includes(":") || value.startsWith("/")) return []
+      const path = relative(projectDir, join(module, value)).split(sep).join("/")
+      return path.startsWith("..") || !existsSync(join(projectDir, path)) ? [] : [path]
+    })
+  })
+  return [...new Set(files)].sort()
 }
 
 /**

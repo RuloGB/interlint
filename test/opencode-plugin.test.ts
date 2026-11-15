@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import plugin, {
   type CheckRun,
   changedFiles,
+  type PermissionEvaluation,
   linesWritten,
   createInterlintPlugin,
   DEFAULT_EDIT_TIMEOUT_MS,
@@ -1159,5 +1160,100 @@ process.stdin.on("end", () => console.log(JSON.stringify({ args: process.argv.sl
     const run = await runInterlint(scratch, "node argv.mjs", 10_000, ["check", "--when", "task-end"], context)
 
     expect(JSON.parse(run.output)).toEqual({ args: ["check", "--when", "task-end", "--agent-context"], input: JSON.stringify(context) })
+  })
+})
+
+describe("OpenCode plugin with protected files", () => {
+  const QUESTION =
+    "Interlint: the agent wants to change interlint.yaml, protected in interlint.yaml because it defines the project's rules. Allow it only if the task needs this change.\n"
+
+  /** Fake checks that record every run with its arguments, and answer pre-edit with the question for `interlint.yaml`. */
+  function recordingChecks() {
+    const runs: { args: string[]; context?: unknown }[] = []
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = [], context) => {
+      runs.push({ args, context })
+      if (args[2] === "pre-edit") return { exitCode: 0, output: args.includes("interlint.yaml") ? QUESTION : "" }
+      return PASSED
+    }
+    return { runs, run }
+  }
+
+  /** A context whose OpenCode gives plugins the permission hook. */
+  function withPermissions(ctx: ReturnType<typeof fakeContext>["ctx"]) {
+    let evaluate: ((event: PermissionEvaluation) => Promise<void> | void) | undefined
+    const permission = {
+      hook: async (_name: "evaluate", callback: (event: PermissionEvaluation) => Promise<void> | void) => {
+        evaluate = callback
+        return { dispose: async () => {} }
+      },
+    }
+    return { ctx: Object.assign(ctx, { permission }), evaluate: async (event: PermissionEvaluation) => evaluate?.(event) }
+  }
+
+  const permissionEvent = (action: string, resource: string): PermissionEvaluation => ({
+    sessionID: "s1",
+    action,
+    resources: [resource],
+    effect: "allow",
+  })
+
+  it("keeps the protected files once when a main session's first turn starts, not for a subagent", async () => {
+    const { runs, run } = recordingChecks()
+    const { ctx, done, emit } = fakeContext([], { writer: { parentID: "main" } })
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+
+    emit("session.execution.started", "main")
+    emit("session.execution.started", "writer")
+    emit("session.execution.started", "main")
+    await settled()
+    await settled()
+
+    expect(runs).toEqual([{ args: ["check", "--when", "session-start"], context: { agent: "opencode", session: "main" } }])
+  })
+
+  it("makes OpenCode ask the user before an edit changes a protected file", async () => {
+    const { run } = recordingChecks()
+    const fake = fakeContext()
+    const { ctx, evaluate } = withPermissions(fake.ctx)
+    await createInterlintPlugin(run).setup(ctx)
+    await fake.done
+
+    const guarded = permissionEvent("edit", "interlint.yaml")
+    const free = permissionEvent("edit", "src/Order.ts")
+    const read = permissionEvent("read", "interlint.yaml")
+    await evaluate(guarded)
+    await evaluate(free)
+    await evaluate(read)
+
+    expect(guarded).toMatchObject({ effect: "ask", message: QUESTION.trim() })
+    expect(free).toEqual(permissionEvent("edit", "src/Order.ts"))
+    expect(read).toEqual(permissionEvent("read", "interlint.yaml"))
+  })
+
+  it("tells the CLI the main session when a subagent edits, as the protected files are kept for it", async () => {
+    const { runs, run } = recordingChecks()
+    const fake = fakeContext([], { writer: { parentID: "main" } })
+    await createInterlintPlugin(run).setup(withPermissions(fake.ctx).ctx)
+    await fake.done
+
+    await fake.afterTool("edit", { path: "/repo/src/Order.ts" }, "completed", { sessionID: "writer" })
+    await fake.afterTool("edit", { path: "/repo/src/Order.ts" }, "completed", { sessionID: "main" })
+
+    const edits = runs.filter(({ args }) => args[2] === "edit").map(({ args }) => args)
+    expect(edits[0]).toEqual(expect.arrayContaining(["--root-session", "main"]))
+    expect(edits[1]).not.toContain("--root-session")
+  })
+
+  it("never tells the CLI that an edit was approved: OpenCode Desktop grants an ask without showing it", async () => {
+    const { runs, run } = recordingChecks()
+    const fake = fakeContext()
+    await createInterlintPlugin(run).setup(withPermissions(fake.ctx).ctx)
+    await fake.done
+    await fake.afterTool("edit", { path: "/repo/src/Order.ts" })
+    fake.emit("session.execution.succeeded", "s1")
+    await settled()
+
+    expect(runs.filter(({ args }) => args.includes("--asked"))).toEqual([])
   })
 })

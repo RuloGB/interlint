@@ -1,9 +1,17 @@
 import { resolve } from "node:path"
-import { afterEdit, type FeedbackDeps, mainStop, subagentStop } from "../../../application/feedback/agent-events.js"
+import {
+  afterEdit,
+  beforeEdit,
+  type FeedbackDeps,
+  mainStop,
+  sessionStart,
+  subagentStop,
+} from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
+import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, failedLine, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import { editNote, failedLine, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type HookInput, parseHookInput } from "./hook-input.js"
 
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
@@ -43,7 +51,7 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
     const [agent, event, ...extra] = args
     if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code, copilot or codex (got "${agent ?? ""}")`)
     if (!isHookEvent(event) || extra.length > 0) {
-      throw new UsageError(`claude-code hooks are ${HOOK_EVENT_NAMES} (got "${args.slice(1).join(" ")}")`)
+      throw new UsageError(`claude-code hooks are ${hookEventNames()} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseHookInput(io.stdin ? await io.stdin() : "")
     // Copilot also runs the hooks in .claude/settings.json, where it can neither block nor give the edited file: its
@@ -57,12 +65,31 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
     const projectDir = resolve(io.cwd, process.env.CLAUDE_PROJECT_DIR || input.cwd || ".")
     const context = () => contextOf(input, deps)
 
+    if (event === "session-start") {
+      sessionStart(projectDir, context(), deps)
+      return HOOK_EXIT.pass
+    }
+
+    if (event === "pre-edit") {
+      if (input.filePath === undefined) return HOOK_EXIT.pass
+      const guarded = beforeEdit(projectDir, projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath]), deps)
+      if (guarded.length === 0) return HOOK_EXIT.pass
+      // Claude Code shows the reason to the user in its permission prompt; the edit runs only if they allow it.
+      const decision = {
+        hookEventName: "PreToolUse",
+        permissionDecision: "ask",
+        permissionDecisionReason: protectedEditQuestion(guarded),
+      }
+      io.stdout(`${JSON.stringify({ hookSpecificOutput: decision })}\n`)
+      return HOOK_EXIT.pass
+    }
+
     if (event === "post-edit") {
       if (input.filePath === undefined) return HOOK_EXIT.pass
       const changed = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
       // The notice waits for the stop: shown after every edit, it would repeat what the user already read.
       const linesWritten = new Map(changed.map((file) => [file, input.linesWritten]))
-      const { report, passed, failed } = await afterEdit(projectDir, input, changed, deps, linesWritten, context())
+      const { report, passed, failed } = await afterEdit(projectDir, input, changed, deps, linesWritten, context(), true)
       if (report !== "") {
         // The tool already ran: `block` adds the reason next to its result for Claude, and the user reads the message.
         io.stdout(`${JSON.stringify({ decision: "block", reason: editNote(report), systemMessage: failedLine(failed) })}\n`)
@@ -77,7 +104,7 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
     const { decision, notice, passed } =
       event === "subagent-stop"
         ? await subagentStop(projectDir, input, deps, context())
-        : await mainStop(projectDir, input, deps, context())
+        : await mainStop(projectDir, input, deps, context(), true)
     // Claude Code reads stdout only when the hook does not block, so a blocked stop gives Claude the notice to pass on.
     if (decision.action === "block") {
       io.stderr(withNotice(decision.text, notice))

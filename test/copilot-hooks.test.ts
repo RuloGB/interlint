@@ -445,6 +445,6 @@ describe("interlint hook copilot", () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("copilot hooks are post-edit, stop and subagent-stop")
+    expect(stderr).toContain("copilot hooks are session-start, pre-edit, post-edit, stop and subagent-stop")
   })
 })

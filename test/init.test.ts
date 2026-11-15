@@ -76,6 +76,7 @@ describe("interlint init", () => {
           every: 5, lines: 100,
         },
       ],
+      protected: ["src/test/java/**/ArchitectureRulesTest.java", "src/test/java/**/LayersTest.java"],
     })
   })
 
@@ -394,6 +395,8 @@ describe("interlint init --agent claude-code", () => {
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
+  const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const readSettings = () => readFileSync(join(projectDir, SETTINGS), "utf8")
 
   beforeEach(() => {
@@ -401,12 +404,14 @@ describe("interlint init --agent claude-code", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("adds the post-edit, stop and subagent-stop hooks to .claude/settings.json", async () => {
+  it("adds the session-start, pre-edit, post-edit, stop and subagent-stop hooks to .claude/settings.json", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "claude-code")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
     expect(JSON.parse(readSettings())).toEqual({
       hooks: {
+        SessionStart: [{ hooks: [SESSION_START] }],
+        PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
         PostToolUse: [{ matcher: "Edit|Write", hooks: [POST_EDIT] }],
         Stop: [{ hooks: [STOP] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
@@ -435,7 +440,8 @@ describe("interlint init --agent claude-code", () => {
       hooks: {
         PostToolUse: [lint, { matcher: "Edit|Write", hooks: [POST_EDIT] }],
         Stop: [notify, { hooks: [STOP] }],
-        SessionStart: [notify],
+        SessionStart: [notify, { hooks: [SESSION_START] }],
+        PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       },
     })
@@ -454,7 +460,7 @@ describe("interlint init --agent claude-code", () => {
   })
 
   it("leaves a file that already has the hooks exactly as it is, formatting included", async () => {
-    const settings = `{\n    "hooks": {\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }]\n    }\n}\n`
+    const settings = `{\n    "hooks": {\n        "SessionStart": [{ "hooks": [${JSON.stringify(SESSION_START)}] }],\n        "PreToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(PRE_EDIT)}] }],\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }]\n    }\n}\n`
     writeFile(SETTINGS, settings)
 
     expect((await run("init", "--agent", "claude-code")).stdout).toContain("Unchanged:\n  .claude/settings.json\n")
@@ -485,6 +491,8 @@ describe("interlint init --agent claude-code", () => {
       ],
       Stop: [{ hooks: [STOP] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
+      SessionStart: [{ hooks: [SESSION_START] }],
+      PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
     })
   })
 
@@ -536,6 +544,15 @@ describe("interlint init --agent copilot", () => {
   const HOOKS = {
     version: 1,
     hooks: {
+      sessionStart: [{ type: "command", command: "interlint hook copilot session-start", timeoutSec: 30 }],
+      preToolUse: [
+        {
+          type: "command",
+          matcher: "edit|create|str_replace_editor|apply_patch",
+          command: "interlint hook copilot pre-edit",
+          timeoutSec: 30,
+        },
+      ],
       postToolUse: [
         {
           type: "command",
@@ -554,7 +571,7 @@ describe("interlint init --agent copilot", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
+  it("writes the session-start, pre-edit, post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "copilot")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -600,6 +617,7 @@ describe("interlint init --agent codex", () => {
   const TRUST_NOTE =
     "Codex runs these hooks only once you trust them: open Codex in this project and approve Interlint's hooks in /hooks."
   const INTERLINT_HOOKS = {
+    SessionStart: [{ hooks: [{ type: "command", command: "interlint hook codex session-start", timeout: 30 }] }],
     PostToolUse: [
       {
         matcher: "apply_patch|Edit|Write",
@@ -615,7 +633,7 @@ describe("interlint init --agent codex", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
+  it("writes the session-start, post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "codex")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -641,7 +659,7 @@ describe("interlint init --agent codex", () => {
     expect(JSON.parse(readHooks())).toEqual({
       description: "Team hooks",
       hooks: {
-        SessionStart: team.hooks.SessionStart,
+        SessionStart: [...team.hooks.SessionStart, ...INTERLINT_HOOKS.SessionStart],
         Stop: [...team.hooks.Stop, ...INTERLINT_HOOKS.Stop],
         PostToolUse: INTERLINT_HOOKS.PostToolUse,
         SubagentStop: INTERLINT_HOOKS.SubagentStop,
@@ -691,6 +709,8 @@ describe("interlint init --agent claude-code with an older hook next to the curr
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
+  const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
 
   beforeEach(() => {
     writeFile("mvnw", "")
@@ -721,6 +741,8 @@ describe("interlint init --agent claude-code with an older hook next to the curr
       ],
       Stop: [{ hooks: [STOP] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
+      SessionStart: [{ hooks: [SESSION_START] }],
+      PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
     })
   })
 })
@@ -1698,5 +1720,72 @@ describe("interlint init with dependency-cruiser", () => {
     writeFile(".dependency-cruiser.cjs", "")
 
     expect((await run("init")).stderr).toContain("was found either: package.json is not valid JSON. Nothing was written.")
+  })
+})
+
+describe("interlint init proposes the protected files", () => {
+  const plugin = (artifactId: string, configuration: string) =>
+    `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n        <configuration>\n${configuration}        </configuration>\n      </plugin>\n`
+
+  it("lists the @ArchTest classes and the rule files the build names, never pom.xml", async () => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile("config/checkstyle.xml", "<module/>\n")
+    writeFile("config/suppressions.xml", "<suppressions/>\n")
+    writeFile("pmd/ruleset.xml", "<ruleset/>\n")
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <plugins>\n${plugin(
+        "maven-checkstyle-plugin",
+        "          <configLocation>config/checkstyle.xml</configLocation>\n          <suppressionsLocation>\${project.basedir}/config/suppressions.xml</suppressionsLocation>\n",
+      )}${plugin(
+        "maven-pmd-plugin",
+        "          <rulesets>\n            <ruleset>pmd/ruleset.xml</ruleset>\n            <ruleset>/category/java/bestpractices.xml</ruleset>\n          </rulesets>\n",
+      )}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual([
+      "src/test/java/**/ArchitectureRulesTest.java",
+      "config/checkstyle.xml",
+      "config/suppressions.xml",
+      "pmd/ruleset.xml",
+    ])
+  })
+
+  it("leaves out a rule file the project does not hold, such as one on the classpath", async () => {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <plugins>\n${plugin("maven-checkstyle-plugin", "          <configLocation>google_checks.xml</configLocation>\n")}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toBeUndefined()
+  })
+
+  it("lists the ESLint and dependency-cruiser configuration of an npm project in its directory, never package.json", async () => {
+    writeFile(
+      "web/package.json",
+      JSON.stringify({ devDependencies: { eslint: "^10.0.0", "dependency-cruiser": "^17.0.0" } }),
+    )
+    writeFile("web/eslint.config.js", "export default []\n")
+    writeFile("web/.dependency-cruiser.cjs", "module.exports = {}\n")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual(["web/eslint.config.js", "web/.dependency-cruiser.cjs"])
+  })
+
+  it("lists the @ArchTest classes of each module that holds them", async () => {
+    writeFile("pom.xml", "<project>\n  <modules>\n    <module>core</module>\n    <module>api</module>\n  </modules>\n</project>\n")
+    writeFile("core/pom.xml", "<project/>\n")
+    writeFile("api/pom.xml", "<project/>\n")
+    archTest("core/src/test/java/com/acme/CoreRulesTest.java")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual(["core/src/test/java/**/CoreRulesTest.java"])
   })
 })

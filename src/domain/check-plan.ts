@@ -2,7 +2,7 @@ import type { Check } from "./check.js"
 import { DEPCRUISE_COMMAND } from "./depcruise-command.js"
 import { ESLINT_COMMAND } from "./eslint-command.js"
 import { mavenCommand } from "./maven-command.js"
-import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses } from "./project-facts.js"
+import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses, TEST_SOURCES } from "./project-facts.js"
 
 /**
  * PMD resolves types from the compiled classes and SpotBugs analyses them, so their checks compile first. Compiling
@@ -151,6 +151,25 @@ export function npmChecks(facts: NpmFacts, dir?: string): Check[] {
   const depcruise: Check[] =
     facts.depcruiseConfig === undefined ? [] : [{ name: "depcruise", run: DEPCRUISE_COMMAND, report: "depcruise", when: "edit" }]
   return inDir([...eslint, ...depcruise], dir)
+}
+
+/**
+ * The files that define the rules of a Maven project, as `protected:` lists them: its `@ArchTest` classes, by name in
+ * the test sources of each module that holds them, and the rule files its build names.
+ */
+export function projectProtected(facts: ProjectFacts, dir?: string): string[] {
+  const modules = facts.archTestModules.length > 0 ? facts.archTestModules : [""]
+  const archTests = modules.flatMap((module) =>
+    runnableClasses(facts).map((name) => [module, TEST_SOURCES, "**", `${name}.java`].filter((part) => part !== "").join("/")),
+  )
+  return [...archTests, ...(facts.ruleFiles ?? [])].map((path) => (dir === undefined ? path : `${dir}/${path}`))
+}
+
+/** The configuration files of the tools an npm project runs, as `protected:` lists them. */
+export function npmProtected(facts: NpmFacts, dir?: string): string[] {
+  return [facts.eslintConfig, facts.depcruiseConfig]
+    .filter((file): file is string => file !== undefined)
+    .map((file) => (dir === undefined ? file : `${dir}/${file}`))
 }
 
 function inDir(checks: Check[], dir: string | undefined): Check[] {

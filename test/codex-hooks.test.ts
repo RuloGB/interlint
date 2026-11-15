@@ -439,7 +439,7 @@ describe("interlint hook codex", () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("codex hooks are post-edit, stop and subagent-stop")
+    expect(stderr).toContain("codex hooks are session-start, post-edit, stop and subagent-stop")
   })
 
   it("writes hooks that run interlint hook codex for each event", () => {

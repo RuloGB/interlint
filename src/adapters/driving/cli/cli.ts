@@ -18,8 +18,8 @@ const USAGE = `Usage:
       Run every check in interlint.yaml
   interlint check --when edit --file <path>... [--cwd <dir>]
       Run the edit checks for the changed files
-  interlint hook claude-code|copilot|codex post-edit|stop|subagent-stop
-      Agent hook: reads the hook's JSON on stdin
+  interlint hook claude-code|copilot|codex session-start|pre-edit|post-edit|stop|subagent-stop
+      Agent hook: reads the hook's JSON on stdin (codex has no pre-edit)
   interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|codex|copilot|opencode] [--cwd <dir>]
       Sum up the metrics of the checks
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
