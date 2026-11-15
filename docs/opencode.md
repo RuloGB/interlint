@@ -19,10 +19,10 @@ One OpenCode server runs the sessions of every project you open in it. The plugi
 The plugin protects the files that define your rules (see [Protected files](usage.md#protected-files)):
 
 - When a main session's first turn starts, it runs `interlint check --when session-start`, which keeps a hash of each protected file.
-- Before the `edit`, `write` or `patch` tool changes a protected file, it makes OpenCode ask you whether to allow it, with a message that names the file. It asks the CLI with `interlint check --when pre-edit --file <path>...`, which prints the message, or nothing for a file that is not protected. An edit you allow becomes the new reference for that file. This needs an OpenCode that gives plugins its permission hook; without one the plugin does not ask, and no edit counts as approved.
-- At turn end, a protected file changed without your approval, by any means, blocks the main agent as a failed check does.
+- Before the `edit`, `write` or `patch` tool changes a protected file, it makes OpenCode ask you whether to allow it, with a message that names the file. It asks the CLI with `interlint check --when pre-edit --file <path>...`, which prints the message, or nothing for a file that is not protected. This needs an OpenCode that gives plugins its permission hook. The OpenCode TUI shows the question; OpenCode Desktop 2.2.5 grants it without showing it.
+- An edit of a protected file never counts as approved, even one you allowed: the plugin cannot tell your answer from Desktop's. Right after it, the agent is told it changed a protected file, and at turn end the change blocks the main agent as a failed check does, until the file is back as it was or after 3 blocks in a row. A change you want stays for good from the next session.
 
-The plugin passes `--asked` to the edit and task-end checks when OpenCode asks you, so the CLI knows an edit of a protected file was approved. These options are for the plugin and are not in the usage.
+The CLI options the plugin uses for this, `--when session-start`, `--when pre-edit` and `--root-session`, are not in the usage.
 
 ## After each edit
 

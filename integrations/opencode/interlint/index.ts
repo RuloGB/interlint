@@ -409,10 +409,6 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const deferTimers = new Map<string, ReturnType<typeof setTimeout>>()
       /** The sessions whose protected files Interlint keeps since their first turn, each until the CLI did it. */
       const started = new Map<string, Promise<void>>()
-      /** Whether OpenCode asks the user before an edit changes a protected file: it needs the permission hook. */
-      let asks = false
-      /** `--asked` when OpenCode asks, so the CLI takes an edit of a protected file as approved by the user. */
-      const asked = () => (asks ? ["--asked"] : [])
 
       const lookup = async (sessionID: string) => {
         const known = lookups.get(sessionID)
@@ -572,7 +568,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for (let attempt = 1; ; attempt++) {
           const files = [...(written.get(sessionID) ?? [])]
           if (files.length === 0) return { kind: "clean" }
-          const args = [...TASK_END_ARGS, ...asked(), ...files.flatMap((file) => ["--file", file])]
+          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
           const run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
           if (run.exitCode === 0) {
             written.delete(sessionID)
@@ -646,7 +642,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         running.add(sessionID)
         try {
           const context = await contextOf(sessionID)
-          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, [...TASK_END_ARGS, ...asked()], context))
+          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
           if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,
@@ -715,7 +711,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         // A subagent runs in its own session, and the protected files are kept for its main one.
         const root = knownRootOf(event.sessionID)
         const rootArgs = root === event.sessionID ? [] : ["--root-session", root]
-        const args = ["check", "--when", "edit", ...asked(), ...rootArgs, ...fileArgs]
+        const args = ["check", "--when", "edit", ...rootArgs, ...fileArgs]
         const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(event.sessionID))
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
@@ -746,7 +742,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         await done
       }
 
-      // OpenCode evaluates the permission before the tool runs: a protected file makes it ask the user.
+      // OpenCode evaluates the permission before the tool runs: a protected file makes it ask the user. An edit that
+      // ran still never counts as approved: OpenCode Desktop 2.2.5 grants an `ask` without showing it, and the plugin
+      // gets no event that tells a reply from that, so the CLI is never told the edit was asked about.
       let permissionHook: { dispose(): Promise<void> } | undefined
       try {
         permissionHook = await ctx.permission?.hook?.("evaluate", async (event) => {
@@ -760,7 +758,6 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           event.effect = "ask"
           event.message = question
         })
-        asks = permissionHook !== undefined
       } catch (error) {
         console.error("[interlint] could not ask before protected files change", error)
       }

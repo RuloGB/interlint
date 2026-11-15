@@ -1245,20 +1245,15 @@ describe("OpenCode plugin with protected files", () => {
     expect(edits[1]).not.toContain("--root-session")
   })
 
-  it("tells the CLI that edits were asked about only when OpenCode gives the permission hook", async () => {
-    const asking = recordingChecks()
+  it("never tells the CLI that an edit was approved: OpenCode Desktop grants an ask without showing it", async () => {
+    const { runs, run } = recordingChecks()
     const fake = fakeContext()
-    await createInterlintPlugin(asking.run).setup(withPermissions(fake.ctx).ctx)
+    await createInterlintPlugin(run).setup(withPermissions(fake.ctx).ctx)
     await fake.done
     await fake.afterTool("edit", { path: "/repo/src/Order.ts" })
+    fake.emit("session.execution.succeeded", "s1")
+    await settled()
 
-    const silent = recordingChecks()
-    const older = fakeContext()
-    await createInterlintPlugin(silent.run).setup(older.ctx)
-    await older.done
-    await older.afterTool("edit", { path: "/repo/src/Order.ts" })
-
-    expect(asking.runs.at(-1)?.args).toContain("--asked")
-    expect(silent.runs.at(-1)?.args).not.toContain("--asked")
+    expect(runs.filter(({ args }) => args.includes("--asked"))).toEqual([])
   })
 })
