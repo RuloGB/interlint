@@ -22,3 +22,12 @@ export function writeProjectFile(projectDir: string, file: PlannedFile) {
 }
 
 export const diskProjectFiles: ProjectFiles = { stateOf, write: writeProjectFile }
+
+/** A project file's text, by its `/`-separated path relative to the project, or `undefined` when it cannot be read. */
+export function readProjectFile(projectDir: string, path: string): string | undefined {
+  try {
+    return readFileSync(join(projectDir, path), "utf8")
+  } catch {
+    return undefined
+  }
+}

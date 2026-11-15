@@ -138,6 +138,59 @@ The notice does not change the exit code. Each agent shows it to you at task end
 
 On Windows, a leading `./` in `run` becomes `.\`, so the same `interlint.yaml` works on every operating system.
 
+## `interlint doctor`
+
+Tell whether Interlint works in this project and on this machine, and what to fix if not:
+
+```bash
+interlint doctor [--cwd <dir>]
+```
+
+It only reads: it writes no file and runs no check. It looks at:
+
+| Section | What it checks |
+|---|---|
+| Environment | Node is 22 or later, the version of Interlint, and, when an agent is set up, that `interlint` is on the `PATH`, since the agent's hooks run it |
+| Configuration | `interlint.yaml` exists, is valid, and the `dir` of each check exists |
+| Tools | The program each check runs is found from its directory, as the check would run it: `./mvnw` or `mvn` (or `mvnd`, which runs every Maven check when it is on the `PATH`), and for `npx`, the package in a `node_modules/.bin`. Without `mvnd`, the Maven edit checks run at task end: a warning |
+| Agents | The files of each agent set up in the project are what `interlint init` writes with this version: `.claude/settings.json`, `.opencode/plugins/interlint/`, `.github/hooks/interlint.json` and `.codex/hooks.json`. A file with no Interlint hooks is a warning; Interlint's files missing or from another version are an error, and so is having no agent set up |
+| State | Interlint can write its state and metrics directory |
+| Protected files | Each pattern of `protected:` matches a file. One that matches none is a warning |
+
+Each line is correct (`✓`), a warning (`!`) or an error (`✗`), and a warning or an error comes with what fixes it:
+
+```text
+Interlint doctor in /home/me/shop
+
+Environment
+  ✓ Node 22.11.0
+  ✓ Interlint 1.18.0
+  ✓ interlint is on the PATH, where the agent's hooks run it
+Configuration
+  ✓ interlint.yaml is valid, with 3 checks
+Tools
+  ✓ check architecture: ./mvnw is found
+  ✓ check checkstyle: ./mvnw is found
+  ✓ check pmd: ./mvnw is found
+  ! mvnd is not on the PATH, so the Maven edit checks run at task end
+    → install mvnd to run them after edits
+Agents
+  ✗ Claude Code: .claude/settings.json is missing or from another version of Interlint
+    → run `interlint init --agent claude-code`
+State
+  ✓ /home/me/.local/state/interlint can be written, for the state and the metrics
+Protected files
+  ✓ 2 patterns of protected match 3 files
+
+1 error, 1 warning.
+```
+
+| Exit code | Meaning |
+|---|---|
+| 0 | No error. There may be warnings |
+| 1 | At least one error |
+| 2 | Usage error, such as a `--cwd` that does not exist |
+
 ## Checkstyle and PMD
 
 A check with `report: maven` reads the reports Checkstyle and PMD write in `target/`: `checkstyle-result.xml` and `pmd.xml`, in the project and in its modules, at any depth. Each violated rule shows its message and source file and line, like an ArchUnit rule:

@@ -143,3 +143,9 @@ function isExecutable(path: string): boolean {
     return false
   }
 }
+
+/** Whether the shell `runCommand` uses finds the program `command` starts with, from `cwd`. */
+export function findsCommand(command: string, cwd: string, platform: NodeJS.Platform = process.platform): boolean {
+  const platformCommand = toPlatformCommand(command, platform)
+  return platform === "win32" ? cmdFindsCommand(platformCommand, cwd) : shFindsCommand(platformCommand, cwd)
+}

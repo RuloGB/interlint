@@ -97,6 +97,14 @@ Requires Node 22 or later and one of these:
 
 3. Commit the generated `interlint.yaml` (and `.claude/settings.json`, `.github/hooks/interlint.json` or `.opencode/`), then start your agent as usual.
 
+4. To check that it all works, on any machine of the team:
+
+   ```bash
+   interlint doctor
+   ```
+
+   It names what is missing, such as a removed hook, a tool that is not installed or an old `interlint.yaml`, and the command that fixes it.
+
 > [!IMPORTANT]
 > **On a Maven project, install [`mvnd`](https://github.com/apache/maven-mvnd) too.** It keeps Maven running between checks, which makes checks after each edit fast enough. Without it on your `PATH`, every Maven check waits for task end, after the agent may have built more code on top of a broken rule. Interlint finds `mvnd` on its own: there is nothing to configure.
 
@@ -140,7 +148,7 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 
 ## Built for teams
 
-- **The same checks for everyone.** `interlint.yaml` and the agent setup live in the repository, so every developer and every agent runs the same rules.
+- **The same checks for everyone.** `interlint.yaml` and the agent setup live in the repository, so every developer and every agent runs the same rules. `interlint doctor` tells each developer whether it works on their machine.
 - **Deterministic.** Your own build decides, not a prompt the agent may ignore.
 - **Your data never leaves your machine.** Metrics are plain files in your user's state directory, never in the project. They keep only the check, its result and time, the rule, type and file of each violation, and the agent, model and session. Never your code, the violation messages or anything personal. To keep none, set `metrics: false`.
 - **No lock-in.** Interlint adds no rules. Remove it, and your checks still run in your build and CI as before.
