@@ -62,6 +62,10 @@ const NOTICE_MARK = "ℹ Interlint · for the user:"
 const PASSED_MARK = "✓ Interlint · "
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
+/** Keeps the protected files of the session in the agent's context as they are. */
+const SESSION_START_ARGS = ["check", "--when", "session-start"]
+/** The permission OpenCode evaluates before the `edit`, `write` and `patch` tools change files. */
+const EDIT_PERMISSION = "edit"
 /** The built-in tools that change files. */
 const FILE_TOOLS = new Set(["edit", "write", "patch"])
 const PATCH_FILE_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm
@@ -343,6 +347,23 @@ interface PluginContext {
       callback: (event: ToolExecuted) => Promise<void> | void,
     ): Promise<{ dispose(): Promise<void> }>
   }
+  /** Absent on an OpenCode without permission hooks: the user is then not asked before a protected file changes. */
+  permission?: {
+    hook?(
+      name: "evaluate",
+      callback: (event: PermissionEvaluation) => Promise<void> | void,
+    ): Promise<{ dispose(): Promise<void> }>
+  }
+}
+
+/** A permission OpenCode is about to grant or ask for. Setting `effect` to `ask` makes it ask the user, with `message`. */
+export interface PermissionEvaluation {
+  readonly sessionID: string
+  readonly action: string
+  /** For `edit`, the paths the `edit`, `write` or `patch` tool is about to change. */
+  readonly resources: readonly string[]
+  effect: "allow" | "ask" | "deny"
+  message?: string
 }
 
 export type RunChecks = (
@@ -386,6 +407,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const deferred = new Set<string>()
       /** Ends the wait of a deferred main session after subagentTimeoutMs, per main session. */
       const deferTimers = new Map<string, ReturnType<typeof setTimeout>>()
+      /** The sessions whose protected files Interlint keeps since their first turn, each until the CLI did it. */
+      const started = new Map<string, Promise<void>>()
+      /** Whether OpenCode asks the user before an edit changes a protected file: it needs the permission hook. */
+      let asks = false
+      /** `--asked` when OpenCode asks, so the CLI takes an edit of a protected file as approved by the user. */
+      const asked = () => (asks ? ["--asked"] : [])
 
       const lookup = async (sessionID: string) => {
         const known = lookups.get(sessionID)
@@ -533,7 +560,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for (let attempt = 1; ; attempt++) {
           const files = [...(written.get(sessionID) ?? [])]
           if (files.length === 0) return { kind: "clean" }
-          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
+          const args = [...TASK_END_ARGS, ...asked(), ...files.flatMap((file) => ["--file", file])]
           const run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
           if (run.exitCode === 0) {
             written.delete(sessionID)
@@ -607,7 +634,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         running.add(sessionID)
         try {
           const context = await contextOf(sessionID)
-          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
+          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, [...TASK_END_ARGS, ...asked()], context))
           if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,
@@ -669,8 +696,11 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         })
         if (files.length === 0 || !(await isOurs(event.sessionID))) return
         record(event.sessionID, files)
+        // So an approved edit renews a fingerprint that exists. Every session's, as looking up its main one may wait.
+        await Promise.all(started.values())
         const lines = linesWritten(event.tool, event.input)
-        const args = ["check", "--when", "edit", ...files.flatMap((file) => ["--file", file, "--lines", `${lines.get(file) ?? 0}`])]
+        const fileArgs = files.flatMap((file) => ["--file", file, "--lines", `${lines.get(file) ?? 0}`])
+        const args = ["check", "--when", "edit", ...asked(), ...fileArgs]
         const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(event.sessionID))
         const note = editNote(run)
         if (note) event.result = withNote(event.result, note)
@@ -685,6 +715,41 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         }
       })
 
+      /**
+       * Keeps the protected files as they are when a main session's first turn starts, so its turn end can tell which
+       * it changed. Once per session in this server: the CLI keeps the first fingerprint of a session anyway.
+       */
+      const onTurnStart = async (sessionID: string) => {
+        if (started.has(sessionID)) return
+        const { parent, ours } = await lookup(sessionID)
+        if (parent !== undefined || !ours || started.has(sessionID)) return
+        const done = (async () => {
+          const run = await runChecks(directory, command, editTimeoutMs, SESSION_START_ARGS, await contextOf(sessionID))
+          if (run.exitCode !== 0) console.error("[interlint] could not keep the protected files:", run.output)
+        })()
+        started.set(sessionID, done)
+        await done
+      }
+
+      // OpenCode evaluates the permission before the tool runs: a protected file makes it ask the user.
+      let permissionHook: { dispose(): Promise<void> } | undefined
+      try {
+        permissionHook = await ctx.permission?.hook?.("evaluate", async (event) => {
+          if (event.action !== EDIT_PERMISSION || event.effect === "deny") return
+          const files = event.resources.filter((file) => SHELL_SAFE_PATH.test(file) && !file.endsWith("\\"))
+          if (files.length === 0 || !(await isOurs(event.sessionID))) return
+          const args = ["check", "--when", "pre-edit", ...files.flatMap((file) => ["--file", file])]
+          const run = await runChecks(directory, command, editTimeoutMs, args)
+          const question = run.exitCode === 0 ? run.output.trim() : ""
+          if (question === "") return
+          event.effect = "ask"
+          event.message = question
+        })
+        asks = permissionHook !== undefined
+      } catch (error) {
+        console.error("[interlint] could not ask before protected files change", error)
+      }
+
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           const sessionID = event.data?.sessionID
@@ -697,6 +762,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           const waiting = resumed.get(sessionID)
           if (event.type === TURN_START) {
             if (waiting) waiting.started = true
+            else onTurnStart(sessionID).catch((error) => console.error("[interlint]", error))
             continue
           }
           const end = TURN_ENDS.get(event.type)
@@ -721,6 +787,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for (const timer of deferTimers.values()) clearTimeout(timer)
         void afterTool.dispose()
         void modelHook?.dispose()
+        void permissionHook?.dispose()
       }
     },
   }
