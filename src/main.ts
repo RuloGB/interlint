@@ -11,7 +11,7 @@ import { depcruiseReader } from "./adapters/driven/depcruise/report-reader.js"
 import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
 import { eslintReader } from "./adapters/driven/eslint/report-reader.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
-import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
+import { diskProjectFiles, readProjectFile } from "./adapters/driven/fs/project-files.js"
 import { diskProtectedFiles } from "./adapters/driven/fs/protected-files.js"
 import { diskReportFile } from "./adapters/driven/fs/report-file.js"
 import { removeBrokenClasses } from "./adapters/driven/maven/broken-classes.js"
@@ -20,8 +20,9 @@ import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
 import { archUnitReader } from "./adapters/driven/maven/reports/archunit-reader.js"
 import { jacocoReader } from "./adapters/driven/maven/reports/jacoco-reader.js"
 import { mavenQualityReader } from "./adapters/driven/maven/reports/quality-reader.js"
+import { findsNpxTool } from "./adapters/driven/npm/package-bin.js"
 import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
-import { runCommand } from "./adapters/driven/process/command-runner.js"
+import { findsCommand, runCommand } from "./adapters/driven/process/command-runner.js"
 import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
@@ -32,7 +33,8 @@ import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { fileProtectedBaselines } from "./adapters/driven/state/protected-baselines.js"
-import { loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
+import { stateLocation } from "./adapters/driven/state/user-state.js"
+import { CONFIG_FILE, loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
 import { type CliDeps, runCli } from "./adapters/driving/cli/cli.js"
 import type { Io } from "./adapters/driving/cli/cli-io.js"
 import type { CheckProjectDeps } from "./application/checking/check-project.js"
@@ -60,6 +62,13 @@ const checking: CheckProjectDeps = {
   protection: { files: diskProtectedFiles, baselines: fileProtectedBaselines() },
 }
 
+const agents = {
+  opencode: openCodePluginFiles,
+  "claude-code": claudeCodeSettingsFiles,
+  copilot: copilotHookFiles,
+  codex: codexHookFiles,
+}
+
 const DEPS: CliDeps = {
   checking,
   feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter, transcriptModel },
@@ -69,8 +78,23 @@ const DEPS: CliDeps = {
     scanNpm: scanNpmProjects,
     files: diskProjectFiles,
     config: yamlConfigFile,
-    agents: { opencode: openCodePluginFiles, "claude-code": claudeCodeSettingsFiles, copilot: copilotHookFiles, codex: codexHookFiles },
+    agents,
     hasExecutable: lookupExecutable,
+  },
+  doctor: {
+    nodeVersion: () => process.versions.node,
+    version: interlintVersion,
+    configFile: CONFIG_FILE,
+    loadConfig,
+    readFile: readProjectFile,
+    hasDirectory: isDirectory,
+    hasExecutable: lookupExecutable,
+    findsCommand: (command, cwd) => findsCommand(command, cwd),
+    findsNpxTool,
+    agents,
+    files: diskProjectFiles,
+    state: stateLocation,
+    protectedFiles: diskProtectedFiles,
   },
   metrics: { source: fileMetricsSource(), reportFile: diskReportFile, pdf: headlessPdf(), now: () => new Date() },
   version: interlintVersion,

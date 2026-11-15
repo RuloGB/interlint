@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs"
+import { accessSync, constants, mkdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, posix, resolve, win32 } from "node:path"
 
@@ -42,4 +42,25 @@ export function projectKey(projectDir: string): string {
   }
   if (process.platform === "win32") dir = dir.toLowerCase()
   return createHash("sha256").update(dir).digest("hex").slice(0, 16)
+}
+
+/**
+ * Where Interlint keeps its state and metrics, and whether the user may write there. Nothing is created: when the
+ * directory is not there yet, its deepest existing parent must be writable, since Interlint creates the rest.
+ */
+export function stateLocation(): { dir: string; writable: boolean } {
+  const dir = join(userStateDir(), "interlint")
+  let existing = dir
+  for (;;) {
+    try {
+      if (!statSync(existing).isDirectory()) return { dir, writable: false }
+      accessSync(existing, constants.W_OK)
+      return { dir, writable: true }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { dir, writable: false }
+    }
+    const parent = dirname(existing)
+    if (parent === existing) return { dir, writable: false }
+    existing = parent
+  }
 }
