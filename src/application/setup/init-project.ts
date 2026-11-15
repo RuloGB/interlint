@@ -1,5 +1,5 @@
 import type { Check } from "../../domain/check.js"
-import { npmChecks, projectChecks } from "../../domain/check-plan.js"
+import { npmChecks, npmProtected, projectChecks, projectProtected } from "../../domain/check-plan.js"
 import { MAVEN_DAEMON } from "../../domain/maven-command.js"
 import type { ExecutableLookup } from "../checking/ports.js"
 import type {
@@ -62,7 +62,9 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
     return { status: "nothing-to-check", projects, npm: { searched: npm.searched, unreadable: npm.unreadable } }
   }
 
-  const config: PlannedFile = { path: deps.config.path, content: deps.config.render({ checks }), replace: force }
+  const protectedFiles = [...new Set(projects.filter((project) => checksOf(project).length > 0).flatMap(protectedOf))]
+  const content = deps.config.render({ checks, ...(protectedFiles.length === 0 ? {} : { protected: protectedFiles }) })
+  const config: PlannedFile = { path: deps.config.path, content, replace: force }
   const agentFiles = agent === undefined ? [] : deps.agents[agent](projectDir)
   const keepConfig = agent !== undefined && deps.files.stateOf(projectDir, config) === "conflict"
   const kept = keepConfig ? [config.path] : []
@@ -84,6 +86,11 @@ export function initProject(projectDir: string, { agent, force }: InitRequest, d
     kept,
     daemonOnPath: deps.hasExecutable(MAVEN_DAEMON),
   }
+}
+
+/** The files that define the project's rules, for the agent to change only with the user's approval (F23). */
+function protectedOf(project: ScannedProject): string[] {
+  return "npm" in project ? npmProtected(project.npm, project.dir) : projectProtected(project.facts, project.dir)
 }
 
 function checksOf(project: ScannedProject): Check[] {

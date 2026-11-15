@@ -76,6 +76,7 @@ describe("interlint init", () => {
           every: 5, lines: 100,
         },
       ],
+      protected: ["src/test/java/**/ArchitectureRulesTest.java", "src/test/java/**/LayersTest.java"],
     })
   })
 
@@ -1719,5 +1720,72 @@ describe("interlint init with dependency-cruiser", () => {
     writeFile(".dependency-cruiser.cjs", "")
 
     expect((await run("init")).stderr).toContain("was found either: package.json is not valid JSON. Nothing was written.")
+  })
+})
+
+describe("interlint init proposes the protected files", () => {
+  const plugin = (artifactId: string, configuration: string) =>
+    `      <plugin>\n        <artifactId>${artifactId}</artifactId>\n        <configuration>\n${configuration}        </configuration>\n      </plugin>\n`
+
+  it("lists the @ArchTest classes and the rule files the build names, never pom.xml", async () => {
+    writeFile("mvnw", "")
+    archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+    writeFile("config/checkstyle.xml", "<module/>\n")
+    writeFile("config/suppressions.xml", "<suppressions/>\n")
+    writeFile("pmd/ruleset.xml", "<ruleset/>\n")
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <plugins>\n${plugin(
+        "maven-checkstyle-plugin",
+        "          <configLocation>config/checkstyle.xml</configLocation>\n          <suppressionsLocation>\${project.basedir}/config/suppressions.xml</suppressionsLocation>\n",
+      )}${plugin(
+        "maven-pmd-plugin",
+        "          <rulesets>\n            <ruleset>pmd/ruleset.xml</ruleset>\n            <ruleset>/category/java/bestpractices.xml</ruleset>\n          </rulesets>\n",
+      )}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual([
+      "src/test/java/**/ArchitectureRulesTest.java",
+      "config/checkstyle.xml",
+      "config/suppressions.xml",
+      "pmd/ruleset.xml",
+    ])
+  })
+
+  it("leaves out a rule file the project does not hold, such as one on the classpath", async () => {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <plugins>\n${plugin("maven-checkstyle-plugin", "          <configLocation>google_checks.xml</configLocation>\n")}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toBeUndefined()
+  })
+
+  it("lists the ESLint and dependency-cruiser configuration of an npm project in its directory, never package.json", async () => {
+    writeFile(
+      "web/package.json",
+      JSON.stringify({ devDependencies: { eslint: "^10.0.0", "dependency-cruiser": "^17.0.0" } }),
+    )
+    writeFile("web/eslint.config.js", "export default []\n")
+    writeFile("web/.dependency-cruiser.cjs", "module.exports = {}\n")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual(["web/eslint.config.js", "web/.dependency-cruiser.cjs"])
+  })
+
+  it("lists the @ArchTest classes of each module that holds them", async () => {
+    writeFile("pom.xml", "<project>\n  <modules>\n    <module>core</module>\n    <module>api</module>\n  </modules>\n</project>\n")
+    writeFile("core/pom.xml", "<project/>\n")
+    writeFile("api/pom.xml", "<project/>\n")
+    archTest("core/src/test/java/com/acme/CoreRulesTest.java")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).protected).toEqual(["core/src/test/java/**/CoreRulesTest.java"])
   })
 })

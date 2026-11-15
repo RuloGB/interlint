@@ -40,6 +40,11 @@ export interface ProjectFacts {
   checkExecutions: Record<QualityPlugin, string[]>
   /** The ids of the build's executions that run `jacoco-maven-plugin`'s `check` goal: none when it has no coverage rules. */
   coverageExecutions: string[]
+  /**
+   * The rule files the build's Checkstyle, PMD and SpotBugs settings name and the project holds, such as
+   * `config/checkstyle.xml`, as `/`-separated paths relative to the project.
+   */
+  ruleFiles?: string[]
 }
 
 /** A class name made of letters, digits and `_` only. Anything else (`$`, `(`, `;`…) could mean something to the shell. */
