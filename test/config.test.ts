@@ -180,7 +180,7 @@ checks:
 `)
 
     expect(configErrorOf(() => loadConfig(projectDir)).message).toBe(
-      'interlint.yaml: checks[1].report must be one of: archunit, maven, jacoco, eslint, depcruise (got "gradle")',
+      'interlint.yaml: checks[1].report must be one of: archunit, maven, jacoco, eslint, depcruise, exit-code (got "gradle")',
     )
   })
 

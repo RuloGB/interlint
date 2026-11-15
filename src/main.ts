@@ -21,6 +21,7 @@ import { jacocoReader } from "./adapters/driven/maven/reports/jacoco-reader.js"
 import { mavenQualityReader } from "./adapters/driven/maven/reports/quality-reader.js"
 import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { runCommand } from "./adapters/driven/process/command-runner.js"
+import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
 import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
@@ -38,7 +39,14 @@ import type { CheckProjectDeps } from "./application/checking/check-project.js"
 const checking: CheckProjectDeps = {
   loadConfig,
   run: runCommand,
-  readers: { archunit: archUnitReader, maven: mavenQualityReader, jacoco: jacocoReader, eslint: eslintReader, depcruise: depcruiseReader },
+  readers: {
+    archunit: archUnitReader,
+    maven: mavenQualityReader,
+    jacoco: jacocoReader,
+    eslint: eslintReader,
+    depcruise: depcruiseReader,
+    "exit-code": exitCodeReader,
+  },
   hasExecutable: lookupExecutable,
   lock: withProjectLock,
   changes: fileChangeTracker(),

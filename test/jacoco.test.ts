@@ -189,7 +189,7 @@ function depsAnswering(result: { exitCode: number; output: string }) {
   const launched: string[] = []
   const deps: CheckDeps = {
     run: async (command) => (launched.push(command), result),
-    readers: { archunit: jacocoReader, maven: jacocoReader, jacoco: jacocoReader, eslint: jacocoReader, depcruise: jacocoReader },
+    readers: { archunit: jacocoReader, maven: jacocoReader, jacoco: jacocoReader, eslint: jacocoReader, depcruise: jacocoReader, "exit-code": jacocoReader },
     hasExecutable: () => false,
     lock: (_projectDir, work) => work(),
     changes: {

@@ -289,6 +289,42 @@ Fix these problems before continuing.
 - dependency-cruiser analyzes the whole project after each edit, which takes longer as the project grows: about 2 seconds on a small one. When it slows the agent down, give the check [`every` or `lines`](#every-n-files-or-lines), as `init` does for PMD.
 - `init` looks for npm projects with dependency-cruiser as it does for ESLint. A project with both gets both checks, such as `eslint` and `depcruise`. Below a project with dependency-cruiser alone, such as the root of a monorepo, `init` still looks for packages with ESLint and writes their `eslint` checks. They get no `depcruise` check of their own, since the one above already analyzes them.
 
+## Any command
+
+A check with `report: exit-code` runs any command of your team, such as your tests or `tsc --noEmit`, and reads only its exit code. It reads no report. 0 passes; any other code fails, and the agent cannot end the task:
+
+```yaml
+checks:
+  - name: tests
+    run: npm test
+    report: exit-code
+    when: task-end
+  - name: types
+    run: npx --no -- tsc --noEmit
+    report: exit-code
+    when: task-end
+```
+
+A failure shows the check, the exit code and the last lines of the command's output:
+
+```text
+✗ tests · the command failed (exit code 1)
+
+  Command: npm test
+  Last lines of its output:
+     FAIL  test/order.test.ts > totals
+    AssertionError: expected 4 to be 3
+    …
+```
+
+- The agent gets the last 60 lines of the output, enough for two or three failing tests of Vitest or Jest, or Maven's test results. When the output is longer, its first line says how many earlier lines were cut, such as `… 40 earlier lines cut`.
+- A command that does not exist or cannot start, such as a typo in `run`, does not count as a failure of the check. It says `the command did not run: it was not found or could not start`, with the last lines of its output, and still blocks.
+- `init` never writes this check: Interlint does not know your commands. Add it to `interlint.yaml` yourself.
+- It works with `when`, `every`, `lines` and `dir`, like any check. At edit, any changed file inside its project counts as one of its sources, since Interlint cannot tell what the command checks.
+- A slow command, such as a whole test suite, belongs in `when: task-end`. In `when: edit` it runs after each edit; give it [`every` or `lines`](#every-n-files-or-lines) if it must run there.
+- At task end with `--changed`, it runs only when its project changed since its checks last passed, like every check. It has no report, so it never passes on [the reports of the agent's own build](#reports-from-the-agents-own-build).
+- Its metrics keep one violation per failing run, with the check's name as its rule.
+
 ## After each edit
 
 A check with `when: edit` also runs after the agent changes one of its sources:
@@ -297,7 +333,7 @@ A check with `when: edit` also runs after the agent changes one of its sources:
 interlint check --when edit --file src/main/java/shop/Order.java
 ```
 
-- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`, and `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `*.js`, `*.jsx`, `*.mjs` and `*.cjs` for `report: eslint` and `report: depcruise`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
+- Only `edit` checks run, and only when a changed file inside the project is one of their sources: `*.java` for `report: archunit` and `report: maven`, and `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `*.js`, `*.jsx`, `*.mjs` and `*.cjs` for `report: eslint` and `report: depcruise`, and any file for `report: exit-code`. A `report: jacoco` check never runs at edit. Any other file, such as `README.md`, runs nothing and exits with 0.
 - The output and exit codes are the same as at task end. `--file` can be repeated.
 - `--lines <n>` gives the lines the edit wrote in a file, for checks with [`lines`](#every-n-files-or-lines). Give one `--lines` after each `--file`, as in `--file A.java --lines 12 --file B.java --lines 0`, or none at all: files without it wrote no lines. The agent integrations always give it.
 - With [`mvnd`](https://github.com/apache/maven-mvnd) on the `PATH`, a check whose `run` starts with `mvn`, `mvnw` or `./mvnw` runs with `mvnd` instead, with the same arguments, at edit time and at task end. Keep `./mvnw` in `interlint.yaml` so it works for teammates without `mvnd`.
