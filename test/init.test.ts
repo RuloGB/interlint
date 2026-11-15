@@ -394,6 +394,8 @@ describe("interlint init --agent claude-code", () => {
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
+  const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const readSettings = () => readFileSync(join(projectDir, SETTINGS), "utf8")
 
   beforeEach(() => {
@@ -401,12 +403,14 @@ describe("interlint init --agent claude-code", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("adds the post-edit, stop and subagent-stop hooks to .claude/settings.json", async () => {
+  it("adds the session-start, pre-edit, post-edit, stop and subagent-stop hooks to .claude/settings.json", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "claude-code")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
     expect(JSON.parse(readSettings())).toEqual({
       hooks: {
+        SessionStart: [{ hooks: [SESSION_START] }],
+        PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
         PostToolUse: [{ matcher: "Edit|Write", hooks: [POST_EDIT] }],
         Stop: [{ hooks: [STOP] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
@@ -435,7 +439,8 @@ describe("interlint init --agent claude-code", () => {
       hooks: {
         PostToolUse: [lint, { matcher: "Edit|Write", hooks: [POST_EDIT] }],
         Stop: [notify, { hooks: [STOP] }],
-        SessionStart: [notify],
+        SessionStart: [notify, { hooks: [SESSION_START] }],
+        PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       },
     })
@@ -454,7 +459,7 @@ describe("interlint init --agent claude-code", () => {
   })
 
   it("leaves a file that already has the hooks exactly as it is, formatting included", async () => {
-    const settings = `{\n    "hooks": {\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }]\n    }\n}\n`
+    const settings = `{\n    "hooks": {\n        "SessionStart": [{ "hooks": [${JSON.stringify(SESSION_START)}] }],\n        "PreToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(PRE_EDIT)}] }],\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }]\n    }\n}\n`
     writeFile(SETTINGS, settings)
 
     expect((await run("init", "--agent", "claude-code")).stdout).toContain("Unchanged:\n  .claude/settings.json\n")
@@ -485,6 +490,8 @@ describe("interlint init --agent claude-code", () => {
       ],
       Stop: [{ hooks: [STOP] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
+      SessionStart: [{ hooks: [SESSION_START] }],
+      PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
     })
   })
 
@@ -536,6 +543,15 @@ describe("interlint init --agent copilot", () => {
   const HOOKS = {
     version: 1,
     hooks: {
+      sessionStart: [{ type: "command", command: "interlint hook copilot session-start", timeoutSec: 30 }],
+      preToolUse: [
+        {
+          type: "command",
+          matcher: "edit|create|str_replace_editor|apply_patch",
+          command: "interlint hook copilot pre-edit",
+          timeoutSec: 30,
+        },
+      ],
       postToolUse: [
         {
           type: "command",
@@ -554,7 +570,7 @@ describe("interlint init --agent copilot", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
+  it("writes the session-start, pre-edit, post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "copilot")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -600,6 +616,7 @@ describe("interlint init --agent codex", () => {
   const TRUST_NOTE =
     "Codex runs these hooks only once you trust them: open Codex in this project and approve Interlint's hooks in /hooks."
   const INTERLINT_HOOKS = {
+    SessionStart: [{ hooks: [{ type: "command", command: "interlint hook codex session-start", timeout: 30 }] }],
     PostToolUse: [
       {
         matcher: "apply_patch|Edit|Write",
@@ -615,7 +632,7 @@ describe("interlint init --agent codex", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
+  it("writes the session-start, post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "codex")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -641,7 +658,7 @@ describe("interlint init --agent codex", () => {
     expect(JSON.parse(readHooks())).toEqual({
       description: "Team hooks",
       hooks: {
-        SessionStart: team.hooks.SessionStart,
+        SessionStart: [...team.hooks.SessionStart, ...INTERLINT_HOOKS.SessionStart],
         Stop: [...team.hooks.Stop, ...INTERLINT_HOOKS.Stop],
         PostToolUse: INTERLINT_HOOKS.PostToolUse,
         SubagentStop: INTERLINT_HOOKS.SubagentStop,
@@ -691,6 +708,8 @@ describe("interlint init --agent claude-code with an older hook next to the curr
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
+  const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
 
   beforeEach(() => {
     writeFile("mvnw", "")
@@ -721,6 +740,8 @@ describe("interlint init --agent claude-code with an older hook next to the curr
       ],
       Stop: [{ hooks: [STOP] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
+      SessionStart: [{ hooks: [SESSION_START] }],
+      PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
     })
   })
 })

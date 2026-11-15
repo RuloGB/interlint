@@ -112,4 +112,9 @@ export interface Config {
   checks: Check[]
   /** `false` keeps no metrics of the runs. Absent, they are kept (decision 42). */
   metrics?: boolean
+  /**
+   * Paths or globs, relative to `interlint.yaml` and `/`-separated, of the files that define the project's rules.
+   * `interlint.yaml` is protected even when absent from it (F23).
+   */
+  protected?: string[]
 }

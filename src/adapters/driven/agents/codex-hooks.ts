@@ -9,8 +9,10 @@ export const CODEX_HOOKS_FILE = ".codex/hooks.json"
 /**
  * `apply_patch` is Codex's edit tool; the matcher also takes `Edit` and `Write`, which Codex sends as `apply_patch`.
  * `Stop` fires for the main agent only; a subagent fires `SubagentStop`, so it gets the failures of its own changes.
+ * `SessionStart` keeps the protected files as they are. No pre-edit hook: Codex hooks cannot ask the user.
  */
 const HOOKS: InterlintHook[] = [
+  { event: "SessionStart", command: "interlint hook codex session-start", timeout: 30 },
   { event: "PostToolUse", matcher: "apply_patch|Edit|Write", command: "interlint hook codex post-edit", timeout: 120 },
   { event: "Stop", command: "interlint hook codex stop", timeout: 600 },
   { event: "SubagentStop", command: "interlint hook codex subagent-stop", timeout: 600 },

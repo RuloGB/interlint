@@ -35,9 +35,32 @@ export function loadConfig(projectDir: string): Config {
   const parsed = checks.map((entry, index) => parseCheck(entry, `checks[${index}]`))
   assertUniqueNames(parsed)
   const metrics = (raw as Record<string, unknown>).metrics
-  if (metrics === undefined) return { checks: parsed }
-  if (typeof metrics !== "boolean") throw invalid(`metrics must be true or false (got ${JSON.stringify(metrics)})`)
-  return { checks: parsed, metrics }
+  if (metrics !== undefined && typeof metrics !== "boolean") {
+    throw invalid(`metrics must be true or false (got ${JSON.stringify(metrics)})`)
+  }
+  const protectedFiles = optionalProtected((raw as Record<string, unknown>).protected)
+  return {
+    checks: parsed,
+    ...(metrics === undefined ? {} : { metrics }),
+    ...(protectedFiles === undefined ? {} : { protected: protectedFiles }),
+  }
+}
+
+/**
+ * The paths or globs of `protected:`, `/`-separated and without `./`. One outside the project is rejected: Interlint
+ * protects the project's own files only.
+ */
+function optionalProtected(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value)) throw invalid("protected must be a list of paths or globs")
+  return value.map((entry, index) => {
+    const segments = typeof entry === "string" ? entry.split(/[\\/]/).filter((segment) => segment !== "" && segment !== ".") : []
+    const absolute = typeof entry === "string" && (/^[\\/]/.test(entry) || /^[A-Za-z]:/.test(entry))
+    if (typeof entry !== "string" || segments.length === 0 || absolute || segments.includes("..")) {
+      throw invalid(`protected[${index}] must be a path or glob inside the project, relative to ${CONFIG_FILE} (got ${JSON.stringify(entry)})`)
+    }
+    return segments.join("/")
+  })
 }
 
 function parseCheck(entry: unknown, at: string): Check {

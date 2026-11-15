@@ -12,6 +12,7 @@ import { eslintOnFiles } from "./adapters/driven/eslint/eslint-scope.js"
 import { eslintReader } from "./adapters/driven/eslint/report-reader.js"
 import { isDirectory } from "./adapters/driven/fs/directory-lookup.js"
 import { diskProjectFiles } from "./adapters/driven/fs/project-files.js"
+import { diskProtectedFiles } from "./adapters/driven/fs/protected-files.js"
 import { diskReportFile } from "./adapters/driven/fs/report-file.js"
 import { removeBrokenClasses } from "./adapters/driven/maven/broken-classes.js"
 import { checkstyleOnFiles } from "./adapters/driven/maven/checkstyle-scope.js"
@@ -29,6 +30,7 @@ import { fileMetrics, fileMetricsSource } from "./adapters/driven/state/file-met
 import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
+import { fileProtectedBaselines } from "./adapters/driven/state/protected-baselines.js"
 import { loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
 import { type CliDeps, runCli } from "./adapters/driving/cli/cli.js"
 import type { Io } from "./adapters/driving/cli/cli-io.js"
@@ -47,6 +49,7 @@ const checking: CheckProjectDeps = {
   removeBrokenClasses,
   pending: filePendingEdits(),
   metrics: fileMetrics(),
+  protection: { files: diskProtectedFiles, baselines: fileProtectedBaselines() },
 }
 
 const DEPS: CliDeps = {

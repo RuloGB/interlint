@@ -1,5 +1,6 @@
 import type { Config, Report } from "../../domain/check.js"
 import type { CheckMetric } from "../../domain/metric.js"
+import type { Fingerprint } from "../../domain/protected-files.js"
 import type { RuleFailure } from "../../domain/violation.js"
 
 /**
@@ -152,3 +153,16 @@ export type ReportReaders = Record<Report, ReportReader>
  * its tool can be told to check only some files. Otherwise the command as it is.
  */
 export type EditScope = (command: string, files: string[], dir: string) => string
+
+/**
+ * The content hash of each existing file the patterns match, relative to the project and `/`-separated. Patterns are
+ * relative to the project too.
+ */
+export type ProtectedFiles = (projectDir: string, patterns: readonly string[]) => Fingerprint
+
+/** The protected files' fingerprint of each agent session, kept across the processes of its hooks. */
+export interface ProtectedBaselines {
+  /** The session's fingerprint: `undefined` when none was saved or it cannot be read. */
+  read(projectDir: string, session: string): Fingerprint | undefined
+  save(projectDir: string, session: string, fingerprint: Fingerprint): void
+}

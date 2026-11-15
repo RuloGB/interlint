@@ -1,9 +1,9 @@
 import { resolve } from "node:path"
-import { afterEdit, type FeedbackDeps, mainStop, subagentStop } from "../../../application/feedback/agent-events.js"
+import { afterEdit, type FeedbackDeps, mainStop, sessionStart, subagentStop } from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, failedLine, HOOK_EVENT_NAMES, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import { CODEX_HOOK_EVENTS, editNote, failedLine, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type CodexHookInput, parseCodexHookInput } from "./hook-input.js"
 
 /**
@@ -40,13 +40,19 @@ function tellUser(io: Io, text: string): void {
 export async function codexHook(args: string[], io: Io, deps: FeedbackDeps): Promise<number> {
   try {
     const [, event, ...extra] = args
-    if (!isHookEvent(event) || extra.length > 0) {
-      throw new UsageError(`codex hooks are ${HOOK_EVENT_NAMES} (got "${args.slice(1).join(" ")}")`)
+    if (!isHookEvent(event, CODEX_HOOK_EVENTS) || extra.length > 0) {
+      throw new UsageError(`codex hooks are ${hookEventNames(CODEX_HOOK_EVENTS)} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseCodexHookInput(io.stdin ? await io.stdin() : "")
     // Codex sets no variable with the project's directory: it runs the hook in the session's working directory.
     const projectDir = resolve(io.cwd, input.cwd ?? ".")
     const context = contextOf(input)
+
+    // Codex also starts it for each subagent, with the session's ID: the fingerprint is kept only once.
+    if (event === "session-start") {
+      sessionStart(projectDir, context, deps)
+      return CODEX_HOOK_EXIT.pass
+    }
 
     if (event === "post-edit") {
       // Codex may have changed its input: say why no check ran, rather than skip the edit without a trace.

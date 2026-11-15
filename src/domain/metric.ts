@@ -35,11 +35,16 @@ export interface ViolationMetric {
   file?: string
 }
 
+/** The report of a check's metric: a check's own, or `protected` for the protected files (F23). */
+export type MetricReport = Report | "protected"
+
+const METRIC_REPORTS: readonly MetricReport[] = [...REPORTS, "protected"]
+
 /** What one check did in one run of `interlint check`, with who ran it. */
 export interface CheckMetric extends AgentContext {
   when: When
   check: string
-  report: Report
+  report: MetricReport
   result: MetricResult
   /** Present only when `result` is `skipped`. */
   skipped?: SkipReason
@@ -78,7 +83,7 @@ export function metricEventOf(value: unknown): MetricEvent | undefined {
   if (v !== METRICS_FORMAT_VERSION) return undefined
   if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined
   if (!isText(interlint) || !isText(projectKey) || !isText(project) || !isText(check)) return undefined
-  if (!isOneOf(when, WHENS) || !isOneOf(report, REPORTS) || !isOneOf(result, RESULTS)) return undefined
+  if (!isOneOf(when, WHENS) || !isOneOf(report, METRIC_REPORTS) || !isOneOf(result, RESULTS)) return undefined
   if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return undefined
   // In UTC as Interlint writes it, so a date edited by hand sorts and filters with the rest.
   const event: MetricEvent = { v, at: new Date(at).toISOString(), interlint, projectKey, project, when, check, report, result, durationMs }

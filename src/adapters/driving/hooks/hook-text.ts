@@ -1,14 +1,19 @@
 /** The texts the agent hooks give, the same for every agent that runs them. */
 
-/** The events every agent hook command takes. */
-export const HOOK_EVENTS = ["post-edit", "stop", "subagent-stop"] as const
+/** The events the agent hook commands take. Codex takes all but `pre-edit`: its hooks cannot ask the user. */
+export const HOOK_EVENTS = ["session-start", "pre-edit", "post-edit", "stop", "subagent-stop"] as const
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
-/** `post-edit, stop and subagent-stop`. */
-export const HOOK_EVENT_NAMES = `${HOOK_EVENTS.slice(0, -1).join(", ")} and ${HOOK_EVENTS.at(-1)}`
+/** The events of Codex's hook command. */
+export const CODEX_HOOK_EVENTS: readonly HookEvent[] = HOOK_EVENTS.filter((event) => event !== "pre-edit")
 
-export function isHookEvent(event: string | undefined): event is HookEvent {
-  return (HOOK_EVENTS as readonly (string | undefined)[]).includes(event)
+/** The events as words, such as `session-start, post-edit, stop and subagent-stop`. */
+export function hookEventNames(events: readonly HookEvent[] = HOOK_EVENTS): string {
+  return `${events.slice(0, -1).join(", ")} and ${events.at(-1)}`
+}
+
+export function isHookEvent(event: string | undefined, events: readonly HookEvent[] = HOOK_EVENTS): event is HookEvent {
+  return (events as readonly (string | undefined)[]).includes(event)
 }
 
 /** What the post-edit hook sends to the agent when the checks fail. */

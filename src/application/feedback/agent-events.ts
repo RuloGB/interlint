@@ -1,5 +1,6 @@
 import type { AgentContext } from "../../domain/metric.js"
-import { type CheckProjectDeps, type CheckResult, checkProject } from "../checking/check-project.js"
+import { type CheckProjectDeps, type CheckResult, checkProject, startSession } from "../checking/check-project.js"
+import { protectedAmong } from "../checking/protected-files.js"
 import type { AgentRef, StopCounter, SubagentFiles, TranscriptModel } from "./ports.js"
 import { decideStop, type StopDecision, type StopRequest } from "./stop-policy.js"
 
@@ -8,6 +9,20 @@ export interface FeedbackDeps {
   subagentFiles: SubagentFiles
   stops: StopCounter
   transcriptModel: TranscriptModel
+}
+
+/** When the agent's session starts: keeps the protected files as they are, so its task end can tell what it changed. */
+export function sessionStart(projectDir: string, context: AgentContext, deps: FeedbackDeps): void {
+  startSession(projectDir, context, deps.checking)
+}
+
+/**
+ * Before the agent's edit tool changes files, given relative to the project: the protected ones, which the user has to
+ * approve. None when no file is protected.
+ */
+export function beforeEdit(projectDir: string, files: string[], deps: FeedbackDeps): string[] {
+  if (deps.checking.protection === undefined || files.length === 0) return []
+  return protectedAmong(deps.checking.loadConfig(projectDir), files)
 }
 
 /**
@@ -22,9 +37,10 @@ export async function afterEdit(
   deps: FeedbackDeps,
   linesWritten?: ReadonlyMap<string, number>,
   context?: AgentContext,
+  asked = false,
 ): Promise<CheckResult> {
   deps.subagentFiles.record(agent, files)
-  return checkProject(projectDir, { when: "edit", files, linesWritten, agent: context }, deps.checking)
+  return checkProject(projectDir, { when: "edit", files, linesWritten, agent: context, asked }, deps.checking)
 }
 
 /**
@@ -50,16 +66,20 @@ export async function subagentStop(
   return { decision, notice, passed }
 }
 
-/** When the main agent stops: the checks of the projects it changed since their checks last passed. */
+/**
+ * When the main agent stops: the checks of the projects it changed since their checks last passed, and the protected
+ * files it changed without the user's approval. `asked` tells that its edit tool asks the user before changing one.
+ */
 export async function mainStop(
   projectDir: string,
   request: StopRequest,
   deps: FeedbackDeps,
   context?: AgentContext,
+  asked = false,
 ): Promise<StopOutcome> {
   const { report, notice, passed } = await checkProject(
     projectDir,
-    { when: "task-end", changedOnly: true, agent: context },
+    { when: "task-end", changedOnly: true, agent: context, asked },
     deps.checking,
   )
   return { decision: decideStop(request, report, deps.stops), notice, passed }
