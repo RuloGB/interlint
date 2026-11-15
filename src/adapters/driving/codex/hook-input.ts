@@ -8,7 +8,7 @@ export interface CodexHookInput {
   sessionId: string
   /** The session's working directory, where Codex runs the hook. */
   cwd?: string
-  /** The files an edit tool changed, as it gives them (relative to `cwd` in a patch), each with the lines it wrote. */
+  /** The files an edit tool changed, as it gives them (absolute in Codex's own patches, or relative to `cwd`), each with the lines it wrote. */
   edits: FileEdit[]
   /** Whether Codex is already continuing because a stop hook blocked. */
   stopHookActive: boolean

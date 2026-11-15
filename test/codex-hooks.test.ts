@@ -193,6 +193,12 @@ describe("interlint hook codex post-edit", () => {
     expect(ran()).toBe(true)
   })
 
+  it("reads the absolute paths Codex writes in its patches", async () => {
+    writeCheck("edit", VIOLATIONS_XML)
+
+    expect(contextOf((await hook("post-edit", postToolUse(patch(update(join(projectDir, ORDER), "new"))))).stdout)).toContain("ARCH-01")
+  })
+
   it("reads the project from the input's cwd, wherever the hook runs", async () => {
     writeCheck("edit", VIOLATIONS_XML)
 
