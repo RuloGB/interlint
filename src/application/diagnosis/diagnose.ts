@@ -24,11 +24,25 @@ const AGENT_NAMES: Record<Agent, string> = {
 /** Whether the shell a check runs in finds the program `command` starts with, from `cwd`. */
 export type CommandLookup = (command: string, cwd: string) => boolean
 
-/** Whether an npm package's executable is in a `node_modules/.bin` of `cwd` or of a directory above it. */
-export type PackageBinLookup = (name: string, cwd: string) => boolean
+/** What a command runs with npx: the package it names, when it names one, and the executable it runs. */
+export interface NpxTool {
+  package?: string
+  bin: string
+}
 
-/** A project file's text, by its `/`-separated path relative to the project, or `undefined` when it is not there. */
-export type ProjectFileReader = (projectDir: string, path: string) => string | undefined
+/** Whether npx finds the tool installed from `cwd`: its executable in a `node_modules/.bin`, or its package installed. */
+export type NpxToolLookup = (tool: NpxTool, cwd: string) => boolean
+
+/** A file that is there but cannot be read, with why, such as `EACCES`. */
+export interface UnreadableFile {
+  unreadable: string
+}
+
+/**
+ * A project file's text, by its `/`-separated path relative to the project: `undefined` when it is not there, and an
+ * `UnreadableFile` when it is there but cannot be read.
+ */
+export type ProjectFileReader = (projectDir: string, path: string) => string | undefined | UnreadableFile
 
 /** Where Interlint keeps its state and metrics, and whether it may write there. */
 export interface StateLocation {
@@ -46,7 +60,7 @@ export interface DoctorDeps {
   hasDirectory: DirectoryLookup
   hasExecutable: ExecutableLookup
   findsCommand: CommandLookup
-  findsPackageBin: PackageBinLookup
+  findsNpxTool: NpxToolLookup
   agents: Record<Agent, AgentFiles>
   files: Pick<ProjectFiles, "stateOf">
   /** Tells where the state goes without creating anything. */
@@ -144,9 +158,12 @@ function environmentFindings(deps: DoctorDeps, agentSetUp: boolean): Finding[] {
 }
 
 function loadedConfig(projectDir: string, deps: DoctorDeps): { findings: Finding[]; value?: Config } {
-  if (deps.readFile(projectDir, deps.configFile) === undefined) {
+  const file = deps.readFile(projectDir, deps.configFile)
+  if (file === undefined) {
     return { findings: [error(`${deps.configFile} not found`, "run `interlint init` to detect the checks and write it")] }
   }
+  // Suggesting init here would replace a file the team wrote.
+  if (typeof file !== "string") return { findings: [unreadable(deps.configFile, file)] }
   let config: Config
   try {
     config = deps.loadConfig(projectDir)
@@ -188,14 +205,15 @@ function toolFinding(projectDir: string, check: Check, daemon: boolean, deps: Do
       `install it or put it on the PATH, or change the check's run in ${deps.configFile}`,
     )
   }
-  const pkg = npxPackage(check.run)
-  if (pkg !== undefined && !deps.findsPackageBin(pkg, dir)) {
+  const tool = npxTool(check.run)
+  const name = tool?.package ?? tool?.bin
+  if (tool !== undefined && !deps.findsNpxTool(tool, dir)) {
     return error(
-      `check ${check.name}: ${pkg} is not installed in node_modules`,
+      `check ${check.name}: ${name} is not installed in node_modules`,
       `run \`npm install\`${check.dir === undefined ? "" : ` in ${check.dir}`}`,
     )
   }
-  return ok(`check ${check.name}: ${pkg ?? program} is found`)
+  return ok(`check ${check.name}: ${name ?? program} is found`)
 }
 
 /**
@@ -218,13 +236,20 @@ function agentFindings(projectDir: string, deps: DoctorDeps): { findings: Findin
       setUp = true
       continue
     }
-    const present = planned.filter((file) => deps.readFile(projectDir, file.path) !== undefined)
+    const reads = planned.map((file) => ({ path: file.path, read: deps.readFile(projectDir, file.path) }))
+    const present = reads.filter(({ read }) => read !== undefined)
     if (present.length === 0) continue
+    const blocked = present.find(({ read }) => typeof read !== "string")
+    if (blocked !== undefined) {
+      findings.push(unreadable(`${name}: ${blocked.path}`, blocked.read as UnreadableFile))
+      setUp = true
+      continue
+    }
     const stale = planned.filter((file) => deps.files.stateOf(projectDir, file) !== "unchanged").map((file) => file.path)
     if (stale.length === 0) {
       findings.push(ok(`${name}: ${planned.map((file) => file.path).join(", ")} ${planned.length === 1 ? "is" : "are"} up to date`))
       setUp = true
-    } else if (!present.some((file) => /interlint/i.test(deps.readFile(projectDir, file.path) ?? ""))) {
+    } else if (!present.some(({ read }) => mentionsInterlint(read as string))) {
       findings.push(warning(`${name}: ${present.map((file) => file.path).join(", ")} has no Interlint hooks`, fix))
     } else {
       findings.push(error(`${name}: ${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} missing or from another version of Interlint`, fix))
@@ -253,14 +278,41 @@ function protectedFindings(projectDir: string, patterns: string[], deps: DoctorD
   )
 }
 
-/** The npm package a command runs with npx: the first word after `--`, or else after npx's options. */
-export function npxPackage(command: string): string | undefined {
+/**
+ * Whether a file of an agent holds anything of Interlint's. A file without it is the project's own, such as Claude
+ * Code settings without the hooks, and not an older setup of Interlint.
+ */
+function mentionsInterlint(text: string): boolean {
+  return /interlint/i.test(text)
+}
+
+/**
+ * What a command runs with npx. With `-p` or `--package`, the package it names and the executable after the options;
+ * otherwise the first word after the options or `--`, a package spec whose executable npx takes from its name. The
+ * version of a spec is left out. Nothing for a command that does not start with npx, or that runs a `-c` command.
+ */
+export function npxTool(command: string): NpxTool | undefined {
   const words = command.trim().split(/\s+/)
   if (words[0] !== "npx") return undefined
-  const rest = words.slice(1)
-  const end = rest.indexOf("--")
-  const candidates = end === -1 ? rest.filter((word) => !word.startsWith("-")) : rest.slice(end + 1)
-  return candidates[0]
+  let pkg: string | undefined
+  let first: string | undefined
+  for (let index = 1; index < words.length && first === undefined; index++) {
+    const word = words[index]!
+    if (word === "--") first = words[index + 1]
+    else if (word === "-c" || word === "--call" || word.startsWith("--call=")) return undefined
+    else if (word === "-p" || word === "--package") pkg = words[++index]
+    else if (word.startsWith("--package=")) pkg = word.slice("--package=".length)
+    else if (!word.startsWith("-")) first = word
+  }
+  if (first === undefined) return undefined
+  if (pkg !== undefined) return { package: withoutVersion(pkg), bin: first }
+  const name = withoutVersion(first)
+  return { package: name, bin: name.replace(/^@[^/]+\//, "") }
+}
+
+/** A package spec without its version: `eslint@9` is `eslint`, `@scope/name@1` is `@scope/name`. */
+function withoutVersion(spec: string): string {
+  return /^(@[^/@]+\/[^@]+|[^@]+)/.exec(spec)?.[1] ?? spec
 }
 
 /** The program a command starts with, without the quotes around it. */
@@ -270,6 +322,10 @@ function firstWord(command: string): string | undefined {
 
 function checkDirOf(projectDir: string, check: Check): string {
   return check.dir === undefined ? projectDir : `${projectDir}/${check.dir}`
+}
+
+function unreadable(subject: string, { unreadable }: UnreadableFile): Finding {
+  return error(`${subject} cannot be read (${unreadable})`, "check that your user may read it")
 }
 
 function ok(text: string): Finding {

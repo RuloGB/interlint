@@ -152,7 +152,7 @@ It only reads: it writes no file and runs no check. It looks at:
 |---|---|
 | Environment | Node is 22 or later, the version of Interlint, and, when an agent is set up, that `interlint` is on the `PATH`, since the agent's hooks run it |
 | Configuration | `interlint.yaml` exists, is valid, and the `dir` of each check exists |
-| Tools | The program each check runs is found from its directory, as the check would run it: `./mvnw` or `mvn` (or `mvnd`, which runs every Maven check when it is on the `PATH`), and for `npx`, the package in a `node_modules/.bin`. Without `mvnd`, the Maven edit checks run at task end: a warning |
+| Tools | The program each check runs is found from its directory, as the check would run it: `./mvnw` or `mvn` (or `mvnd`, which runs every Maven check when it is on the `PATH`), and for `npx`, its package or executable installed in a `node_modules`, from the check's directory up. An `interlint.yaml` that is there but cannot be read is an error of its own, so `doctor` never suggests replacing it with `init`. Without `mvnd`, the Maven edit checks run at task end: a warning |
 | Agents | The files of each agent set up in the project are what `interlint init` writes with this version: `.claude/settings.json`, `.opencode/plugins/interlint/`, `.github/hooks/interlint.json` and `.codex/hooks.json`. A file with no Interlint hooks is a warning; Interlint's files missing or from another version are an error, and so is having no agent set up |
 | State | Interlint can write its state and metrics directory |
 | Protected files | Each pattern of `protected:` matches a file. One that matches none is a warning |

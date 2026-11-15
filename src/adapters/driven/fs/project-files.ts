@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import type { ProjectFileReader } from "../../../application/diagnosis/diagnose.js"
 import type { FileState, PlannedFile, ProjectFiles } from "../../../application/setup/ports.js"
 
 /** What writing `file` would do, without writing anything. */
@@ -23,11 +24,16 @@ export function writeProjectFile(projectDir: string, file: PlannedFile) {
 
 export const diskProjectFiles: ProjectFiles = { stateOf, write: writeProjectFile }
 
-/** A project file's text, by its `/`-separated path relative to the project, or `undefined` when it cannot be read. */
-export function readProjectFile(projectDir: string, path: string): string | undefined {
+/**
+ * A project file's text, by its `/`-separated path relative to the project: `undefined` when it is not there, and why
+ * it cannot be read when it is there but cannot be, such as a directory or a file the user may not read.
+ */
+export const readProjectFile: ProjectFileReader = (projectDir, path) => {
   try {
     return readFileSync(join(projectDir, path), "utf8")
-  } catch {
-    return undefined
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined
+    return { unreadable: code ?? (error as Error).message }
   }
 }

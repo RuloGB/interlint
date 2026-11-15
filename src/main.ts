@@ -20,7 +20,7 @@ import { scanMavenProjects } from "./adapters/driven/maven/project-scan.js"
 import { archUnitReader } from "./adapters/driven/maven/reports/archunit-reader.js"
 import { jacocoReader } from "./adapters/driven/maven/reports/jacoco-reader.js"
 import { mavenQualityReader } from "./adapters/driven/maven/reports/quality-reader.js"
-import { findsPackageBin } from "./adapters/driven/npm/package-bin.js"
+import { findsNpxTool } from "./adapters/driven/npm/package-bin.js"
 import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { findsCommand, runCommand } from "./adapters/driven/process/command-runner.js"
 import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
@@ -90,7 +90,7 @@ const DEPS: CliDeps = {
     hasDirectory: isDirectory,
     hasExecutable: lookupExecutable,
     findsCommand: (command, cwd) => findsCommand(command, cwd),
-    findsPackageBin,
+    findsNpxTool,
     agents,
     files: diskProjectFiles,
     state: stateLocation,

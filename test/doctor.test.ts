@@ -3,11 +3,11 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { claudeCodeSettingsFiles } from "../src/adapters/driven/agents/claude-code-settings.js"
-import { writeProjectFile } from "../src/adapters/driven/fs/project-files.js"
-import { findsPackageBin } from "../src/adapters/driven/npm/package-bin.js"
+import { readProjectFile, writeProjectFile } from "../src/adapters/driven/fs/project-files.js"
+import { findsNpxTool } from "../src/adapters/driven/npm/package-bin.js"
 import { stateLocation } from "../src/adapters/driven/state/user-state.js"
 import { ConfigError } from "../src/application/checking/ports.js"
-import { type DoctorDeps, diagnose, formatDiagnosis, hasErrors, npxPackage } from "../src/application/diagnosis/diagnose.js"
+import { type DoctorDeps, diagnose, formatDiagnosis, hasErrors, npxTool } from "../src/application/diagnosis/diagnose.js"
 import { AgentSetupError } from "../src/application/setup/ports.js"
 import type { Config } from "../src/domain/check.js"
 import { main } from "../src/main.js"
@@ -37,7 +37,7 @@ function fakeDeps(overrides: Partial<DoctorDeps> = {}, disk: Record<string, stri
     hasDirectory: () => true,
     hasExecutable: (name) => name === "interlint" || name === "mvnd",
     findsCommand: () => true,
-    findsPackageBin: () => true,
+    findsNpxTool: () => true,
     agents: {
       "claude-code": planned(
         ".claude/settings.json",
@@ -157,7 +157,7 @@ describe("diagnose", () => {
   })
 
   it("detects an npm package a check runs with npx that is not installed", () => {
-    const deps = fakeDeps({ findsPackageBin: (name, cwd) => !(name === "eslint" && cwd === "/project/web") })
+    const deps = fakeDeps({ findsNpxTool: (tool, cwd) => !(tool.bin === "eslint" && cwd === "/project/web") })
 
     expect(errors(deps)).toEqual([
       {
@@ -166,6 +166,42 @@ describe("diagnose", () => {
         fix: "run `npm install` in web",
       },
     ])
+  })
+
+  it("names the package of a scoped or versioned npx command, and looks it up as a package", () => {
+    const config: Config = { checks: [{ name: "biome", run: "npx @biomejs/biome@1.9 check .", report: "exit-code", when: "task-end" }] }
+    const seen: unknown[] = []
+    const deps = fakeDeps({ loadConfig: () => config, findsNpxTool: (tool) => (seen.push(tool), false) })
+
+    expect(errors(deps)).toEqual([
+      { status: "error", text: "check biome: @biomejs/biome is not installed in node_modules", fix: "run `npm install`" },
+    ])
+    expect(seen).toEqual([{ package: "@biomejs/biome", bin: "biome" }])
+  })
+
+  it("says an interlint.yaml that exists but cannot be read cannot be read, without suggesting init", () => {
+    const base = fakeDeps()
+    const deps = fakeDeps({
+      readFile: (dir, path) => (path === "interlint.yaml" ? { unreadable: "EACCES" } : base.readFile(dir, path)),
+    })
+
+    expect(errors(deps)).toEqual([
+      { status: "error", text: "interlint.yaml cannot be read (EACCES)", fix: "check that your user may read it" },
+    ])
+  })
+
+  it("says an agent's file that cannot be read cannot be read", () => {
+    const base = fakeDeps()
+    const deps = fakeDeps({
+      readFile: (dir, path) => (path === ".claude/settings.json" ? { unreadable: "EISDIR" } : base.readFile(dir, path)),
+      files: { stateOf: () => { throw new Error("stateOf must not read an unreadable file") } },
+    })
+
+    expect(errors(deps)).toContainEqual({
+      status: "error",
+      text: "Claude Code: .claude/settings.json cannot be read (EISDIR)",
+      fix: "check that your user may read it",
+    })
   })
 
   it("warns, without an error, that the Maven edit checks run at task end without mvnd (S2)", () => {
@@ -320,15 +356,45 @@ describe("diagnose", () => {
   })
 })
 
-describe("npxPackage", () => {
+describe("npxTool", () => {
   it("finds the package after -- or after npx's options", () => {
-    expect(npxPackage("npx --no -- eslint -f json .")).toBe("eslint")
-    expect(npxPackage("npx --no depcruise .")).toBe("depcruise")
-    expect(npxPackage("npm test")).toBeUndefined()
+    expect(npxTool("npx --no -- eslint -f json .")).toEqual({ package: "eslint", bin: "eslint" })
+    expect(npxTool("npx --no depcruise .")).toEqual({ package: "depcruise", bin: "depcruise" })
+    expect(npxTool("npm test")).toBeUndefined()
+  })
+
+  it("leaves out the version, and takes the bin of a scoped package from its name", () => {
+    expect(npxTool("npx eslint@9 .")).toEqual({ package: "eslint", bin: "eslint" })
+    expect(npxTool("npx @biomejs/biome@1.9.4 check")).toEqual({ package: "@biomejs/biome", bin: "biome" })
+  })
+
+  it("takes the bin after the package that -p or --package names", () => {
+    expect(npxTool("npx -p typescript tsc --noEmit")).toEqual({ package: "typescript", bin: "tsc" })
+    expect(npxTool("npx --package=@scope/tools@2 run-it")).toEqual({ package: "@scope/tools", bin: "run-it" })
+  })
+
+  it("gives nothing for a command that -c runs, which names no package", () => {
+    expect(npxTool(`npx -c "eslint ."`)).toBeUndefined()
   })
 })
 
-describe("findsPackageBin", () => {
+describe("readProjectFile", () => {
+  it("tells a file that is not there from one that cannot be read", () => {
+    const root = mkdtempSync(join(tmpdir(), "interlint-read-"))
+    try {
+      writeFileSync(join(root, "a.txt"), "text")
+      mkdirSync(join(root, "dir.txt"))
+
+      expect(readProjectFile(root, "a.txt")).toBe("text")
+      expect(readProjectFile(root, "missing.txt")).toBeUndefined()
+      expect(readProjectFile(root, "dir.txt")).toEqual({ unreadable: "EISDIR" })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("findsNpxTool", () => {
   let root: string
 
   beforeEach(() => {
@@ -342,15 +408,22 @@ describe("findsPackageBin", () => {
     writeFileSync(join(root, "node_modules", ".bin", "eslint"), "")
     mkdirSync(join(root, "web"))
 
-    expect(findsPackageBin("eslint", join(root, "web"))).toBe(true)
-    expect(findsPackageBin("depcruise", join(root, "web"))).toBe(false)
+    expect(findsNpxTool({ package: "eslint", bin: "eslint" }, join(root, "web"))).toBe(true)
+    expect(findsNpxTool({ package: "depcruise", bin: "depcruise" }, join(root, "web"))).toBe(false)
   })
 
   it("finds the .cmd npm writes on Windows", () => {
     mkdirSync(join(root, "node_modules", ".bin"), { recursive: true })
     writeFileSync(join(root, "node_modules", ".bin", "eslint.cmd"), "")
 
-    expect(findsPackageBin("eslint", root)).toBe(true)
+    expect(findsNpxTool({ bin: "eslint" }, root)).toBe(true)
+  })
+
+  it("finds a scoped package installed by its name, whatever its bin is called", () => {
+    mkdirSync(join(root, "node_modules", "@biomejs", "biome"), { recursive: true })
+    writeFileSync(join(root, "node_modules", "@biomejs", "biome", "package.json"), "{}")
+
+    expect(findsNpxTool({ package: "@biomejs/biome", bin: "biome" }, root)).toBe(true)
   })
 })
 
@@ -536,6 +609,16 @@ describe("interlint doctor", () => {
     expect(stdout).toContain(`Interlint doctor in ${projectDir}`)
     expect(stdout).toContain("✓ interlint.yaml is valid, with 1 check")
     expect(exitCode).toBe(0)
+  })
+
+  it("says interlint.yaml cannot be read when it is not a file, and exits 1", async () => {
+    mkdirSync(join(projectDir, "interlint.yaml"))
+
+    const { exitCode, stdout } = await run([])
+
+    expect(stdout).toContain("✗ interlint.yaml cannot be read (EISDIR)")
+    expect(stdout).not.toContain("interlint init` to detect")
+    expect(exitCode).toBe(1)
   })
 
   it("exits 2 for a directory that does not exist", async () => {
