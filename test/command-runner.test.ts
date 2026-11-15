@@ -49,7 +49,7 @@ describe.runIf(process.platform === "win32")("cmdFindsCommand", () => {
   })
 })
 
-// POSIX rules: executable files only, case-sensitive. Interlint looks commands up this way only off Windows.
+// POSIX rules: executable files only. Interlint looks commands up this way only off Windows. Case is left out: macOS file systems ignore it.
 describe.runIf(process.platform !== "win32")("shFindsCommand", () => {
   let cwd: string
   let bin: string
@@ -74,7 +74,7 @@ describe.runIf(process.platform !== "win32")("shFindsCommand", () => {
     },
   )
 
-  it.each(["vitest run", "interlint-no-such-command-f24", "./plain.sh", "./gradlew build", "NPM test"])("does not find %s", (command) => {
+  it.each(["vitest run", "interlint-no-such-command-f24", "./plain.sh", "./gradlew build"])("does not find %s", (command) => {
     expect(shFindsCommand(command, cwd, env())).toBe(false)
   })
 })
