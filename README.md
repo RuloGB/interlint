@@ -109,6 +109,8 @@ Requires Node 22 or later and one of these:
 
 **No endless loops.** After 3 blocks in a row, Interlint lets the task end and shows you what is still failing.
 
+**No weakened rules.** Before the agent edits a file that defines your rules, such as the ArchUnit test or `checkstyle.xml`, you are asked whether it may. A change you did not approve, even one made from the terminal, blocks the task end. See [Protected files](docs/usage.md#protected-files).
+
 ## Make it fit your team
 
 `interlint.yaml` decides when each check runs. `init` writes a starting point; the file is yours to edit, and you commit it so the whole team gets the same behavior.
@@ -119,6 +121,7 @@ Requires Node 22 or later and one of these:
 | `when: task-end` | Runs only at task end. |
 | `every: <n>` | With `when: edit`, waits until `n` distinct source files were edited. |
 | `lines: <n>` | With `when: edit`, waits until `n` lines were written in its sources. |
+| `protected:` | Paths and globs of the files the agent may change only with your approval. `interlint.yaml` always is. |
 
 For example, to run ArchUnit once the agent has written 200 lines, so a log line in three files waits for task end but a new feature does not:
 

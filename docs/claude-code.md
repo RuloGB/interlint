@@ -1,6 +1,6 @@
 # Claude Code
 
-Interlint works with Claude Code through three hooks in the project's settings.
+Interlint works with Claude Code through five hooks in the project's settings.
 
 ## Set it up
 
@@ -8,11 +8,22 @@ Interlint works with Claude Code through three hooks in the project's settings.
 interlint init --agent claude-code
 ```
 
-Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds three hooks to the project's `.claude/settings.json`, the one you commit:
+Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds five hooks to the project's `.claude/settings.json`, the one you commit:
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code session-start", "timeout": 30 }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code pre-edit", "timeout": 30 }]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
@@ -44,8 +55,10 @@ GitHub Copilot also runs the hooks in `.claude/settings.json`. When it does, `in
 
 ## What the hooks do
 
+- **When the session starts,** `session-start` keeps a hash of each [protected file](usage.md#protected-files), so the task end can tell which ones changed. A resumed or compacted session keeps the first hash.
+- **Before `Edit` or `Write`** changes a protected file, `pre-edit` makes Claude Code ask you whether to allow it, with a message that names the file. Other edits go through as usual. An edit you allow becomes the new reference for that file.
 - **After `Edit` or `Write`,** `post-edit` runs the `edit` checks for that file. Claude gets the failures right after the edit, and you see a line that names the checks that failed, such as `✗ Interlint · checks failed after this edit: architecture`. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines, on all of them; Claude and its subagents add to the same count. The hook counts the lines each `Edit` adds or changes, and every line of a `Write`.
-- **When Claude finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, Claude cannot stop and gets the failures to fix them. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. Only the main agent runs it: a subagent ends with `SubagentStop`.
+- **When Claude finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, Claude cannot stop and gets the failures to fix them. A protected file changed without your approval, by any means, blocks it too. After 3 blocks in a row it lets the task end and shows you the failures once; it does not block again until the next turn. Only the main agent runs it: a subagent ends with `SubagentStop`.
 - **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed with `Edit` or `Write`, so the failures go to the agent that wrote the code. A subagent that changed no file, such as a read-only reviewer, runs nothing. If a check fails, the subagent cannot stop and gets the failures to fix them, before the main agent gets its answer. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 
 When the checks that ran pass, `post-edit` and `stop` show you a message that names them, such as `✓ Interlint · checks passed: checkstyle (1.2s)`, so you see that Interlint ran (see [`interlint check`](usage.md#interlint-check)). Claude does not get it. An edit that runs no check, such as one to `README.md`, and a stop with no changed project show nothing. `subagent-stop` shows nothing when its checks pass: the main agent's `stop` shows them.
@@ -60,10 +73,10 @@ Each check the hooks run is kept in your [metrics](usage.md#metrics) with `agent
 
 ## `interlint hook claude-code`
 
-`interlint hook claude-code post-edit|stop|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`CLAUDE_PROJECT_DIR`). It exits with Claude Code's codes instead of the ones of `interlint check`:
+`interlint hook claude-code session-start|pre-edit|post-edit|stop|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`CLAUDE_PROJECT_DIR`). It exits with Claude Code's codes instead of the ones of `interlint check`:
 
 | Exit code | Meaning |
 |---|---|
-| 0 | The checks passed, or no check reads the edited file. A message for you, if any, is on stdout as `systemMessage`. For `post-edit`, it is also the code when a check failed: stdout holds `"decision": "block"` with the failures for Claude as `reason`, and the checks that failed for you as `systemMessage` |
+| 0 | The checks passed, or no check reads the edited file. For `session-start`, the hashes were kept. For `pre-edit`, stdout holds `"permissionDecision": "ask"` with the question for you when the edit changes a protected file, and is empty otherwise. A message for you, if any, is on stdout as `systemMessage`. For `post-edit`, it is also the code when a check failed: stdout holds `"decision": "block"` with the failures for Claude as `reason`, and the checks that failed for you as `systemMessage` |
 | 2 | A check failed at `stop` or `subagent-stop`: the failures go to Claude on stderr, and it cannot stop yet |
 | 1 | Interlint could not run, for example without `interlint.yaml`. Claude Code shows it to you and does not block |

@@ -60,6 +60,7 @@ checks:
 - When the build runs `jacoco:check`, it adds a `coverage` check that runs at task end only. See [JaCoCo coverage](#jacoco-coverage).
 - In an npm project with ESLint, it writes an `eslint` check that runs after each edit. See [ESLint](#eslint).
 - In an npm project with dependency-cruiser, it writes a `depcruise` check that runs after each edit. See [dependency-cruiser](#dependency-cruiser).
+- It lists the files that define your rules under `protected:`: the `@ArchTest` classes, the rule files the build's Checkstyle, PMD and SpotBugs settings name (`configLocation`, `suppressionsLocation`, `ruleset`, `excludeFilterFile`, `includeFilterFile`) when the project holds them, and the ESLint and dependency-cruiser configuration. `pom.xml` and `package.json` stay out. See [Protected files](#protected-files).
 - With no `@ArchTest` classes, no Checkstyle or PMD plugin, no SpotBugs or JaCoCo `check` goal and no npm project with ESLint or dependency-cruiser it says so, writes nothing and exits with 2.
 - `--agent opencode` also copies the OpenCode plugin. See [OpenCode](opencode.md).
 - `--agent claude-code` also adds Interlint's hooks to `.claude/settings.json`. See [Claude Code](claude-code.md).
@@ -371,6 +372,30 @@ With `--changed`, a check does not run when a build since the project's last cha
 Otherwise the check runs as usual. So a build that skipped the tests or a plugin, or ran only some tests, does not count. A file changed while that build ran, after the build read it, still makes the reports look new: keep the agent's build as the last thing that touches the files.
 
 Without `--changed`, as when you run `interlint check` yourself, and after an edit, every check runs.
+
+## Protected files
+
+An agent can pass a check by weakening its rule: editing the ArchUnit test, `checkstyle.xml` or the ESLint configuration. Interlint cannot tell whether a change like that is what the task needs, so it asks you.
+
+```yaml
+protected:
+  - "src/test/java/**/ArchitectureRulesTest.java"
+  - config/checkstyle.xml
+  - eslint.config.js
+```
+
+- Each entry is a path or a glob relative to `interlint.yaml`, inside the project. `**` matches any number of directories, `*` any characters within one, and `?` one character. Case does not matter. Globs do not look inside `node_modules`, `.git` or `target`.
+- `interlint.yaml` is always protected, even without `protected:`.
+- **Before an edit,** the agent asks you whether it may change a protected file, with a message that names it. Claude Code and GitHub Copilot ask through Interlint's `pre-edit` hook, and OpenCode through the plugin. Codex cannot ask: its `post-edit` hook tells the agent right after the edit that it changed a protected file.
+- **When the session starts,** the agent hooks keep a hash of each protected file. A resumed or compacted session keeps the first one.
+- **At task end,** a protected file that differs from that hash, or was deleted, blocks the main agent's task end. The message names each file and asks the agent to put it back as it was. A change you approved in the agent's prompt does not count: it becomes the new reference. A change made any other way, such as from the terminal, does. A file created since the session started that matches a glob does not block.
+- The block counts towards the same limit of 3 as the checks: after 3 blocks in a row, the task may end and you see the files. A new session starts from the files as they are then.
+- A subagent's stop does not check protected files: its main agent's task end does.
+- Each blocked task end is kept in your [metrics](#metrics) as a check named `protected files`, with `report: protected` and one violation per file, `protected file changed` or `protected file deleted`. An older Interlint skips these lines.
+
+`interlint check` run by hand checks no protected file: it has no agent session. Hooks set up by an older `interlint init` keep no hash, so nothing is protected until you run `init --agent <agent>` again.
+
+This is not a sandbox: the agent can still change files on disk, Interlint's state included. It makes weakening a rule visible: the agent is blocked, you are told, and the metrics keep it.
 
 ## Multi-module projects and workspaces
 

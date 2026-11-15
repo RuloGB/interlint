@@ -14,6 +14,16 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this copies `integra
 
 One OpenCode server runs the sessions of every project you open in it. The plugin only checks the sessions that run in its own project's directory, or in a directory inside it, symbolic links included, so a project without Interlint open in the same OpenCode is left alone.
 
+## Protected files
+
+The plugin protects the files that define your rules (see [Protected files](usage.md#protected-files)):
+
+- When a main session's first turn starts, it runs `interlint check --when session-start`, which keeps a hash of each protected file.
+- Before the `edit`, `write` or `patch` tool changes a protected file, it makes OpenCode ask you whether to allow it, with a message that names the file. It asks the CLI with `interlint check --when pre-edit --file <path>...`, which prints the message, or nothing for a file that is not protected. An edit you allow becomes the new reference for that file. This needs an OpenCode that gives plugins its permission hook; without one the plugin does not ask, and no edit counts as approved.
+- At turn end, a protected file changed without your approval, by any means, blocks the main agent as a failed check does.
+
+The plugin passes `--asked` to the edit and task-end checks when OpenCode asks you, so the CLI knows an edit of a protected file was approved. These options are for the plugin and are not in the usage.
+
 ## After each edit
 
 After the `edit`, `write` or `patch` tool changes files, the plugin runs `interlint check --when edit` for them. If a check fails, it adds the failures to that tool's result, so the agent sees them right after the edit. OpenCode Desktop shows an edit's diff, not its result, so the plugin also sends you a line in the session that does not make the agent continue: the checks that failed, such as `✗ Interlint · checks failed after this edit: architecture`, or, when they pass, the checks that ran, such as `✓ Interlint · checks passed: checkstyle (1.2s)`. An edit that runs no check, such as one to `README.md`, sends nothing. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines, on all of them; the agent and its subagents add to the same count. The plugin counts the lines each `edit` adds or changes, every line of a `write`, and the `+` lines of each file of a `patch`.
