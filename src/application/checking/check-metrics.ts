@@ -34,9 +34,10 @@ function metricOf(entry: RunEntry, when: When): CheckMetric {
   if (outcome.status !== "violations") return { ...base, result: outcome.status, durationMs: outcome.durationMs }
   // The rule and file only: a violation's text can quote the code.
   // A rule the report names without its violations counts once.
+  // A team command has no rules of its own: its check is the rule, whatever the exit code.
   const violations = outcome.failures.flatMap(({ title, type, violations }) =>
     (violations.length > 0 ? violations : [{ path: undefined }]).map(({ path }) => ({
-      rule: title,
+      rule: check.report === "exit-code" ? check.name : title,
       ...(type === undefined ? {} : { type }),
       ...(path === undefined ? {} : { file: path }),
     })),

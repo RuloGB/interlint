@@ -17,6 +17,10 @@ export interface CommandResult {
   exitCode: number
   /** The end of stdout and stderr, interleaved as they arrived. */
   output: string
+  /** Present, as true, only when the command was not found or could not start, so it did not run at all. */
+  notFound?: true
+  /** How many lines were left out before `output` to keep it bounded. Present only when some were. */
+  droppedLines?: number
 }
 
 /** Runs a check's `run` command in the project directory. */
@@ -122,8 +126,11 @@ export type ReportSnapshot = ReadonlyMap<string, string>
 /** Reads what one run of a check left behind. */
 export interface ReportReader {
   snapshot(projectDir: string): ReportSnapshot
-  /** `output` is the end of the command's output, for reports that cannot say on their own why the command failed. */
-  read(projectDir: string, before: ReportSnapshot, output: string): ReportResult
+  /**
+   * `output` is the end of the command's output, for reports that cannot say on their own why the command failed, and
+   * `run` how it ended, for a command whose result is its exit code.
+   */
+  read(projectDir: string, before: ReportSnapshot, output: string, run: CommandResult): ReportResult
   /**
    * Reads the reports `command` writes from those a build already left, such as one the agent ran itself, when each
    * of them is there and was written after `sinceMs`; otherwise nothing. A report that also lists what the build

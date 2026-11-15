@@ -205,28 +205,28 @@ describe("depcruiseReader", () => {
     writeReport(content)
     utimesSync(path, time, time)
 
-    expect(depcruiseReader.read(dir, before, "")).toMatchObject({ found: true, failures: [{ title: "domain-not-to-infrastructure" }] })
+    expect(depcruiseReader.read(dir, before, "", { exitCode: 0, output: "" })).toMatchObject({ found: true, failures: [{ title: "domain-not-to-infrastructure" }] })
   })
 
   it("reads the report the run wrote", () => {
     const before = depcruiseReader.snapshot(dir)
     writeReport(report([domainToInfra]))
 
-    expect(depcruiseReader.read(dir, before, "")).toMatchObject({ found: true, failures: [{ title: "domain-not-to-infrastructure" }] })
+    expect(depcruiseReader.read(dir, before, "", { exitCode: 0, output: "" })).toMatchObject({ found: true, failures: [{ title: "domain-not-to-infrastructure" }] })
   })
 
   it("ignores a report left by an earlier run", () => {
     writeReport(report([domainToInfra]))
     const before = depcruiseReader.snapshot(dir)
 
-    expect(depcruiseReader.read(dir, before, "")).toEqual({ found: false, failures: [] })
+    expect(depcruiseReader.read(dir, before, "", { exitCode: 0, output: "" })).toEqual({ found: false, failures: [] })
   })
 
   it("finds no report when the run analyzed no module", () => {
     const before = depcruiseReader.snapshot(dir)
     writeReport(report([], { totalCruised: 0 }))
 
-    expect(depcruiseReader.read(dir, before, "")).toEqual({ found: false, failures: [] })
+    expect(depcruiseReader.read(dir, before, "", { exitCode: 0, output: "" })).toEqual({ found: false, failures: [] })
   })
 })
 
@@ -257,7 +257,7 @@ function depcruiseDeps(fake: FakeRun) {
       if (fake.report !== undefined) writeReport(fake.report, cwd)
       return { exitCode: fake.exitCode, output: fake.output ?? "" }
     },
-    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: unused, depcruise: depcruiseReader },
+    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: unused, depcruise: depcruiseReader, "exit-code": unused },
     hasExecutable: () => false,
     lock: (_projectDir, work) => work(),
     changes: {

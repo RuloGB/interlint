@@ -28,7 +28,7 @@ The agent puts infrastructure code in the domain. Interlint tells it right away,
 
 ## Why Interlint
 
-- **Your rules, enforced.** Interlint has no rules of its own. It runs your ArchUnit tests, Checkstyle, PMD, SpotBugs, JaCoCo coverage rules, ESLint and dependency-cruiser, so your build stays the single source of truth.
+- **Your rules, enforced.** Interlint has no rules of its own. It runs your ArchUnit tests, Checkstyle, PMD, SpotBugs, JaCoCo coverage rules, ESLint, dependency-cruiser and any command of yours, such as your tests, so your build stays the single source of truth.
 - **Fixed while the context is fresh.** Checks run after edits, so the agent fixes a violation before it builds more code on top of it.
 - **No green, no done.** At task end every check runs. The agent cannot finish while a rule is broken.
 - **One command to set up.** `interlint init` finds your checks and wires your agent.
@@ -149,13 +149,13 @@ See [Every N files or lines](docs/usage.md#every-n-files-or-lines) for the full 
 | | |
 |---|---|
 | Agents | Claude Code, GitHub Copilot (hooks in preview), Codex, OpenCode V2 |
-| Checks | ArchUnit, Checkstyle, PMD, [SpotBugs](docs/usage.md#spotbugs), JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint), [dependency-cruiser](docs/usage.md#dependency-cruiser) |
+| Checks | ArchUnit, Checkstyle, PMD, [SpotBugs](docs/usage.md#spotbugs), JaCoCo coverage rules (at task end), [ESLint](docs/usage.md#eslint), [dependency-cruiser](docs/usage.md#dependency-cruiser), and [any command](docs/usage.md#any-command), such as your tests or `tsc --noEmit` |
 | Build | Maven, with or without the Maven Wrapper, and `mvnd` for checks after each edit; npm with the project's own ESLint and dependency-cruiser |
 | Layout | One project, a multi-module reactor, or a workspace of several Maven and npm projects |
 
 Known limits:
 
-- Only Maven projects and npm projects with ESLint or dependency-cruiser. On npm projects there is no `tsc` check and no coverage check yet. In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package. Below a root with dependency-cruiser alone, it still writes each package's ESLint check.
+- Only Maven projects and npm projects with ESLint or dependency-cruiser. On npm projects `init` writes no test, `tsc` or coverage check: add your tests or `tsc --noEmit` as [a command check](docs/usage.md#any-command). In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package. Below a root with dependency-cruiser alone, it still writes each package's ESLint check.
 - `init` finds ESLint only with its flat configuration (`eslint.config.*`). With `.eslintrc`, [write the check yourself](docs/usage.md#eslint).
 - dependency-cruiser 18 does not support TypeScript 7 yet. With it, the `depcruise` check blocks and says it analyzed no source: [use TypeScript 5](docs/usage.md#dependency-cruiser).
 - PMD and SpotBugs cannot be limited to one file from the command line, so they check the whole project each time they run. `init` gives them [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so they wait for 5 edited files or 100 written lines and shows the failures of all of them.

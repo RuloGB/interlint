@@ -10,6 +10,17 @@ const FOOTER = "Fix these problems before continuing."
 /** Formats the outcomes for the agent. Returns an empty string when every check passed. */
 export function formatOutcomes(outcomes: CheckOutcome[]): string {
   const blocks = outcomes.flatMap((outcome) => {
+    if (outcome.status === "violations" && outcome.check.report === "exit-code") {
+      return outcome.failures.map((failure) =>
+        [
+          `✗ ${outcome.check.name} · ${failure.title}`,
+          "",
+          `  Command: ${outcome.check.run}`,
+          "  Last lines of its output:",
+          ...failure.violations.flatMap(({ text }) => text.split("\n").map((line) => `    ${line}`)),
+        ].join("\n"),
+      )
+    }
     if (outcome.status === "violations") {
       const failures = outcome.failures.map((failure) =>
         [`✗ ${outcome.check.name} · ${failure.title}`, "", ...violationLines(failure.violations)].join("\n"),
@@ -43,7 +54,9 @@ export function formatOutcomes(outcomes: CheckOutcome[]): string {
         [
           outcome.exitCode === 0
             ? `✗ ${outcome.check.name} · the command exited 0 but ${NO_RESULT[outcome.check.report]}`
-            : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ${tool} failures`,
+            : outcome.check.report === "exit-code"
+              ? `✗ ${outcome.check.name} · the command did not run: it was not found or could not start (exit code ${outcome.exitCode})`
+              : `✗ ${outcome.check.name} · the command failed (exit code ${outcome.exitCode}) and left no ${tool} failures`,
           "",
           `  Command: ${outcome.command}`,
           "  Last lines of its output:",

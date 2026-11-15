@@ -1,4 +1,4 @@
-export const REPORTS = ["archunit", "maven", "jacoco", "eslint", "depcruise"] as const
+export const REPORTS = ["archunit", "maven", "jacoco", "eslint", "depcruise", "exit-code"] as const
 export const WHENS = ["edit", "task-end"] as const
 
 export type Report = (typeof REPORTS)[number]
@@ -10,14 +10,16 @@ const SCRIPT_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs",
 /**
  * The files whose change makes an `edit` check worth running, by report format. Coverage needs the whole test suite
  * and is measured for a whole module, so no edit runs a JaCoCo check. ESLint's are a fixed list (decision 53): with
- * its older configuration format, ESLint checks any file it is given, whatever it is.
+ * its older configuration format, ESLint checks any file it is given, whatever it is. Interlint cannot tell what a
+ * team command checks, so any file of its project is one of its sources.
  */
-const SOURCE_EXTENSIONS: Record<Report, readonly string[]> = {
+const SOURCE_EXTENSIONS: Record<Report, readonly string[] | "any"> = {
   archunit: [".java"],
   maven: [".java"],
   jacoco: [],
   eslint: SCRIPT_EXTENSIONS,
   depcruise: SCRIPT_EXTENSIONS,
+  "exit-code": "any",
 }
 
 /** The report formats a check may use only at task end, with the reason `interlint.yaml` gives for it. */
@@ -30,6 +32,7 @@ export const REPORT_TOOLS: Record<Report, string> = {
   jacoco: "JaCoCo",
   eslint: "ESLint",
   depcruise: "dependency-cruiser",
+  "exit-code": "command",
 }
 
 /** What a run that exits 0 without a result of its tool did not do, as the output says it. */
@@ -39,6 +42,8 @@ export const NO_RESULT: Record<Report, string> = {
   jacoco: "JaCoCo checked no coverage rule",
   eslint: "wrote no ESLint report",
   depcruise: "dependency-cruiser analyzed no source: it found no module, or no TypeScript compiler it supports",
+  // Never shown: a team command that exits 0 passes.
+  "exit-code": "gave no result",
 }
 
 /**
@@ -55,12 +60,15 @@ export const EDIT_SHOWS_CHANGED_FILES_ONLY: Record<Report, boolean> = {
   jacoco: false,
   eslint: true,
   depcruise: true,
+  "exit-code": false,
 }
 
 /** Whether `file`, relative to the project, is a source the check verifies. */
 export function isSourceOf(report: Report, file: string): boolean {
+  const extensions = SOURCE_EXTENSIONS[report]
+  if (extensions === "any") return true
   const lower = file.toLowerCase()
-  return SOURCE_EXTENSIONS[report].some((extension) => lower.endsWith(extension))
+  return extensions.some((extension) => lower.endsWith(extension))
 }
 
 export interface Check {

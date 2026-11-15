@@ -137,7 +137,7 @@ describe("eslintReader", () => {
     const before = eslintReader.snapshot(dir)
     writeReport([entry("src/a.ts", anyError)])
 
-    const result = eslintReader.read(dir, before, "")
+    const result = eslintReader.read(dir, before, "", { exitCode: 0, output: "" })
 
     expect(result.found).toBe(true)
     expect(result.failures.map((failure) => failure.title)).toEqual(["@typescript-eslint/no-explicit-any"])
@@ -146,11 +146,11 @@ describe("eslintReader", () => {
   it("ignores a report left by an earlier run", () => {
     writeReport([entry("src/a.ts", anyError)])
 
-    expect(eslintReader.read(dir, eslintReader.snapshot(dir), "")).toEqual({ found: false, failures: [] })
+    expect(eslintReader.read(dir, eslintReader.snapshot(dir), "", { exitCode: 0, output: "" })).toEqual({ found: false, failures: [] })
   })
 
   it("finds no report when the run wrote none", () => {
-    expect(eslintReader.read(dir, eslintReader.snapshot(dir), "")).toEqual({ found: false, failures: [] })
+    expect(eslintReader.read(dir, eslintReader.snapshot(dir), "", { exitCode: 0, output: "" })).toEqual({ found: false, failures: [] })
   })
 })
 
@@ -257,7 +257,7 @@ function eslintDeps(fake: FakeRun, options: { mvnd?: boolean } = {}) {
       if (fake.report !== undefined) writeReport(fake.report, cwd)
       return { exitCode: fake.exitCode, output: fake.output ?? "" }
     },
-    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: eslintReader, depcruise: unused },
+    readers: { archunit: unused, maven: unused, jacoco: unused, eslint: eslintReader, depcruise: unused, "exit-code": unused },
     hasExecutable: (name) => options.mvnd === true && name === "mvnd",
     lock: (_projectDir, work) => work(),
     changes: {

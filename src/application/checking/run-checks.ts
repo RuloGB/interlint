@@ -174,8 +174,9 @@ async function passedOnRecheck(
     if (recheck === undefined) continue
     const command = usesMaven(recheck) && deps.hasExecutable(MAVEN_DAEMON) ? withMavenDaemon(recheck) : recheck
     const startedAt = performance.now()
-    const { exitCode, output } = await deps.run(command, dir)
-    const { found, failures, otherFailure } = reader.read(dir, new Map(), output)
+    const ran = await deps.run(command, dir)
+    const { exitCode, output } = ran
+    const { found, failures, otherFailure } = reader.read(dir, new Map(), output, ran)
     if (exitCode === 0 && found && failures.length === 0 && otherFailure !== true) {
       passed.set(check, Math.round(performance.now() - startedAt))
     }
@@ -346,9 +347,9 @@ async function attempt(checkDir: string, check: Check, command: string, { run, r
   const reader = readers[check.report]
   const before = reader.snapshot(checkDir)
   const startedAt = performance.now()
-  const { exitCode, output } = await run(command, checkDir)
+  const ran = await run(command, checkDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  return { exitCode, output, durationMs, ...reader.read(checkDir, before, output) }
+  return { exitCode: ran.exitCode, output: ran.output, durationMs, ...reader.read(checkDir, before, ran.output, ran) }
 }
 
 function outcomeOf(
