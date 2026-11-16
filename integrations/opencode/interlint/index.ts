@@ -65,6 +65,8 @@ const PROTECTED_CHECK = "protected files"
 /** What the main agent is told before its task-end failures. */
 const MAIN_BLOCK_NOTE =
   "Fix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task."
+/** What the note adds when the protected files failed too: their message may tell the agent to ask the user. */
+const PROTECTED_APART_NOTE = " The protected files are a separate case: follow the instructions in their own message."
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** Keeps the protected files of the session in the agent's context as they are. */
@@ -135,11 +137,13 @@ function blockText(attempt: number, output: string): string {
 /**
  * The message that resumes the main agent whose task-end checks failed. One told to change nothing else answers with
  * a question instead of a fix, and each question only spends an attempt. The protected files' failure says what to
- * do itself, which may be to ask the user.
+ * do itself, which may be to ask the user: alone it gets no note, and next to a failed check the note leaves it apart.
  */
 function mainBlockText(attempt: number, output: string): string {
-  const checkFailed = failedNames(output).some((name) => name !== PROTECTED_CHECK)
-  return blockText(attempt, checkFailed ? `${MAIN_BLOCK_NOTE}\n\n${output}` : output)
+  const failed = failedNames(output)
+  if (!failed.some((name) => name !== PROTECTED_CHECK)) return blockText(attempt, output)
+  const apart = failed.includes(PROTECTED_CHECK) ? PROTECTED_APART_NOTE : ""
+  return blockText(attempt, `${MAIN_BLOCK_NOTE}${apart}\n\n${output}`)
 }
 
 /**

@@ -47,11 +47,13 @@ export function decideStop(
 /**
  * What a blocked agent is told before the failures. An agent that answers with a question instead of a fix only
  * spends an attempt: nobody answers a subagent, and a main agent told to change nothing else asks before it fixes.
- * The protected files' failure says what to do itself, which may be to ask the user.
+ * The protected files' failure says what to do itself, which may be to ask the user: alone it gets no note, and next
+ * to a failed check the note leaves it apart.
  */
 function blockNote(request: StopRequest, failed: readonly string[]): string {
   if (request.agentId !== undefined) return SUBAGENT_BLOCK_NOTE
-  return failed.some((name) => name !== PROTECTED_CHECK) ? MAIN_BLOCK_NOTE : ""
+  if (!failed.some((name) => name !== PROTECTED_CHECK)) return ""
+  return `${MAIN_BLOCK_NOTE}${failed.includes(PROTECTED_CHECK) ? PROTECTED_APART_NOTE : ""}\n\n`
 }
 
 /** The same words as the OpenCode plugin's. */
@@ -59,4 +61,7 @@ const SUBAGENT_BLOCK_NOTE = `Fix these failures yourself before you answer: aski
 
 /** The same words as the OpenCode plugin's. */
 const MAIN_BLOCK_NOTE =
-  "Fix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task.\n\n"
+  "Fix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task."
+
+/** The same words as the OpenCode plugin's. */
+const PROTECTED_APART_NOTE = " The protected files are a separate case: follow the instructions in their own message."
