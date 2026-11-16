@@ -250,7 +250,9 @@ describe("interlint hook codex stop", () => {
     const output = decisionOf(stdout)
     expect(Object.keys(output)).toEqual(["decision", "reason"])
     expect(output.decision).toBe("block")
-    expect(output.reason).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+    expect(output.reason).toMatch(
+      /^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\nFix these failures before you answer: .* Asking the user whether to fix them does not end the task\.\n\n✗ architecture · ARCH-01/,
+    )
   })
 
   it("lets the task end after 3 blocks in a row, and does not block again while Codex keeps continuing", async () => {

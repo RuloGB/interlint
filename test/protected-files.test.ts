@@ -8,6 +8,7 @@ import { ConfigError } from "../src/application/checking/ports.js"
 import { isProtected, protectedChanges, withApprovedEdits } from "../src/domain/protected-files.js"
 import { main } from "../src/main.js"
 
+const VIOLATIONS_XML = readFileSync(join(import.meta.dirname, "fixtures", "surefire", "two-rules-violated.xml"), "utf8")
 const PASSING_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="ArchitectureRulesTest" tests="1"><testcase name="DOMAIN_IS_PURE" classname="ArchitectureRulesTest"/></testsuite>`
 
@@ -39,13 +40,14 @@ function writeFile(path: string, content: string) {
   writeFileSync(join(projectDir, path), content)
 }
 
-/** A project whose check passes, so only the protected files can block. */
-function project(config = CONFIG(PROTECTED)) {
+/** A project whose check passes unless it is given a failing report, so only the protected files can block. */
+function project(config = CONFIG(PROTECTED), report = PASSING_XML) {
   writeFile(
     "check.mjs",
     `import { mkdirSync, writeFileSync } from "node:fs"
 mkdirSync("target/surefire-reports", { recursive: true })
-writeFileSync("target/surefire-reports/TEST-ArchitectureRulesTest.xml", ${JSON.stringify(PASSING_XML)})
+writeFileSync("target/surefire-reports/TEST-ArchitectureRulesTest.xml", ${JSON.stringify(report)})
+process.exit(${report.includes("<failure") ? 1 : 0})
 `,
   )
   writeFile("interlint.yaml", config)
@@ -159,6 +161,8 @@ describe("protected files in Claude Code", () => {
     expect(stderr).toContain(`  ${ARCH_TEST} (changed)`)
     expect(stderr).toContain("Undo the change: put each file back as it was.")
     expect(stderr).toContain("If the task needs the change, make it with your edit tool: the user is asked to approve it.")
+    // The protected files' failure says what to do itself: the note for failed checks would contradict it.
+    expect(stderr).not.toContain("Fix these failures before you answer")
   })
 
   it("blocks for a deleted protected file, not for a new file a glob matches", async () => {
@@ -315,6 +319,23 @@ describe("protected files in Codex", () => {
     expect(block.decision).toBe("block")
     expect(block.reason).toContain(`  ${ARCH_TEST} (changed)`)
     expect(block.reason).toContain("If the task needs the change, ask the user whether they want it.")
+  })
+
+  it("keeps the instructions of the protected files apart when a check fails too", async () => {
+    project(CONFIG(PROTECTED), VIOLATIONS_XML)
+    await codex("session-start", { source: "startup" })
+    writeFile(ARCH_TEST, "changed\n")
+    // An edit marks the project as changed, so its checks run at task end.
+    await codex("post-edit", { hook_event_name: "PostToolUse", ...patch("README.md") })
+
+    const { reason } = JSON.parse((await codex("stop", { stop_hook_active: false })).stdout)
+
+    // The note for the failed checks must not undo "ask the user", which the protected files' message says.
+    expect(reason).toContain(
+      "Asking the user whether to fix them does not end the task. The protected files are a separate case: follow the instructions in their own message.\n\n✗ protected files · changed without the user's approval",
+    )
+    expect(reason).toContain("If the task needs the change, ask the user whether they want it.")
+    expect(reason).toContain("✗ architecture · ARCH-01")
   })
 
   it("does not warn about a new file a glob matches: it cannot block the task end", async () => {

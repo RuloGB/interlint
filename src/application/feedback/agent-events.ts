@@ -56,12 +56,12 @@ export async function subagentStop(
 ): Promise<StopOutcome> {
   const files = deps.subagentFiles.list(request)
   if (files.length === 0) return { decision: { action: "end" }, notice: "", passed: "" }
-  const { report, notice, passed } = await checkProject(
+  const { report, notice, passed, failed } = await checkProject(
     projectDir,
     { when: "task-end", files, changedOnly: true, agent: context },
     deps.checking,
   )
-  const decision = decideStop(request, report, deps.stops)
+  const decision = decideStop(request, report, failed, deps.stops)
   if (decision.action !== "block") deps.subagentFiles.forget(request)
   return { decision, notice, passed }
 }
@@ -77,12 +77,12 @@ export async function mainStop(
   context?: AgentContext,
   asked = false,
 ): Promise<StopOutcome> {
-  const { report, notice, passed } = await checkProject(
+  const { report, notice, passed, failed } = await checkProject(
     projectDir,
     { when: "task-end", changedOnly: true, agent: context, asked },
     deps.checking,
   )
-  return { decision: decideStop(request, report, deps.stops), notice, passed }
+  return { decision: decideStop(request, report, failed, deps.stops), notice, passed }
 }
 
 /**

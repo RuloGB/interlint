@@ -60,6 +60,13 @@ const REPORT_MARK = "✗ "
 const NOTICE_MARK = "ℹ Interlint · for the user:"
 /** How the CLI starts the line that names the checks that ran, when they all passed. */
 const PASSED_MARK = "✓ Interlint · "
+/** The name the CLI gives the failure of the protected files in its report. */
+const PROTECTED_CHECK = "protected files"
+/** What the main agent is told before its task-end failures. */
+const MAIN_BLOCK_NOTE =
+  "Fix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task."
+/** What the note adds when the protected files failed too: their message may tell the agent to ask the user. */
+const PROTECTED_APART_NOTE = " The protected files are a separate case: follow the instructions in their own message."
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** Keeps the protected files of the session in the agent's context as they are. */
@@ -105,11 +112,16 @@ function passedLine(run: CheckRun): string | undefined {
  */
 function failedLine(run: CheckRun): string | undefined {
   if (!isReport(run)) return undefined
-  const names = run.output
+  return `${REPORT_MARK}Interlint · checks failed after this edit: ${failedNames(run.output).join(", ")}`
+}
+
+/** The names of the checks that failed in a report of the CLI, each once. */
+function failedNames(output: string): string[] {
+  const names = output
     .split(/\r?\n/)
     .filter((line) => line.startsWith(REPORT_MARK) && line.includes(" · "))
     .map((line) => line.slice(REPORT_MARK.length, line.indexOf(" · ")))
-  return `${REPORT_MARK}Interlint · checks failed after this edit: ${[...new Set(names)].join(", ")}`
+  return [...new Set(names)]
 }
 
 /** Whether the CLI ran and found failures. cmd.exe also exits with 1 when it cannot find the CLI, so exit 1 alone does not mean violations. */
@@ -120,6 +132,18 @@ function isReport(run: CheckRun): boolean {
 /** The message that resumes an agent whose task-end checks failed. */
 function blockText(attempt: number, output: string): string {
   return `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${output}`
+}
+
+/**
+ * The message that resumes the main agent whose task-end checks failed. One told to change nothing else answers with
+ * a question instead of a fix, and each question only spends an attempt. The protected files' failure says what to
+ * do itself, which may be to ask the user: alone it gets no note, and next to a failed check the note leaves it apart.
+ */
+function mainBlockText(attempt: number, output: string): string {
+  const failed = failedNames(output)
+  if (!failed.some((name) => name !== PROTECTED_CHECK)) return blockText(attempt, output)
+  const apart = failed.includes(PROTECTED_CHECK) ? PROTECTED_APART_NOTE : ""
+  return blockText(attempt, `${MAIN_BLOCK_NOTE}${apart}\n\n${output}`)
 }
 
 /**
@@ -159,7 +183,7 @@ export class TaskEndGate {
       }
     }
     this.blocks.set(sessionID, attempt)
-    return { action: "continue", text: blockText(attempt, run.output) }
+    return { action: "continue", text: mainBlockText(attempt, run.output) }
   }
 }
 
