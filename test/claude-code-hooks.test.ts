@@ -204,7 +204,7 @@ describe("interlint hook claude-code stop", () => {
     const { exitCode, stderr } = await hook("stop", stopInput(false))
 
     expect(exitCode).toBe(2)
-    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\n✗ odrers\/architecture · its dir "odrers" does not exist/)
+    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\nFix these failures before you answer: .*\n\n✗ odrers\/architecture · its dir "odrers" does not exist/)
   })
 
   it("runs the checks again once a file changed after they passed, whoever changed it", async () => {
@@ -230,7 +230,9 @@ describe("interlint hook claude-code stop", () => {
 
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
-    expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+    expect(stderr).toMatch(
+      /^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\nFix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else\. Asking the user whether to fix them does not end the task\.\n\n✗ architecture · ARCH-01/,
+    )
   })
 
   it("runs every check, edit ones included, and shows the user the checks that passed", async () => {
@@ -394,7 +396,7 @@ describe("interlint hook claude-code subagent-stop", () => {
     expect(attempts[3]).toEqual({ exitCode: 0, stdout: "", stderr: "" })
     const { exitCode, stderr } = await hook("stop", stopInput(false))
     expect(exitCode).toBe(2)
-    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-01/)
+    expect(stderr).toMatch(/\(attempt 1 of 3\)\.\n\nFix these failures before you answer: .*\n\n✗ architecture · ARCH-01/)
   })
 
   it("lets a subagent whose checks passed stop without a message: the main agent's stop shows them", async () => {
@@ -548,7 +550,9 @@ describe("a FreezingArchRule store frozen from broken classes, in the Claude Cod
 
     expect(exitCode).toBe(2)
     expect(stdout).toBe("")
-    expect(stderr).toMatch(/^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\n✗ architecture · ARCH-07: mappers/)
+    expect(stderr).toMatch(
+      /^Interlint: the task cannot end yet \(attempt 1 of 3\)\.\n\nFix these failures before you answer: .*\n\n✗ architecture · ARCH-07: mappers/,
+    )
     expect(stderr).not.toContain("OrderMapper")
     expect(stderr).toContain(`Fix these problems before continuing.\n\n${NOTICE}\n`)
     expect(stderr).toContain("  Agent: do not change the code for this. Tell the user.\n")

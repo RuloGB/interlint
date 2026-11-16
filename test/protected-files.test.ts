@@ -159,6 +159,8 @@ describe("protected files in Claude Code", () => {
     expect(stderr).toContain(`  ${ARCH_TEST} (changed)`)
     expect(stderr).toContain("Undo the change: put each file back as it was.")
     expect(stderr).toContain("If the task needs the change, make it with your edit tool: the user is asked to approve it.")
+    // The protected files' failure says what to do itself: the note for failed checks would contradict it.
+    expect(stderr).not.toContain("Fix these failures before you answer")
   })
 
   it("blocks for a deleted protected file, not for a new file a glob matches", async () => {

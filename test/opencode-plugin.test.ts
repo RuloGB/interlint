@@ -34,9 +34,18 @@ describe("TaskEndGate", () => {
 
     expect(gate.decide("s1", VIOLATIONS)).toEqual({
       action: "continue",
-      text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${VIOLATIONS.output}`,
+      text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\nFix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task.\n\n${VIOLATIONS.output}`,
     })
     expect(gate.decide("s1", VIOLATIONS)).toMatchObject({ action: "continue", text: expect.stringContaining("attempt 2 of 3") })
+  })
+
+  it("leaves the failure of the protected files as it is: it says what to do itself", () => {
+    const output = "✗ protected files · changed without the user's approval\n\n  interlint.yaml (changed)\n"
+
+    expect(new TaskEndGate().decide("s1", { exitCode: 1, output })).toEqual({
+      action: "continue",
+      text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${output}`,
+    })
   })
 
   it("stops blocking after the limit and only reports", () => {

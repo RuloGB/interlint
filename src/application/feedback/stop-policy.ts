@@ -1,3 +1,4 @@
+import { PROTECTED_CHECK } from "../../domain/protected-files.js"
 import type { AgentRef, StopCounter } from "./ports.js"
 
 /** The same limit as the OpenCode plugin. */
@@ -11,13 +12,18 @@ export interface StopRequest extends AgentRef {
 }
 
 /**
- * Decides what a stop does with the task-end report, empty when every check passed.
+ * Decides what a stop does with the task-end report, empty when every check passed. `failed` names the checks in it.
  * The blocks in a row are counted per session, and per subagent for a subagent's stop.
  * A stop that the agent did not reach by continuing after a blocked stop starts a new count.
  * Past the limit the count stays, so stops in the same row (another stop hook may keep
  * the agent going) end quietly instead of blocking again.
  */
-export function decideStop(request: StopRequest, report: string, counter: StopCounter): StopDecision {
+export function decideStop(
+  request: StopRequest,
+  report: string,
+  failed: readonly string[],
+  counter: StopCounter,
+): StopDecision {
   if (report === "") {
     counter.clear(request)
     return { action: "end" }
@@ -32,13 +38,25 @@ export function decideStop(request: StopRequest, report: string, counter: StopCo
     }
   }
   if (attempt > MAX_CONSECUTIVE_BLOCKS) return { action: "end" }
-  // A subagent that answers with a question instead of a fix only spends an attempt: nobody answers it.
-  const forSubagent = request.agentId === undefined ? "" : SUBAGENT_BLOCK_NOTE
   return {
     action: "block",
-    text: `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${forSubagent}${report}`,
+    text: `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${blockNote(request, failed)}${report}`,
   }
+}
+
+/**
+ * What a blocked agent is told before the failures. An agent that answers with a question instead of a fix only
+ * spends an attempt: nobody answers a subagent, and a main agent told to change nothing else asks before it fixes.
+ * The protected files' failure says what to do itself, which may be to ask the user.
+ */
+function blockNote(request: StopRequest, failed: readonly string[]): string {
+  if (request.agentId !== undefined) return SUBAGENT_BLOCK_NOTE
+  return failed.some((name) => name !== PROTECTED_CHECK) ? MAIN_BLOCK_NOTE : ""
 }
 
 /** The same words as the OpenCode plugin's. */
 const SUBAGENT_BLOCK_NOTE = `Fix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n`
+
+/** The same words as the OpenCode plugin's. */
+const MAIN_BLOCK_NOTE =
+  "Fix these failures before you answer: they are in the projects this task changed, so fixing them is part of the task, even if you were asked to change nothing else. Asking the user whether to fix them does not end the task.\n\n"
