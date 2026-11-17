@@ -142,9 +142,11 @@ async function endTurn(projectDir: string, config: Config, session: string, deps
  */
 export async function startTurn(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
   const { turns, protection } = deps
-  const turnEnd = turns?.read(projectDir, session)
-  if (turns === undefined || turnEnd === undefined) return
+  if (turns === undefined) return
+  // Read under the lock, so a task end that saves a newer record meanwhile is never applied from a stale copy.
   await deps.lock(projectDir, async () => {
+    const turnEnd = turns.read(projectDir, session)
+    if (turnEnd === undefined) return
     takeProjectsBetweenTurns(projectDir, session, turnEnd.projects, deps)
     if (protection && turnEnd.protected) renewBetweenTurns(projectDir, config, session, turnEnd.protected, protection)
     turns.forget(projectDir, session)

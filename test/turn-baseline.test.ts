@@ -222,6 +222,19 @@ describe("the turn step the OpenCode plugin runs", () => {
     expect(ran()).toBe(false)
   })
 
+  it("takes nothing in a session the CLI keeps paused, even when the plugin forgot the pause", async () => {
+    project(PASSING_XML)
+    writeFile(ORDER, "class Order {}\n")
+    expect((await cli(["check", "--when", "task-end", "--changed", "--agent-context"], context)).exitCode).toBe(0)
+    await cli(["check", "--when", "pause", "--agent-context"], context)
+    pull()
+
+    expect(await cli(["check", "--when", "turn-start", "--agent-context"], context)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const taskEnd = await cli(["check", "--when", "task-end", "--changed", "--agent-context"], context)
+
+    expect(taskEnd.exitCode).toBe(1)
+  })
+
   it("needs the session in --agent-context", async () => {
     project(PASSING_XML)
 

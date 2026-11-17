@@ -137,7 +137,7 @@ export async function userPrompt(
   const session = agent.sessionId
   if (agent.agentId !== undefined || session === "") return ""
   if (mark === undefined) {
-    if (!deps.pauses.isPaused(session)) await userTurn(projectDir, session, deps)
+    await userTurn(projectDir, session, deps)
     return ""
   }
   if (mark === "pause") {
@@ -171,8 +171,12 @@ export async function resumeSession(projectDir: string, session: string, deps: F
   }
 }
 
-/** Takes what changed since the main agent's last turn in `session` ended as the user's. */
+/**
+ * Takes what changed since the main agent's last turn in `session` ended as the user's. Nothing in a paused session:
+ * the resume takes everything as it is then.
+ */
 export async function userTurn(projectDir: string, session: string, deps: FeedbackDeps): Promise<void> {
+  if (isPaused(session, deps)) return
   // Without a valid interlint.yaml there is nothing to take: the next hook reports it.
   const config = configOf(projectDir, deps)
   if (config) await startTurn(projectDir, config, session, deps.checking)
