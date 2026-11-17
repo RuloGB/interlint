@@ -33,7 +33,7 @@ import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { fileProtectedBaselines } from "./adapters/driven/state/protected-baselines.js"
-import { stateLocation } from "./adapters/driven/state/user-state.js"
+import { stateLocation, userStateDir } from "./adapters/driven/state/user-state.js"
 import { CONFIG_FILE, loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
 import { type CliDeps, runCli } from "./adapters/driving/cli/cli.js"
 import type { Io } from "./adapters/driving/cli/cli-io.js"
@@ -60,6 +60,7 @@ const checking: CheckProjectDeps = {
   pending: filePendingEdits(),
   metrics: fileMetrics(),
   protection: { files: diskProtectedFiles, baselines: fileProtectedBaselines() },
+  resumes: fileProtectedBaselines(() => userStateDir(), "resumed"),
 }
 
 const agents = {

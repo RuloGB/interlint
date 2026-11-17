@@ -83,11 +83,11 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
 
 /**
  * When the user resumes Interlint in the main agent's `session` (F26): what changed while it was paused is taken as it
- * is, so only the changes from now on are checked. Every project counts as unchanged, no `edit` check waits for
- * earlier edits, and the protected files are kept as they are now.
+ * is, so only the changes from now on are checked. The session's task end skips a project until it changes, no
+ * `edit` check waits for earlier edits, and the protected files are kept as they are now.
  */
 export async function restartSession(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
-  await restartTracking(projectDir, config, deps)
+  await restartTracking(projectDir, config, session, deps)
   const { protection } = deps
   if (protection) await deps.lock(projectDir, async () => renewProtection(projectDir, config, session, protection))
 }

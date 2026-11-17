@@ -167,6 +167,12 @@ export type EditScope = (command: string, files: string[], dir: string) => strin
  */
 export type ProtectedFiles = (projectDir: string, patterns: readonly string[]) => Fingerprint
 
+/**
+ * The fingerprint of each project, by the directory its checks run in, when the user resumed Interlint in a session
+ * (F26), kept per project and session. Kept apart from the change tracker, which every session of the project shares.
+ */
+export type ResumeBaselines = ProtectedBaselines
+
 /** The protected files' fingerprint of each agent session, kept across the processes of its hooks. */
 export interface ProtectedBaselines {
   /** The session's fingerprint: `undefined` when none was saved or it cannot be read. */

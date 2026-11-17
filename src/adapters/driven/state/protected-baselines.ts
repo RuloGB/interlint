@@ -8,12 +8,15 @@ import { projectKey, userStateDir, writeWhole } from "./user-state.js"
 /** A session nobody resumed for this long leaves its fingerprint behind no more. */
 const BASELINE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-/** One JSON file per project and session, written whole, under the user's state directory. */
-export function fileProtectedBaselines(stateDir: () => string = userStateDir): ProtectedBaselines {
+/**
+ * One JSON file per project and session, written whole, under the user's state directory, in `interlint/<kind>`. The
+ * resume baselines (F26) use the same format under another kind.
+ */
+export function fileProtectedBaselines(stateDir: () => string = userStateDir, kind = "protected"): ProtectedBaselines {
   const fileOf = (projectDir: string, session: string) => {
     // Hashed, because the session ID comes from the hook input and goes into a path.
     const name = createHash("sha256").update(`${projectKey(projectDir)}\0${session}`).digest("hex").slice(0, 32)
-    return join(stateDir(), "interlint", "protected", `${name}.json`)
+    return join(stateDir(), "interlint", kind, `${name}.json`)
   }
   return {
     read(projectDir, session) {

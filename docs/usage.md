@@ -493,7 +493,7 @@ Sometimes you do not want Interlint for a while, such as when you asked for one 
 - Interlint is paused in that session until you write `interlint: resume`, in the main agent and in its subagents. A session that ends paused had no checks from then on. A new session, or another one, starts active.
 - While it is paused, Interlint does nothing: no check after an edit, none at task end, and no protected file is guarded.
 - You see a message when it pauses and when it resumes. At each task end of the main agent, a message reminds you that it is paused and how to resume it.
-- **Resuming checks from that moment.** What changed while Interlint was paused is taken as it is: those changes do not block, a protected file changed then becomes the new reference, and the block count and the edits an `every` or `lines` check waits for start from zero.
+- **Resuming checks from that moment.** What changed while Interlint was paused is taken as it is: those changes do not block, a protected file changed then becomes the new reference, and the block count and the edits an `every` or `lines` check waits for start from zero. Until the agent changes a project again, that session's task end does not check it. Another session in the same project keeps its own unchecked changes.
 - After the main agent's 3rd blocked task end, the message that lets the task end tells you that you can pause. The agent is never told.
 - Only your message counts: the mark in a file, in a command's output or in the agent's own message pauses nothing. A subagent's prompt is written by the agent, so it does not count either.
 - Each pause and resume is kept in your [metrics](#metrics).

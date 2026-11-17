@@ -220,6 +220,32 @@ describe("resuming Interlint in a Claude Code session", () => {
     expect(ran()).toBe(false)
   })
 
+  it("leaves another session's unchecked changes alone: its task end still blocks", async () => {
+    project(VIOLATIONS_XML, { when: "task-end" })
+    await edit(ORDER, "class Order {}\n", { session_id: "session-2" })
+    await prompt("interlint: pause")
+
+    await prompt("interlint: resume")
+    const { exitCode, stderr } = await stop(false, { session_id: "session-2" })
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain("(attempt 1 of 3)")
+  })
+
+  it("checks the project again once the agent changes it after the resume", async () => {
+    project(PASSING_XML, { when: "task-end" })
+    await edit(ORDER)
+    expect((await stop()).exitCode).toBe(0)
+    await prompt("interlint: pause")
+    writeFile("report.xml", VIOLATIONS_XML)
+    await edit(ORDER, "class Order { int broken; }\n")
+    await prompt("interlint: resume")
+
+    await edit("src/main/java/shop/Customer.java")
+
+    expect((await stop()).exitCode).toBe(2)
+  })
+
   it("does not block for a protected file changed while Interlint was paused", async () => {
     project(PASSING_XML, { when: "task-end", top: `protected:\n  - "src/test/java/**/arch/**"\n` })
     await claude("session-start", { hook_event_name: "SessionStart" })
@@ -452,10 +478,12 @@ describe("the pause steps the OpenCode plugin runs", () => {
     forgetRun()
 
     expect(await cli(["check", "--when", "resume", "--agent-context"], context)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
-    const taskEnd = await cli(["check", "--when", "task-end", "--changed"], "")
+    const taskEnd = await cli(["check", "--when", "task-end", "--changed", "--agent-context"], context)
+    const otherSession = await cli(["check", "--when", "task-end", "--changed"], "")
 
     expect(taskEnd.exitCode).toBe(0)
-    expect(ran()).toBe(false)
+    // Without the session, as a run by hand or another session, the project's change still counts.
+    expect(otherSession.exitCode).toBe(1)
   })
 
   it("keeps the pause and resume in the metrics with the plugin's context", async () => {
