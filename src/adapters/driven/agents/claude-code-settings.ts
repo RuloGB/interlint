@@ -12,7 +12,12 @@ export interface InterlintHook {
   command: string
   /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones give Maven time. */
   timeout: number
+  /** Shown to the user while the hook runs, for the hooks that run checks. */
+  statusMessage?: string
 }
+
+/** The text the agent shows while a hook runs the checks, so the user knows the task has not ended yet. */
+export const RUNNING_CHECKS = "Interlint: running checks"
 
 /**
  * `Edit` and `Write` are the tools that change source files; `NotebookEdit` only changes notebooks.
@@ -24,9 +29,14 @@ const HOOKS: InterlintHook[] = [
   { event: "SessionStart", command: "interlint hook claude-code session-start", timeout: 30 },
   { event: "UserPromptSubmit", command: "interlint hook claude-code user-prompt", timeout: 120 },
   { event: "PreToolUse", matcher: "Edit|Write", command: "interlint hook claude-code pre-edit", timeout: 30 },
-  { event: "PostToolUse", matcher: "Edit|Write", command: "interlint hook claude-code post-edit", timeout: 120 },
-  { event: "Stop", command: "interlint hook claude-code stop", timeout: 600 },
-  { event: "SubagentStop", command: "interlint hook claude-code subagent-stop", timeout: 600 },
+  { event: "PostToolUse", matcher: "Edit|Write", command: "interlint hook claude-code post-edit", timeout: 120, statusMessage: RUNNING_CHECKS },
+  { event: "Stop", command: "interlint hook claude-code stop", timeout: 600, statusMessage: RUNNING_CHECKS },
+  {
+    event: "SubagentStop",
+    command: "interlint hook claude-code subagent-stop",
+    timeout: 600,
+    statusMessage: RUNNING_CHECKS,
+  },
 ]
 
 type JsonObject = Record<string, unknown>
@@ -39,7 +49,7 @@ export const claudeCodeSettingsFiles: AgentFiles = (projectDir) => {
 }
 
 /**
- * Leaves each hook once: the first handler with the same command, matcher and timeout stays,
+ * Leaves each hook once: the first handler with the same command, matcher, timeout and status message stays,
  * every other handler with that command is an older setup or a copy and is removed, and the hook
  * is added when none was the same. Settings that need no change keep their exact text, so a second
  * `init` leaves the file as it is.
@@ -70,7 +80,14 @@ export function withInterlintHooks(current: string | undefined, file: string, in
     if (!installed) {
       kept.push({
         ...(hook.matcher === undefined ? {} : { matcher: hook.matcher }),
-        hooks: [{ type: "command", command: hook.command, timeout: hook.timeout }],
+        hooks: [
+          {
+            type: "command",
+            command: hook.command,
+            timeout: hook.timeout,
+            ...(hook.statusMessage === undefined ? {} : { statusMessage: hook.statusMessage }),
+          },
+        ],
       })
     }
     if (installed && !removed) continue
@@ -100,7 +117,8 @@ function isInstalled(group: JsonObject, handler: JsonObject, hook: InterlintHook
     (group.matcher ?? "") === (hook.matcher ?? "") &&
     handler.type === "command" &&
     handler.command === hook.command &&
-    handler.timeout === hook.timeout
+    handler.timeout === hook.timeout &&
+    handler.statusMessage === hook.statusMessage
   )
 }
 

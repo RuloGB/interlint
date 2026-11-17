@@ -18,11 +18,11 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this writes `.codex/
     "PostToolUse": [
       {
         "matcher": "apply_patch|Edit|Write",
-        "hooks": [{ "type": "command", "command": "interlint hook codex post-edit", "timeout": 120 }]
+        "hooks": [{ "type": "command", "command": "interlint hook codex post-edit", "timeout": 120, "statusMessage": "Interlint: running checks" }]
       }
     ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "interlint hook codex stop", "timeout": 600 }] }],
-    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "interlint hook codex subagent-stop", "timeout": 600 }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "interlint hook codex stop", "timeout": 600, "statusMessage": "Interlint: running checks" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "interlint hook codex subagent-stop", "timeout": 600, "statusMessage": "Interlint: running checks" }] }]
   }
 }
 ```
@@ -31,6 +31,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this writes `.codex/
 - Running `init` again leaves the file byte for byte as it was, and replaces an older version of Interlint's hooks.
 - If you edited `interlint.yaml`, `init --agent codex` keeps it and still writes the hooks. Only `--force` replaces it.
 - `timeout` is in seconds and gives Maven time. When a hook takes longer, Codex goes on without it and does not block.
+- `statusMessage` is what Codex shows while the hook runs, so you know the checks are still running after the agent writes its last message.
 
 `interlint` must be on the `PATH` that Codex runs hooks with.
 
