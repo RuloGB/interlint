@@ -409,6 +409,37 @@ describe("a report that also lists what the build accepted", () => {
     expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
   })
 
+  it("counts the failure the output shows when the command always exits 0, as Maven does with --fail-never", async () => {
+    const deps = depsExiting(0)
+    const read = () => ({ found: true, failures: [failure], failed: true })
+    deps.readers = { ...deps.readers, maven: { snapshot: () => new Map(), read, alsoListsAccepted: true } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(quality), deps)
+
+    expect(outcome).toMatchObject({ status: "violations", failures: [failure] })
+  })
+
+  it("fails with Maven's output when that failure has no report, such as a module that does not compile", async () => {
+    const deps = depsExiting(0)
+    deps.run = async () => ({ exitCode: 0, output: "[ERROR] Failed to execute goal ...:compile on project application" })
+    const read = () => ({ found: false, failures: [], failed: true })
+    deps.readers = { ...deps.readers, maven: { snapshot: () => new Map(), read, alsoListsAccepted: true } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(quality), deps)
+
+    expect(outcome).toMatchObject({ status: "failed", outputTail: "[ERROR] Failed to execute goal ...:compile on project application" })
+  })
+
+  it("passes when the output of such a command shows no failure that counts", async () => {
+    const deps = depsExiting(0)
+    const read = () => ({ found: true, failures: [failure], failed: false })
+    deps.readers = { ...deps.readers, maven: { snapshot: () => new Map(), read, alsoListsAccepted: true } }
+
+    const [outcome] = await runTaskEndChecks("/repo", config(quality), deps)
+
+    expect(outcome).toMatchObject({ status: "passed" })
+  })
+
   it("keeps at edit an ArchUnit failure in a class the edit did not change", async () => {
     const deps = depsExiting(1)
     const elsewhere = { title: "ARCH-01", violations: [{ text: "Customer calls OrderEntity", path: "src/main/java/shop/Customer.java" }] }

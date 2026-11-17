@@ -1252,8 +1252,8 @@ describe("interlint init in a multi-module project", () => {
         when: "edit",
         every: 5, lines: 100,
       },
-      { name: "checkstyle", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
+      { name: "checkstyle", run: "./mvnw -q -fn checkstyle:check@style", report: "maven", when: "edit" },
+      { name: "pmd", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
     ])
   })
 
@@ -1282,7 +1282,7 @@ describe("interlint init in a multi-module project", () => {
 
     expect((await run("init")).exitCode).toBe(0)
     expect(loadConfig(projectDir).checks.map(({ name, run }) => [name, run])).toEqual([
-      ["spotbugs", "./mvnw -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip"],
+      ["spotbugs", "./mvnw -q -fn compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip"],
     ])
 
     reactor("", { managed: [managed("spotbugs-maven-plugin", "spotbugs")], modules: { domain: [], launcher: [] } })
@@ -1305,7 +1305,7 @@ describe("interlint init in a multi-module project", () => {
 
     await run("init")
 
-    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual(["./mvnw -q compile pmd:check -Dcheckstyle.skip"])
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual(["./mvnw -q -fn compile pmd:check -Dcheckstyle.skip"])
   })
 
   describe("from the root of a workspace without pom.xml", () => {
@@ -1322,7 +1322,7 @@ describe("interlint init in a multi-module project", () => {
       expect((await run("init")).exitCode).toBe(0)
 
       expect(loadConfig(projectDir).checks).toEqual([
-        { name: "apps/billing/checkstyle", dir: "apps/billing", run: "mvn -q checkstyle:check@style", report: "maven", when: "edit" },
+        { name: "apps/billing/checkstyle", dir: "apps/billing", run: "mvn -q -fn checkstyle:check@style", report: "maven", when: "edit" },
         {
           name: "orders/architecture",
           dir: "orders",
@@ -1331,8 +1331,8 @@ describe("interlint init in a multi-module project", () => {
           when: "edit",
           every: 5, lines: 100,
         },
-        { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q checkstyle:check@style", report: "maven", when: "edit" },
-        { name: "orders/pmd", dir: "orders", run: "./mvnw -q compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
+        { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q -fn checkstyle:check@style", report: "maven", when: "edit" },
+        { name: "orders/pmd", dir: "orders", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
       ])
       expect(readConfig()).toContain("  - name: orders/architecture\n    dir: orders\n    run: ")
       expect(readConfig()).toContain("    report: archunit\n    when: edit\n    every: 5\n    lines: 100\n")

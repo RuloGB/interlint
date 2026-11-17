@@ -691,3 +691,179 @@ describe("readFreshQualityReports with SpotBugs", () => {
     expect(readFreshQualityReports(projectDir, SPOTBUGS, SINCE_MS)).toBeUndefined()
   })
 })
+
+describe("a reactor checked with --fail-never", () => {
+  const COMMAND = "./mvnw -q -fn compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip"
+  const SPOTBUGS_PLUGIN = "<plugin><groupId>com.github.spotbugs</groupId><artifactId>spotbugs-maven-plugin</artifactId></plugin>"
+  let projectDir: string
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "interlint-fail-never-"))
+  })
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
+  function write(path: string, content: string, writtenAt?: number) {
+    const file = join(projectDir, path)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, content)
+    if (writtenAt !== undefined) utimesSync(file, writtenAt, writtenAt)
+  }
+
+  /**
+   * A parent `shop` with the modules `contract`, whose build does not run SpotBugs, and `orders`, whose build does.
+   * The parent manages SpotBugs, or runs it for every module when `parentRuns`.
+   */
+  function reactor({ parentRuns = false } = {}) {
+    const parentBuild = parentRuns
+      ? `<build><plugins>${SPOTBUGS_PLUGIN}</plugins></build>`
+      : `<build><pluginManagement><plugins>${SPOTBUGS_PLUGIN}</plugins></pluginManagement></build>`
+    write(
+      "pom.xml",
+      `<project><groupId>com.acme</groupId><artifactId>shop</artifactId><properties><spotbugs-maven-plugin.version>4.9.8.3</spotbugs-maven-plugin.version></properties><modules><module>contract</module><module>orders</module></modules>${parentBuild}</project>`,
+    )
+    const parent = "<parent><groupId>com.acme</groupId><artifactId>shop</artifactId></parent>"
+    write("contract/pom.xml", `<project>${parent}<artifactId>contract</artifactId></project>`)
+    write("orders/pom.xml", `<project>${parent}<artifactId>orders</artifactId><build><plugins>${SPOTBUGS_PLUGIN}</plugins></build></project>`)
+  }
+
+  /** A SpotBugs report of `module` with one bug, of the given type, in its `Order.java`. */
+  function bugIn(module: string, type: string, writtenAt?: number) {
+    write(join(module, "src/main/java/shop/Order.java"), "class Order {}")
+    write(
+      join(module, "target/spotbugsXml.xml"),
+      spotbugsXml([join(projectDir, module, "src", "main", "java")], [spotbugsBug(19, 2, type, `${type} in ${module}`)]),
+      writtenAt,
+    )
+  }
+
+  const failedIn = (project: string) =>
+    `[ERROR] Failed to execute goal com.github.spotbugs:spotbugs-maven-plugin:4.9.8.3:check (spotbugs) on project ${project}: failed with 1 bugs and 0 errors -> [Help 1]`
+  const titles = (result: { failures: { title: string }[] }) => result.failures.map((failure) => failure.title)
+
+  it("shows only the failures of the modules whose build runs the plugin, and says the run failed", () => {
+    reactor()
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+    bugIn("orders", "COMMAND_INJECTION")
+
+    const result = readQualityReports(projectDir, before, `${failedIn("contract")}\n${failedIn("orders")}`, COMMAND)
+
+    expect(titles(result)).toEqual(["COMMAND_INJECTION"])
+    expect(result.failed).toBe(true)
+  })
+
+  it("does not count a check that fails only in a module whose build does not run the plugin", () => {
+    reactor()
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    expect(readQualityReports(projectDir, before, failedIn("contract"), COMMAND)).toEqual({ found: true, failures: [], failed: false })
+  })
+
+  it("leaves out the report of a module whose check passed, as it lists only what the build accepted", () => {
+    reactor()
+    write("contract/pom.xml", `<project><parent><artifactId>shop</artifactId></parent><artifactId>contract</artifactId><build><plugins>${SPOTBUGS_PLUGIN}</plugins></build></project>`)
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+    bugIn("orders", "COMMAND_INJECTION")
+
+    expect(titles(readQualityReports(projectDir, before, failedIn("orders"), COMMAND))).toEqual(["COMMAND_INJECTION"])
+  })
+
+  it("counts any other goal that fails, in any module", () => {
+    reactor()
+    const compile =
+      "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:compile (default-compile) on project contract: Compilation failure"
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), compile, COMMAND)).toEqual({ found: false, failures: [], failed: true })
+  })
+
+  it("counts a module whose dependencies cannot be resolved, which Maven names without a plugin", () => {
+    reactor()
+    const unresolved =
+      "[ERROR] Failed to execute goal on project orders: Could not resolve dependencies for project com.acme:orders:jar:1.0.0"
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), unresolved, COMMAND).failed).toBe(true)
+  })
+
+  it("counts an error Maven prints without naming a failed goal, such as a plugin prefix it cannot find", () => {
+    reactor()
+    const noPlugin = "[ERROR] No plugin found for prefix 'spotbugs' in the current project and in the plugin groups"
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), noPlugin, COMMAND).failed).toBe(true)
+  })
+
+  it("counts a failure it would ignore when the output was cut, as the cut part may hold one that counts", () => {
+    reactor()
+    const before = mavenQualityReader.snapshot(projectDir)
+    const cut = { exitCode: 0, output: failedIn("contract"), droppedLines: 4000 }
+
+    expect(mavenQualityReader.read(projectDir, before, failedIn("contract"), cut, COMMAND).failed).toBe(true)
+  })
+
+  it("passes a cut output without failures, as Maven prints them all at the end", () => {
+    reactor()
+    const before = mavenQualityReader.snapshot(projectDir)
+
+    expect(mavenQualityReader.read(projectDir, before, "", { exitCode: 0, output: "", droppedLines: 4000 }, COMMAND).failed).toBe(false)
+  })
+
+  it("counts the check of a module that runs the plugin in a profile, which may be on", () => {
+    reactor()
+    write(
+      "contract/pom.xml",
+      `<project><parent><artifactId>shop</artifactId></parent><artifactId>contract</artifactId><profiles><profile><id>quality</id><activation><activeByDefault>true</activeByDefault></activation><build><plugins>${SPOTBUGS_PLUGIN}</plugins></build></profile></profiles></project>`,
+    )
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    expect(readQualityReports(projectDir, before, failedIn("contract"), COMMAND).failed).toBe(true)
+  })
+
+  it("counts the check of a module whose parent runs the plugin in its <build><plugins>", () => {
+    reactor({ parentRuns: true })
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    const result = readQualityReports(projectDir, before, failedIn("contract"), COMMAND)
+
+    expect(titles(result)).toEqual(["XSS_SERVLET"])
+    expect(result.failed).toBe(true)
+  })
+
+  it("passes when no goal failed", () => {
+    reactor()
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), "", COMMAND)).toEqual({ found: false, failures: [], failed: false })
+  })
+
+  it("reads the run as before without --fail-never", () => {
+    reactor()
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    const result = readQualityReports(projectDir, before, failedIn("contract"), COMMAND.replace(" -fn", ""))
+
+    expect(titles(result)).toEqual(["XSS_SERVLET"])
+    expect(result.failed).toBeUndefined()
+  })
+
+  it("passes the command to the reader through the port", () => {
+    reactor()
+    const before = mavenQualityReader.snapshot(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    expect(mavenQualityReader.read(projectDir, before, failedIn("contract"), { exitCode: 0, output: "" }, COMMAND).failed).toBe(false)
+  })
+
+  it("leaves out, in a build the agent ran, the reports of the modules whose build does not run the plugin", () => {
+    reactor()
+    bugIn("contract", "XSS_SERVLET", 2000)
+    bugIn("orders", "COMMAND_INJECTION", 2000)
+
+    expect(titles(readFreshQualityReports(projectDir, COMMAND, 1_000_000) ?? { failures: [] })).toEqual(["COMMAND_INJECTION"])
+  })
+})
