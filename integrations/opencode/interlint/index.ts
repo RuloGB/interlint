@@ -91,6 +91,8 @@ const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
 /** Tells the CLI the user paused or resumed Interlint in the main session of `--agent-context` (F26). */
 const PAUSE_ARGS = ["check", "--when", "pause"]
 const RESUME_ARGS = ["check", "--when", "resume"]
+/** Takes what changed since the agent's last turn ended, such as a `git pull`, as the user's. */
+const TURN_START_ARGS = ["check", "--when", "turn-start"]
 /** The marks as the user writes them, in any case, anywhere in the prompt. The same as the CLI's. */
 const PAUSE_MARK = /interlint:[ \t]*(pause|resume)(?![\p{L}\p{N}_-])/giu
 /** The same words as the CLI's. */
@@ -935,9 +937,15 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       try {
         promptHook = await ctx.session.hook?.("prompt", async (event) => {
           const mark = pauseMark(event.prompt?.text)
-          if (mark === undefined) return
           const { parent, ours } = await lookup(event.sessionID)
           if (parent !== undefined || !ours) return
+          if (mark === undefined) {
+            if (paused.has(event.sessionID)) return
+            // Awaited, so the CLI takes the user's changes before the agent's turn changes anything.
+            const run = await runChecks(directory, command, editTimeoutMs, TURN_START_ARGS, await contextOf(event.sessionID))
+            if (run.exitCode !== 0) console.error("[interlint] could not start the turn in the CLI:", run.output)
+            return
+          }
           const text = await markSession(event.sessionID, mark)
           ctx.session
             .synthetic({ sessionID: event.sessionID, text, description: label(text), resume: false })

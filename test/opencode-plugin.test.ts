@@ -1415,14 +1415,26 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(runs.map(({ args }) => args)).toEqual([["check", "--when", "pause"], TASK_END])
   })
 
-  it("leaves a prompt without a mark alone", async () => {
+  it("starts the turn in the CLI on a prompt without a mark, and tells the user nothing", async () => {
     const { ctx, run, runs, sent, prompt } = pausable()
     await createInterlintPlugin(run).setup(ctx)
 
     await prompt("Add a discount to the order")
 
-    expect(runs).toEqual([])
+    expect(runs).toEqual([{ args: ["check", "--when", "turn-start"], context: { agent: "opencode", session: "main" } }])
     expect(sent).toEqual([])
+  })
+
+  it("starts no turn for a subagent's prompt or in a paused session", async () => {
+    const { ctx, run, runs, prompt } = pausable([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("interlint: pause")
+    runs.length = 0
+
+    await prompt("Add a discount to the order")
+    await prompt("Write the tests", "writer")
+
+    expect(runs).toEqual([])
   })
 })
 

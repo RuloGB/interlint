@@ -8,7 +8,14 @@ import {
   pauseMarkOf,
   RESUMED_MESSAGE,
 } from "../../domain/session-pause.js"
-import { type CheckProjectDeps, type CheckResult, checkProject, restartSession, startSession } from "../checking/check-project.js"
+import {
+  type CheckProjectDeps,
+  type CheckResult,
+  checkProject,
+  restartSession,
+  startSession,
+  startTurn,
+} from "../checking/check-project.js"
 import { ConfigError } from "../checking/ports.js"
 import { protectedAmong } from "../checking/protected-files.js"
 import type { AgentRef, SessionMetrics, SessionPauses, StopCounter, SubagentFiles, TranscriptModel } from "./ports.js"
@@ -117,6 +124,7 @@ export async function mainStop(
  * `interlint: pause` or `interlint: resume` (F26), and gives what the user reads about it. Empty without a mark, and
  * for a subagent's prompt, which the agent writes: nothing the agent writes pauses Interlint.
  * Resuming checks only what changes from then on: what changed while Interlint was paused is not the agent's to fix.
+ * A prompt without a mark takes what changed since the agent's last turn ended as the user's, such as a `git pull`.
  */
 export async function userPrompt(
   projectDir: string,
@@ -127,7 +135,11 @@ export async function userPrompt(
 ): Promise<string> {
   const mark = pauseMarkOf(prompt)
   const session = agent.sessionId
-  if (mark === undefined || agent.agentId !== undefined || session === "") return ""
+  if (agent.agentId !== undefined || session === "") return ""
+  if (mark === undefined) {
+    if (!deps.pauses.isPaused(session)) await userTurn(projectDir, session, deps)
+    return ""
+  }
   if (mark === "pause") {
     if (!deps.pauses.isPaused(session)) await pauseSession(projectDir, session, deps, context)
     return PAUSED_MESSAGE
@@ -157,6 +169,13 @@ export async function resumeSession(projectDir: string, session: string, deps: F
     await restartSession(projectDir, config, session, deps.checking)
     await keepSessionMetric(projectDir, config, "resume", context, deps)
   }
+}
+
+/** Takes what changed since the main agent's last turn in `session` ended as the user's. */
+export async function userTurn(projectDir: string, session: string, deps: FeedbackDeps): Promise<void> {
+  // Without a valid interlint.yaml there is nothing to take: the next hook reports it.
+  const config = configOf(projectDir, deps)
+  if (config) await startTurn(projectDir, config, session, deps.checking)
 }
 
 function configOf(projectDir: string, deps: FeedbackDeps): Config | undefined {
