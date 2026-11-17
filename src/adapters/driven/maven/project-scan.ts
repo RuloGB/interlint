@@ -41,6 +41,7 @@ const CHECK_GOAL = /<goal>\s*check\s*<\/goal>/
 const TURNED_OFF = /<phase>\s*none\s*<\/phase>/
 const EXECUTION_ID = /<id>\s*([^<]*?)\s*<\/id>/
 const JACOCO_PLUGIN = "jacoco-maven-plugin"
+const OPENAPI_GENERATOR_PLUGIN = "openapi-generator-maven-plugin"
 /** The id Maven gives an execution without `<id>`. */
 const DEFAULT_EXECUTION_ID = "default"
 
@@ -123,7 +124,7 @@ function ruleFilesOf(projectDir: string, modules: string[]): string[] {
 
 /**
  * The Checkstyle, PMD and SpotBugs plugins the build runs, and the ids of the executions that run their `check` goal, or
- * JaCoCo's `check` goal, which holds the coverage rules.
+ * JaCoCo's `check` goal, which holds the coverage rules, and whether it runs OpenAPI Generator.
  * A plugin counts when a POM of the project declares it in `<build><plugins>`. In a project without modules it
  * also counts when its `pom.xml` only manages it in `pluginManagement`; in a reactor a managed plugin counts only
  * when some module turns it on, but the executions the parent manages are the ones the modules run.
@@ -132,7 +133,7 @@ function ruleFilesOf(projectDir: string, modules: string[]): string[] {
  */
 function scanQualityPlugins(
   modules: string[],
-): Pick<ProjectFacts, "qualityPlugins" | "checkExecutions" | "coverageExecutions"> {
+): Pick<ProjectFacts, "qualityPlugins" | "checkExecutions" | "coverageExecutions" | "generatesOpenApi"> {
   const poms = modules.map((module) => readBuild(join(module, "pom.xml")))
   const activeOf = (build: string) => pluginsIn(build.replace(PLUGIN_MANAGEMENT, " "))
   const managedOf = (build: string) => [...build.matchAll(PLUGIN_MANAGEMENT)].flatMap((match) => pluginsIn(match[0]))
@@ -157,6 +158,7 @@ function scanQualityPlugins(
     qualityPlugins: QUALITY_PLUGINS.filter(counts),
     checkExecutions,
     coverageExecutions: jacoco ? checkExecutionIds(declarationsOf(declared, JACOCO_PLUGIN)) : [],
+    generatesOpenApi: declarationsOf(counted, OPENAPI_GENERATOR_PLUGIN).length > 0,
   }
 }
 

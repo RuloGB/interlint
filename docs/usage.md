@@ -36,27 +36,29 @@ checks:
     report: archunit
     when: edit
     every: 5
-    lines: 100
+    lines: 200
   - name: checkstyle
     run: ./mvnw -q checkstyle:check
     report: maven
     when: edit
   - name: pmd
-    run: ./mvnw -q compile pmd:check -Dcheckstyle.skip
+    run: ./mvnw -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true
     report: maven
     when: edit
     every: 5
-    lines: 100
+    lines: 200
 ```
 
 - The checks use the project's Maven: `./mvnw` when the project has the Maven Wrapper, `mvn` otherwise. The file is the same on every machine, so commit it.
-- Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after 5 edited files or 100 written lines, whichever comes first, with [`every: 5` and `lines: 100`](#every-n-files-or-lines): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. A few small edits, such as a log line in three files, wait for task end. `init` says which applies on yours. To run them after each edit, remove `every` and `lines`; to wait only for written lines, whatever the number of files, remove `every`; to wait for more, raise them; to leave them to task end, set their `when` to `task-end`.
+- Every check runs after edits when `mvnd` is on the `PATH`, and at task end without it (see [After each edit](#after-each-edit)). `checkstyle` checks only the changed files, so it runs after each edit. `architecture` and `pmd` run after 5 edited files or 200 written lines, whichever comes first, with [`every: 5` and `lines: 200`](#every-n-files-or-lines): ArchUnit builds the project and PMD analyses all of it, which in a large project takes tens of seconds. A few small edits, such as a log line in three files, wait for task end. `init` says which applies on yours. To run them after each edit, remove `every` and `lines`; to wait only for written lines, whatever the number of files, remove `every`; to wait for more, raise them; to leave them to task end, set their `when` to `task-end`.
 - It never replaces a different `interlint.yaml` unless you pass `--force`. Without `--agent` it then writes nothing and exits with 2. With `--agent` it keeps your `interlint.yaml`, lists it under `Kept:`, and still writes or updates the agent's files, so you can update them after editing the config. Running it again on an unchanged project changes nothing.
 - The `architecture` check runs only the `@ArchTest` classes. `checkstyle`, `pmd` and `spotbugs` run the project's own `check` goals, each in its own Maven call: in one call, a failing goal stops the ones after it. `pmd` and `spotbugs` compile first: PMD resolves types from the compiled classes, and SpotBugs analyses them. See [Checkstyle and PMD](#checkstyle-and-pmd) and [SpotBugs](#spotbugs).
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`, `-Dspotbugs.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit, PMD or SpotBugs run, and show Checkstyle's failures under their names. A check skips only the plugins the build has: without Checkstyle, PMD or SpotBugs in the build, the `architecture` check has no `-D…skip`.
 - When the build runs a plugin's `check` goal in an `<execution>`, the check names that execution, as in `checkstyle:check@style`, so the configuration inside it applies: called plainly, Maven runs the goal with the plugin's defaults. An execution without `<id>` is `default`; one turned off with `<phase>none</phase>` is left out.
 - A plugin counts when it is in `<build>`, in `<plugins>` or `<pluginManagement>`. Plugins only in a comment, a `<profile>`, `<reporting>`, `<dependencies>` or `<dependencyManagement>` are left out, and so are plugins declared only in an external parent. A Checkstyle or PMD plugin with executions counts only when one of them runs `check`: one whose executions only write a report (the `checkstyle` or `pmd` goal) or run `cpd-check` gets no check, as the build does not enforce its rules. A plugin without executions counts, as you run its `check` goal yourself. In a project with modules, see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces).
-- When the build runs `spotbugs:check`, it adds a `spotbugs` check that runs after 5 edited files or 100 written lines, as `pmd`. A SpotBugs plugin without an execution that runs `check` gets no check: the build only uses it for reports. See [SpotBugs](#spotbugs).
+- The `pmd` check turns on PMD's analysis cache with `-Dpmd.analysisCache=true`: PMD keeps its results in `target/pmd/pmd.cache` and analyses again only the files that changed. `mvn clean` deletes the cache, so the next run analyses every file. A build that sets `<analysisCache>` in the plugin's configuration keeps its own value.
+- When the build runs `openapi-generator-maven-plugin`, the checks that compile (`architecture`, `pmd`, `spotbugs` and `coverage`) get `-Dcodegen.skipIfSpecIsUnchanged=true`. By default the plugin writes its sources again on every build, so Maven compiles them, and every module that depends on them, even when nothing changed. With the property it generates only when the spec changed. It looks only at the spec: after changing the plugin's configuration in `pom.xml`, run `mvn clean` once so the sources are generated again. A plugin the parent of a multi-module project only manages counts when a module turns it on, as for the other plugins.
+- When the build runs `spotbugs:check`, it adds a `spotbugs` check that runs after 5 edited files or 200 written lines, as `pmd`. A SpotBugs plugin without an execution that runs `check` gets no check: the build only uses it for reports. See [SpotBugs](#spotbugs).
 - When the build runs `jacoco:check`, it adds a `coverage` check that runs at task end only. See [JaCoCo coverage](#jacoco-coverage).
 - In an npm project with ESLint, it writes an `eslint` check that runs after each edit. See [ESLint](#eslint).
 - In an npm project with dependency-cruiser, it writes a `depcruise` check that runs after each edit. See [dependency-cruiser](#dependency-cruiser).
@@ -219,7 +221,7 @@ SpotBugs also uses `report: maven`. The check reads `target/spotbugsXml.xml`, in
     report: maven
     when: edit
     every: 5
-    lines: 100
+    lines: 200
 ```
 
 ```text
@@ -413,10 +415,10 @@ checks:
     report: maven
     when: edit
     every: 5
-    lines: 100
+    lines: 200
 ```
 
-- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, or to 100 lines written in them, and it runs on all of them: the failures of any of them are shown, not only those of the last one, and a Checkstyle check with `every` checks those files. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
+- The check runs after the edit that brings it to 5 distinct sources edited since it last passed, or to 200 lines written in them, and it runs on all of them: the failures of any of them are shown, not only those of the last one, and a Checkstyle check with `every` checks those files. The edits before it do not run the check. Checks without `every`, here `checkstyle`, still run after each edit.
 - A Maven check with `every` still needs `mvnd` to run after edits. Without it, edits do not count and the check runs at task end.
 - A file edited twice counts once for `every`, and its lines add up for `lines`. Files that are not sources of the check, such as `README.md`, do not count.
 - The lines an edit wrote are those it adds or changes, not the ones it keeps around them and not the ones it removes: a log line added between two lines counts 1. Every line of a new or rewritten file counts, and so does each `+` line of an OpenCode patch.
@@ -522,7 +524,7 @@ checks:
     report: archunit
     when: edit
     every: 5
-    lines: 100
+    lines: 200
   - name: orders/checkstyle
     dir: orders
     run: ./mvnw -q -fn checkstyle:check@style

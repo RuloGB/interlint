@@ -73,7 +73,7 @@ describe("interlint init", () => {
           run: "./mvnw -q test -Dtest=ArchitectureRulesTest,LayersTest",
           report: "archunit",
           when: "edit",
-          every: 5, lines: 100,
+          every: 5, lines: 200,
         },
       ],
       protected: ["src/test/java/**/ArchitectureRulesTest.java", "src/test/java/**/LayersTest.java"],
@@ -174,7 +174,7 @@ describe("interlint init", () => {
     expect((await run("init", "--force")).exitCode).toBe(0)
 
     expect(readConfig()).toBe(withoutDaemon)
-    expect(loadConfig(projectDir).checks[0]).toMatchObject({ run: "./mvnw -q test -Dtest=ArchitectureRulesTest", when: "edit", every: 5, lines: 100 })
+    expect(loadConfig(projectDir).checks[0]).toMatchObject({ run: "./mvnw -q test -Dtest=ArchitectureRulesTest", when: "edit", every: 5, lines: 200 })
   })
 
   it("uses the Windows wrapper when only mvnw.cmd is there", async () => {
@@ -206,7 +206,7 @@ describe("interlint init", () => {
         "Detected:",
         "  ArchUnit tests: ArchitectureRulesTest",
         "  Maven: ./mvnw (Maven Wrapper)",
-        "  mvnd: on the PATH, so the ArchUnit check runs after every 5 edited files or 100 written lines",
+        "  mvnd: on the PATH, so the ArchUnit check runs after every 5 edited files or 200 written lines",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -221,7 +221,7 @@ describe("interlint init", () => {
     const { stdout } = await run("init")
 
     expect(stdout).toContain(
-      "  Maven: mvn (no Maven Wrapper)\n  mvnd: not on the PATH, so the ArchUnit check runs at task end; install mvnd to run it after every 5 edited files or 100 written lines\n",
+      "  Maven: mvn (no Maven Wrapper)\n  mvnd: not on the PATH, so the ArchUnit check runs at task end; install mvnd to run it after every 5 edited files or 200 written lines\n",
     )
   })
 
@@ -793,7 +793,7 @@ describe("interlint init with Checkstyle and PMD", () => {
     )
   }
 
-  it("adds a checkstyle check for each edit and a pmd check for every 5 edited files or 100 written lines when pom.xml declares both plugins", async () => {
+  it("adds a checkstyle check for each edit and a pmd check for every 5 edited files or 200 written lines when pom.xml declares both plugins", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
     pom({ build: plugin("maven-checkstyle-plugin") + plugin("maven-pmd-plugin") })
@@ -807,10 +807,10 @@ describe("interlint init with Checkstyle and PMD", () => {
         run: "./mvnw -q test -Dtest=ArchitectureRulesTest -Dcheckstyle.skip -Dpmd.skip",
         report: "archunit",
         when: "edit",
-        every: 5, lines: 100,
+        every: 5, lines: 200,
       },
       { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" },
-      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
+      { name: "pmd", run: "./mvnw -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true", report: "maven", when: "edit", every: 5, lines: 200 },
     ])
   })
 
@@ -822,7 +822,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
     expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
       "mvn -q test -Dtest=ArchitectureRulesTest -Dpmd.skip",
-      "mvn -q compile pmd:check -Dcheckstyle.skip",
+      "mvn -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true",
     ])
   })
 
@@ -881,7 +881,7 @@ describe("interlint init with Checkstyle and PMD", () => {
 
       await run("init")
 
-      expect(runs()).toEqual(["mvn -q checkstyle:check@style", "mvn -q compile pmd:check@default -Dcheckstyle.skip"])
+      expect(runs()).toEqual(["mvn -q checkstyle:check@style", "mvn -q compile pmd:check@default -Dcheckstyle.skip -Dpmd.analysisCache=true"])
     })
 
     it("finds the execution in pluginManagement too", async () => {
@@ -957,7 +957,7 @@ describe("interlint init with Checkstyle and PMD", () => {
         "  Checkstyle: maven-checkstyle-plugin in pom.xml",
         "  PMD: maven-pmd-plugin in pom.xml",
         "  Maven: mvn (no Maven Wrapper)",
-        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 100 written lines",
+        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 200 written lines",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -1043,7 +1043,7 @@ describe("interlint init with JaCoCo", () => {
 
     expect(loadConfig(projectDir).checks.map(({ name, run }) => [name, run])).toEqual([
       ["checkstyle", "./mvnw -q checkstyle:check"],
-      ["pmd", "./mvnw -q compile pmd:check -Dcheckstyle.skip"],
+      ["pmd", "./mvnw -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true"],
       ["coverage", "./mvnw test jacoco:check@default -fae -Djacoco.append=false -Dcheckstyle.skip -Dpmd.skip"],
     ])
   })
@@ -1089,6 +1089,29 @@ describe("interlint init with SpotBugs", () => {
     writeFile("pom.xml", `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n</project>\n`)
   }
 
+  it("keeps OpenAPI Generator from regenerating an unchanged spec in the spotbugs check of a project without modules", async () => {
+    pom(spotbugs(execution("spotbugs")) + plugin("openapi-generator-maven-plugin"))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+    ])
+  })
+
+  it("counts OpenAPI Generator that a project without modules only manages in pluginManagement", async () => {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${plugin("openapi-generator-maven-plugin")}      </plugins>\n    </pluginManagement>\n    <plugins>\n${spotbugs(execution("spotbugs"))}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+    ])
+  })
+
   it("adds a spotbugs check that compiles first and skips Checkstyle and PMD, and the other checks skip SpotBugs", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
@@ -1104,16 +1127,16 @@ describe("interlint init with SpotBugs", () => {
         report: "archunit",
         when: "edit",
         every: 5,
-        lines: 100,
+        lines: 200,
       },
       { name: "checkstyle", run: "./mvnw -q checkstyle:check", report: "maven", when: "edit" },
       {
         name: "pmd",
-        run: "./mvnw -q compile pmd:check -Dcheckstyle.skip -Dspotbugs.skip",
+        run: "./mvnw -q compile pmd:check -Dcheckstyle.skip -Dspotbugs.skip -Dpmd.analysisCache=true",
         report: "maven",
         when: "edit",
         every: 5,
-        lines: 100,
+        lines: 200,
       },
       {
         name: "spotbugs",
@@ -1121,7 +1144,7 @@ describe("interlint init with SpotBugs", () => {
         report: "maven",
         when: "edit",
         every: 5,
-        lines: 100,
+        lines: 200,
       },
       {
         name: "coverage",
@@ -1164,7 +1187,7 @@ describe("interlint init with SpotBugs", () => {
 
     expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
       "mvn -q test -Dtest=ArchitectureRulesTest -Dpmd.skip",
-      "mvn -q compile pmd:check -Dcheckstyle.skip",
+      "mvn -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true",
     ])
   })
 
@@ -1182,7 +1205,7 @@ describe("interlint init with SpotBugs", () => {
         "  Checkstyle: maven-checkstyle-plugin in pom.xml",
         "  SpotBugs: spotbugs-maven-plugin check in pom.xml",
         "  Maven: mvn (no Maven Wrapper)",
-        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and SpotBugs checks run after every 5 edited files or 100 written lines",
+        "  mvnd: on the PATH, so the Checkstyle check runs after each edit, and the ArchUnit and SpotBugs checks run after every 5 edited files or 200 written lines",
         "",
         "Wrote:",
         "  interlint.yaml",
@@ -1238,6 +1261,33 @@ describe("interlint init in a multi-module project", () => {
     expect((await run("init", "--force")).exitCode).toBe(2)
   })
 
+  it("keeps OpenAPI Generator from regenerating an unchanged spec in the checks that compile, when a module runs it", async () => {
+    reactor("", {
+      managed: [...MANAGED_BOTH, managed("jacoco-maven-plugin", "check")],
+      modules: { spec: ["openapi-generator-maven-plugin"], launcher: [...BOTH, "jacoco-maven-plugin"] },
+    })
+    archTest("launcher/src/test/java/com/acme/ArchitectureRulesTest.java")
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "./mvnw -q test -pl launcher -am -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+      "./mvnw -q -fn checkstyle:check@style",
+      "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip -Dpmd.analysisCache=true -Dcodegen.skipIfSpecIsUnchanged=true",
+      "./mvnw test jacoco:check@check -fae -Djacoco.append=false -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+    ])
+  })
+
+  it("leaves OpenAPI Generator alone when the parent only manages it and no module runs it", async () => {
+    reactor("", { managed: [managed("maven-pmd-plugin", "pmd"), managed("openapi-generator-maven-plugin", "gen")], modules: { domain: ["maven-pmd-plugin"] } })
+
+    expect((await run("init")).exitCode).toBe(0)
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip -Dpmd.analysisCache=true",
+    ])
+  })
+
   it("finds the @ArchTest classes of a module and runs only that module and the ones it depends on", async () => {
     reactor("", { managed: MANAGED_BOTH, modules: { domain: BOTH, "adapters/rest": BOTH, launcher: BOTH } })
     archTest("launcher/src/test/java/com/acme/ArchitectureRulesTest.java")
@@ -1250,10 +1300,10 @@ describe("interlint init in a multi-module project", () => {
         run: "./mvnw -q test -pl launcher -am -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
         report: "archunit",
         when: "edit",
-        every: 5, lines: 100,
+        every: 5, lines: 200,
       },
       { name: "checkstyle", run: "./mvnw -q -fn checkstyle:check@style", report: "maven", when: "edit" },
-      { name: "pmd", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
+      { name: "pmd", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip -Dpmd.analysisCache=true", report: "maven", when: "edit", every: 5, lines: 200 },
     ])
   })
 
@@ -1305,7 +1355,7 @@ describe("interlint init in a multi-module project", () => {
 
     await run("init")
 
-    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual(["./mvnw -q -fn compile pmd:check -Dcheckstyle.skip"])
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual(["./mvnw -q -fn compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true"])
   })
 
   describe("from the root of a workspace without pom.xml", () => {
@@ -1329,13 +1379,13 @@ describe("interlint init in a multi-module project", () => {
           run: "./mvnw -q test -pl launcher -am -Dtest=OrdersRulesTest -Dsurefire.failIfNoSpecifiedTests=false -Dcheckstyle.skip -Dpmd.skip",
           report: "archunit",
           when: "edit",
-          every: 5, lines: 100,
+          every: 5, lines: 200,
         },
         { name: "orders/checkstyle", dir: "orders", run: "./mvnw -q -fn checkstyle:check@style", report: "maven", when: "edit" },
-        { name: "orders/pmd", dir: "orders", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip", report: "maven", when: "edit", every: 5, lines: 100 },
+        { name: "orders/pmd", dir: "orders", run: "./mvnw -q -fn compile pmd:check@pmd -Dcheckstyle.skip -Dpmd.analysisCache=true", report: "maven", when: "edit", every: 5, lines: 200 },
       ])
       expect(readConfig()).toContain("  - name: orders/architecture\n    dir: orders\n    run: ")
-      expect(readConfig()).toContain("    report: archunit\n    when: edit\n    every: 5\n    lines: 100\n")
+      expect(readConfig()).toContain("    report: archunit\n    when: edit\n    every: 5\n    lines: 200\n")
     })
 
     it("lists each project with what it detected", async () => {
@@ -1358,7 +1408,7 @@ describe("interlint init in a multi-module project", () => {
           "    Checkstyle: maven-checkstyle-plugin in pom.xml",
           "    PMD: maven-pmd-plugin in pom.xml",
           "    Maven: ./mvnw (Maven Wrapper)",
-          "  mvnd: on the PATH, so the Checkstyle checks run after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 100 written lines",
+          "  mvnd: on the PATH, so the Checkstyle checks run after each edit, and the ArchUnit and PMD checks run after every 5 edited files or 200 written lines",
           "",
           "Wrote:",
           "  interlint.yaml",

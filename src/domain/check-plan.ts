@@ -5,6 +5,12 @@ import { mavenCommand } from "./maven-command.js"
 import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, runnableClasses, TEST_SOURCES } from "./project-facts.js"
 
 /**
+ * PMD's analysis cache, kept in `target/pmd/pmd.cache`: PMD analyses again only the files that changed since the last
+ * run. A build that sets `analysisCache` itself keeps its value, since Maven applies the plugin's configuration over `-D`.
+ */
+const PMD_CACHE = " -Dpmd.analysisCache=true"
+
+/**
  * PMD resolves types from the compiled classes and SpotBugs analyses them, so their checks compile first. Compiling
  * runs the lifecycle, and a build may bind a `check` goal to an early phase such as `validate`: skipping the other
  * plugins there keeps their failures out of the check, since their own checks already report them. The `pmd` check
@@ -13,8 +19,9 @@ import { type NpmFacts, type ProjectFacts, QUALITY_PLUGINS, type QualityPlugin, 
  */
 const QUALITY_COMMANDS: Record<QualityPlugin, (goal: string, facts: ProjectFacts) => string> = {
   checkstyle: (goal) => goal,
-  pmd: (goal, facts) => `compile ${goal} -Dcheckstyle.skip${facts.qualityPlugins.includes("spotbugs") ? " -Dspotbugs.skip" : ""}`,
-  spotbugs: (goal) => `compile ${goal} -Dcheckstyle.skip -Dpmd.skip`,
+  pmd: (goal, facts) =>
+    `compile ${goal} -Dcheckstyle.skip${facts.qualityPlugins.includes("spotbugs") ? " -Dspotbugs.skip" : ""}${PMD_CACHE}${unchangedSpec(facts)}`,
+  spotbugs: (goal, facts) => `compile ${goal} -Dcheckstyle.skip -Dpmd.skip${unchangedSpec(facts)}`,
 }
 
 /**
@@ -26,9 +33,9 @@ export const SLOW_CHECK_EVERY = 5
 
 /**
  * How many written lines a slow check waits for, if it reaches them before `SLOW_CHECK_EVERY` files: a few small
- * edits, such as a log line in three files, wait for task end, while a new class runs the check at once.
+ * edits, such as a log line in three files, wait for task end, while a large new class runs the check at once.
  */
-export const SLOW_CHECK_LINES = 100
+export const SLOW_CHECK_LINES = 200
 
 /**
  * The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none.
@@ -81,6 +88,15 @@ function failNever(facts: ProjectFacts): string {
   return facts.hasModules ? " -fn" : ""
 }
 
+/**
+ * OpenAPI Generator writes its sources again on every build, even from an unchanged spec, so Maven compiles them and
+ * every module that depends on them again: tens of seconds in each check that compiles. With this property it generates
+ * only when the spec changed. Checkstyle reads the sources and compiles nothing, so its check needs it not.
+ */
+function unchangedSpec(facts: ProjectFacts): string {
+  return facts.generatesOpenApi === true ? " -Dcodegen.skipIfSpecIsUnchanged=true" : ""
+}
+
 /** Skips the Checkstyle, PMD and SpotBugs plugins the build declares, for a check that runs the lifecycle for something else. */
 function qualitySkips(facts: ProjectFacts): string {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin))
@@ -100,7 +116,7 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
   const reactor = facts.hasModules ? " -Dsurefire.failIfNoSpecifiedTests=false" : ""
   return {
     name: "architecture",
-    run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${qualitySkips(facts)}`,
+    run: `${mavenCommand(facts)} -q test${reactorArgs(facts)} -Dtest=${classes}${reactor}${qualitySkips(facts)}${unchangedSpec(facts)}`,
     report: "archunit",
     ...afterEdits(SLOW_CHECK_EVERY),
   }
@@ -135,7 +151,7 @@ export function coverageCheck(facts: ProjectFacts): Check | undefined {
   const goals = ids.map((id) => `jacoco:check@${id}`).join(" ")
   return {
     name: "coverage",
-    run: `${mavenCommand(facts)} test ${goals} -fae -Djacoco.append=false${qualitySkips(facts)}`,
+    run: `${mavenCommand(facts)} test ${goals} -fae -Djacoco.append=false${qualitySkips(facts)}${unchangedSpec(facts)}`,
     report: "jacoco",
     when: "task-end",
   }
