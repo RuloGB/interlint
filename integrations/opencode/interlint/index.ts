@@ -11,6 +11,8 @@
  *   which runs the checks of the projects that changed since their checks last passed. If a check fails, it resumes
  *   the session with the formatted failures so the agent fixes them, up to MAX_CONSECUTIVE_BLOCKS times in a row.
  *   While one of its subagents has changes whose checks have not passed yet, it waits for that subagent first.
+ *   OpenCode shows the turn as ended meanwhile, so checks that run longer than DEFAULT_RUNNING_NOTICE_MS tell the
+ *   user in a message that they are running.
  * - When a subagent's turn ends, it runs the task-end checks of the projects holding the files that subagent changed
  *   with an edit tool, and resumes the subagent with the failures, up to MAX_CONSECUTIVE_BLOCKS times. A subagent
  *   that changed no file, such as a read-only reviewer, runs nothing.
@@ -49,6 +51,11 @@ export const DEFAULT_EDIT_TIMEOUT_MS = 2 * 60 * 1000
  * while that subagent has unchecked changes. Past it, the subagent's failures are the main agent's.
  */
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000
+/**
+ * How long the main agent's task-end checks run before the plugin tells the user they are running. OpenCode shows the
+ * turn as ended while they run; a run that ends sooner, such as one with no changed project, adds no message.
+ */
+export const DEFAULT_RUNNING_NOTICE_MS = 2 * 1000
 
 const TURN_START = "session.execution.started"
 type TurnEnd = "succeeded" | "failed" | "interrupted"
@@ -66,6 +73,8 @@ const REPORT_MARK = "✗ "
 const NOTICE_MARK = "ℹ Interlint · for the user:"
 /** How the CLI starts the line that names the checks that ran, when they all passed. */
 const PASSED_MARK = "✓ Interlint · "
+/** The message that tells the user the task-end checks are still running after the agent's turn ended. */
+const RUNNING_MESSAGE = "Interlint: running checks"
 /** The name the CLI gives the failure of the protected files in its report. */
 const PROTECTED_CHECK = "protected files"
 /** What the main agent is told before its task-end failures. */
@@ -381,7 +390,13 @@ export interface AgentContext {
 /** The part of the OpenCode V2 plugin context this adapter uses. */
 interface PluginContext {
   location: { directory: string }
-  options?: { command?: unknown; timeoutMs?: unknown; editTimeoutMs?: unknown; subagentTimeoutMs?: unknown }
+  options?: {
+    command?: unknown
+    timeoutMs?: unknown
+    editTimeoutMs?: unknown
+    subagentTimeoutMs?: unknown
+    runningNoticeMs?: unknown
+  }
   session: {
     /**
      * A forked session has no `parentID`: only the sessions a subagent runs in have one. `location` is where the
@@ -458,6 +473,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         typeof ctx.options?.editTimeoutMs === "number" ? ctx.options.editTimeoutMs : DEFAULT_EDIT_TIMEOUT_MS
       const subagentTimeoutMs =
         typeof ctx.options?.subagentTimeoutMs === "number" ? ctx.options.subagentTimeoutMs : DEFAULT_SUBAGENT_TIMEOUT_MS
+      const runningNoticeMs =
+        typeof ctx.options?.runningNoticeMs === "number" ? ctx.options.runningNoticeMs : DEFAULT_RUNNING_NOTICE_MS
       const directory = ctx.location.directory
       const gate = new TaskEndGate()
       const running = new Set<string>()
@@ -695,6 +712,26 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         return entry
       }
 
+      /**
+       * Runs `checks` and, when they take longer than runningNoticeMs, tells the user in the session that they are
+       * running. The notice is sent before the result, so the two never arrive out of order.
+       */
+      const withRunningNotice = async (sessionID: string, checks: () => Promise<CheckRun>) => {
+        let notice: Promise<unknown> | undefined
+        const timer = setTimeout(() => {
+          notice = ctx.session
+            .synthetic({ sessionID, text: RUNNING_MESSAGE, description: RUNNING_MESSAGE, resume: false })
+            .catch((error) => console.error("[interlint] could not say the checks are running", error))
+        }, runningNoticeMs)
+        timer.unref?.()
+        try {
+          return await checks()
+        } finally {
+          clearTimeout(timer)
+          await notice
+        }
+      }
+
       const onTurnEnd = async (sessionID: string) => {
         const { parent, ours } = await lookup(sessionID)
         if (!ours) return
@@ -722,7 +759,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         running.add(sessionID)
         try {
           const context = await contextOf(sessionID)
-          const decision = gate.decide(sessionID, await runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
+          const run = await withRunningNotice(sessionID, () => runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
+          const decision = gate.decide(sessionID, run)
           if (decision.action === "none") return
           await ctx.session.synthetic({
             sessionID,

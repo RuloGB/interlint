@@ -1425,3 +1425,74 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(sent).toEqual([])
   })
 })
+
+describe("telling the user that the task-end checks are running", () => {
+  const RUNNING = "Interlint: running checks"
+  const DELAY = 2_000
+  beforeEach(() => void vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }))
+  afterEach(() => void vi.useRealTimers())
+
+  /** Task-end checks that end with `result` once `finish` is called. */
+  function slowChecks(result: CheckRun) {
+    let finish!: () => void
+    const ended = new Promise<void>((resolve) => (finish = resolve))
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = []) => {
+      if (args[2] === "task-end") await ended
+      return result
+    }
+    return { run, finish }
+  }
+
+  async function turnEnd(run: RunChecks) {
+    const context = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
+    await createInterlintPlugin(run).setup(context.ctx)
+    await context.done
+    await settled()
+    return context
+  }
+
+  it("sends a message saying the checks are running when they take longer than 2 seconds, before their result", async () => {
+    const { run, finish } = slowChecks(PASSED_NAMED)
+    const { sent, labels } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    expect(sent).toEqual([{ sessionID: "s1", text: RUNNING, resume: false }])
+    expect(labels).toEqual([RUNNING])
+
+    finish()
+    await settled()
+    expect(sent).toEqual([
+      { sessionID: "s1", text: RUNNING, resume: false },
+      { sessionID: "s1", text: PASS_LINE, resume: false },
+    ])
+  })
+
+  it("says nothing more when the checks end within 2 seconds, such as when no project changed", async () => {
+    const { run, finish } = slowChecks(PASSED)
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY - 1)
+    finish()
+    await settled()
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+
+    expect(sent).toEqual([])
+  })
+
+  it("still makes the agent fix the failures after saying the checks are running", async () => {
+    const { run, finish } = slowChecks(VIOLATIONS)
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+
+    expect(sent.map(({ text, resume }) => ({ running: text === RUNNING, resume }))).toEqual([
+      { running: true, resume: false },
+      { running: false, resume: true },
+    ])
+  })
+})
