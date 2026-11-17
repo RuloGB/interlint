@@ -486,6 +486,22 @@ protected:
 
 This is not a sandbox: the agent can still change files on disk, Interlint's state included. It makes weakening a rule visible: the agent is blocked, you are told, and the metrics keep it.
 
+## Pausing Interlint
+
+Sometimes you do not want Interlint for a while, such as when you asked for one small change and the checks keep failing on something else. Write `interlint: pause` anywhere in your message to the agent. Case does not matter.
+
+- Interlint is paused in that session until you write `interlint: resume`, in the main agent and in its subagents. A session that ends paused had no checks from then on. A new session, or another one, starts active.
+- While it is paused, Interlint does nothing: no check after an edit, none at task end, and no protected file is guarded.
+- You see a message when it pauses and when it resumes. At each task end of the main agent, a message reminds you that it is paused and how to resume it.
+- **Resuming checks from that moment.** What changed while Interlint was paused is taken as it is: those changes do not block, a protected file changed then becomes the new reference, and the block count and the edits an `every` or `lines` check waits for start from zero. Until the agent changes a project again, that session's task end does not check it. Another session in the same project keeps its own unchecked changes.
+- After the main agent's 3rd blocked task end, the message that lets the task end tells you that you can pause. The agent is never told.
+- Only your message counts: the mark in a file, in a command's output or in the agent's own message pauses nothing. A subagent's prompt is written by the agent, so it does not count either.
+- Each pause and resume is kept in your [metrics](#metrics).
+
+The checks look at the whole project, not at the lines that changed. If, after you resume, the agent changes a project where something broke during the pause, that failure shows up: Interlint cannot tell when it came in. It is the same with failures that were there before the session started.
+
+Each agent reads your message through its own hook, which `interlint init --agent <agent>` writes: `UserPromptSubmit` in Claude Code and Codex, `userPromptSubmitted` in GitHub Copilot, and the plugin's prompt hook in OpenCode. Run `init` again if your hooks come from an older Interlint; `interlint doctor` tells you. GitHub Copilot shows nothing a prompt hook writes, so there the messages go to Copilot's log. In OpenCode the pause lives in the plugin: restarting OpenCode resumes Interlint.
+
 ## Multi-module projects and workspaces
 
 Start Interlint, and your agent, in the root of either layout:
@@ -544,6 +560,7 @@ Each line is a JSON object:
 - `result` is `passed`, `violations`, `failed` (the command failed without a report that explains it), `missing-dir`, `broken-build` or `skipped`. A skipped check has `skipped`: `pending` (it waits for more edits, see [Every N files or lines](#every-n-files-or-lines)), `unchanged` (its project did not change since its checks passed, with `--changed`) or `build` (it passed on the reports of the agent's own build).
 - `violations` has, for each violation, its rule, its type (`architecture`, `checkstyle`, `pmd`, `spotbugs`, `coverage` or `eslint`; dependency-cruiser's are `architecture`, as ArchUnit's) and its file from the directory of `interlint.yaml`. At edit, it has only what the agent was shown. No line number, message or code is kept.
 - `agent`, `session` and `model` say who ran the check, and `subagent: true` with `agentType` when a subagent did. OpenCode also gives `provider`. A field the agent does not give is left out. A check run by hand has none of them.
+- When you [pause Interlint](#pausing-interlint) or resume it, a line has `event`: `pause` or `resume`, with `agent`, `session` and `model`, and no `when` or `check`. `interlint metrics` leaves these lines out of its figures.
 
 The lines are plain text: you can read them with any tool, and they never leave your machine. Interlint has no telemetry, no account and no server, and makes no network calls: `interlint metrics` and `interlint metrics report` read these files on your machine, and the HTML and PDF reports load nothing from the internet. When a line cannot be written, as on a full disk, it is lost and the checks give the same result and output.
 

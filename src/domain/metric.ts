@@ -1,4 +1,5 @@
 import { REPORTS, type Report, type When, WHENS } from "./check.js"
+import type { PauseMark } from "./session-pause.js"
 import type { RuleType } from "./violation.js"
 
 /**
@@ -52,6 +53,21 @@ export interface CheckMetric extends AgentContext {
   durationMs: number
   /** Present only when `result` is `violations`. */
   violations?: ViolationMetric[]
+}
+
+/** The user paused or resumed Interlint in an agent session (F26), with who the session runs. */
+export interface SessionMetric extends AgentContext {
+  event: PauseMark
+}
+
+const SESSION_EVENTS: readonly PauseMark[] = ["pause", "resume"]
+
+/**
+ * Whether a parsed metrics line holds a session's pause or resume rather than a check's metric. The checks' summaries
+ * leave it out, and it is not an unreadable line.
+ */
+export function isSessionMetricLine(value: unknown): boolean {
+  return isRecord(value) && value.v === METRICS_FORMAT_VERSION && isOneOf(value.event, SESSION_EVENTS)
 }
 
 /** The version of the metrics line format. A reader of older lines tells them apart by it. */

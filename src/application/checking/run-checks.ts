@@ -28,6 +28,7 @@ import type {
   ProjectChange,
   ProjectLock,
   ReportReader,
+  ResumeBaselines,
   ReportReaders,
   ReportResult,
 } from "./ports.js"
@@ -59,6 +60,8 @@ export interface CheckDeps {
   removeBrokenClasses: BrokenClassRemover
   pending: PendingEdits
   metrics: MetricsSink
+  /** Absent, resuming Interlint in a session takes no project as it is. */
+  resumes?: ResumeBaselines
 }
 
 export interface TaskEndOptions {
@@ -95,7 +98,9 @@ export async function runTaskEndChecks(
       dir,
       seen: deps.changes.lookup(dir),
     }))
-    const selected = changedOnly ? projects.filter(({ seen }) => seen.changed) : projects
+    // A project the session has not changed since the user resumed Interlint in it is not this session's to check.
+    const resumed = changedOnly && agent?.session !== undefined ? deps.resumes?.read(projectDir, agent.session) : undefined
+    const selected = changedOnly ? projects.filter(({ dir, seen }) => seen.changed && resumed?.[dir] !== seen.fingerprint) : projects
     const dirs = selected.map(({ dir }) => dir)
     const checks = config.checks.filter(
       (check) => holds(check) && (!present.includes(check) || dirs.includes(checkDirOf(projectDir, check))),
@@ -263,6 +268,25 @@ function withEdits(pending: PendingEdit[], edited: string[], linesWritten: Reado
  * Forgets the pending files of the checks with `every` or `lines` that passed. A check that failed keeps them, so each next
  * edit of one of its sources runs it again on them all, until it passes. Called under the project lock.
  */
+/**
+ * Starts tracking the session's changes again from the project's files as they are now (F26): until the session changes
+ * a project, its task end does not check it, and no `edit` check waits for earlier edits any more. The change tracker,
+ * which every session of the project shares, stays as it is, so another session's unchecked changes still count.
+ */
+export async function restartTracking(projectDir: string, config: Config, session: string, deps: CheckDeps): Promise<void> {
+  await deps.lock(projectDir, async () => {
+    const present = config.checks.filter((check) => deps.hasDirectory(checkDirOf(projectDir, check)))
+    const fingerprints: Record<string, string> = {}
+    for (const dir of new Set(present.map((check) => checkDirOf(projectDir, check)))) {
+      fingerprints[dir] = deps.changes.lookup(dir).fingerprint
+    }
+    deps.resumes?.save(projectDir, session, fingerprints)
+    for (const check of config.checks.filter(waitsForEdits)) {
+      if ((deps.pending.list(projectDir, check.name)?.length ?? 1) > 0) deps.pending.save(projectDir, check.name, [])
+    }
+  })
+}
+
 function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {
   for (const { check, status } of outcomes) {
     if (status !== "passed" || !waitsForEdits(check)) continue

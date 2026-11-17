@@ -7,12 +7,14 @@ export const COPILOT_HOOKS_FILE = ".github/hooks/interlint.json"
  * `postToolUse` runs only for the tools that change files. `agentStop` fires for the main agent only; a subagent fires
  * `subagentStop`, so it gets the failures of its own changes. `timeoutSec` is in seconds: the edit one matches the
  * OpenCode plugin's edit timeout, the stop ones give Maven time; past it, Copilot does not block. `sessionStart` keeps
- * the protected files as they are, and `preToolUse` asks the user before an edit changes one.
+ * the protected files as they are, and `preToolUse` asks the user before an edit changes one. `userPromptSubmitted`
+ * reads `interlint: pause` and `interlint: resume` in the user's prompt.
  */
 const HOOKS = {
   version: 1,
   hooks: {
     sessionStart: [{ type: "command", command: "interlint hook copilot session-start", timeoutSec: 30 }],
+    userPromptSubmitted: [{ type: "command", command: "interlint hook copilot user-prompt", timeoutSec: 120 }],
     preToolUse: [
       {
         type: "command",

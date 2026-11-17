@@ -13,10 +13,19 @@ import plugin, {
   editNote,
   MAX_CONSECUTIVE_BLOCKS,
   MAX_OUTPUT_CHARS,
+  pauseMark,
   type RunChecks,
   runInterlint,
   TaskEndGate,
 } from "../integrations/opencode/interlint/index.js"
+import {
+  NOT_PAUSED_MESSAGE,
+  PAUSE_ADVICE,
+  PAUSED_MESSAGE,
+  PAUSED_REMINDER,
+  pauseMarkOf,
+  RESUMED_MESSAGE,
+} from "../src/domain/session-pause.js"
 
 const VIOLATIONS: CheckRun = { exitCode: 1, output: "✗ architecture · ARCH-01: rule\n\nFix these problems before continuing.\n" }
 const PASSED: CheckRun = { exitCode: 0, output: "" }
@@ -57,13 +66,15 @@ describe("TaskEndGate", () => {
     })
   })
 
-  it("stops blocking after the limit and only reports", () => {
+  it("stops blocking after the limit and only reports, advising the user how to pause Interlint", () => {
     const gate = new TaskEndGate()
-    for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) gate.decide("s1", VIOLATIONS)
+    for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) {
+      expect(gate.decide("s1", VIOLATIONS)).not.toMatchObject({ text: expect.stringContaining("interlint: pause") })
+    }
 
     expect(gate.decide("s1", VIOLATIONS)).toEqual({
       action: "report",
-      text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${VIOLATIONS.output}`,
+      text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${VIOLATIONS.output.trimEnd()}\n\n${PAUSE_ADVICE}\n`,
     })
     expect(gate.decide("s1", VIOLATIONS)).toMatchObject({ action: "continue", text: expect.stringContaining("attempt 1 of 3") })
   })
@@ -1273,5 +1284,144 @@ describe("OpenCode plugin with protected files", () => {
     await settled()
 
     expect(runs.filter(({ args }) => args.includes("--asked"))).toEqual([])
+  })
+})
+
+describe("pausing Interlint in an OpenCode session", () => {
+  /** Fake checks that record every run of the CLI, with a `prompt` session hook the test can fire. */
+  function pausable(events: PluginEvent[] = [], sessions: Parameters<typeof fakeContext>[1] = {}) {
+    const fake = fakeContext(events, sessions)
+    const runs: { args: string[]; context: unknown }[] = []
+    let onPrompt: ((event: { sessionID: string; prompt?: { text?: unknown } }) => Promise<void> | void) | undefined
+    Object.assign(fake.ctx.session, {
+      hook: async (name: string, callback: typeof onPrompt) => {
+        if (name === "prompt") onPrompt = callback
+        return { dispose: async () => {} }
+      },
+    })
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = [], context) => {
+      runs.push({ args, context })
+      return args[2] === "task-end" ? VIOLATIONS : PASSED
+    }
+    const prompt = async (text: string, sessionID = "main") => {
+      await onPrompt?.({ sessionID, prompt: { text } })
+      await settled()
+    }
+    return { ...fake, runs, run, prompt }
+  }
+
+  it("finds the marks as the CLI does", () => {
+    for (const text of ["interlint: pause", "Do X. INTERLINT: Resume", "interlint:pause then interlint: resume", "interlint: paused", "pause", 'a "interlint: pause" b']) {
+      expect(pauseMark(text)).toBe(pauseMarkOf(text))
+    }
+    expect(pauseMark(undefined)).toBeUndefined()
+  })
+
+  it("pauses a main session, tells the CLI and confirms it to the user", async () => {
+    const { ctx, run, runs, sent, prompt } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("Change only the label. interlint: PAUSE")
+
+    expect(runs).toEqual([{ args: ["check", "--when", "pause"], context: { agent: "opencode", session: "main" } }])
+    expect(sent).toEqual([{ sessionID: "main", text: PAUSED_MESSAGE, resume: false }])
+  })
+
+  it("runs nothing while paused, in the main agent and its subagents, and reminds the user at each turn end", async () => {
+    const { ctx, run, runs, sent, prompt, afterTool, emit } = pausable([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("interlint: pause")
+    runs.length = 0
+    sent.length = 0
+
+    const edited = await afterTool("edit", { path: "src/main/java/shop/Order.java" }, "completed", { sessionID: "main" })
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    emit(SUCCEEDED, "writer")
+    await settled()
+    emit(SUCCEEDED, "main")
+    await settled()
+    await settled()
+
+    expect(runs).toEqual([])
+    expect(edited.result).toEqual({ content: [{ type: "text", text: "Edited the file" }] })
+    expect(sent).toEqual([{ sessionID: "main", text: PAUSED_REMINDER, resume: false }])
+  })
+
+  it("resumes, tells the CLI to restart the session and checks the next turn again", async () => {
+    const { ctx, run, runs, sent, prompt, emit } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("interlint: pause")
+
+    await prompt("interlint: resume")
+    emit(SUCCEEDED, "main")
+    await settled()
+    await settled()
+
+    expect(runs.map(({ args }) => args)).toEqual([["check", "--when", "pause"], ["check", "--when", "resume"], TASK_END])
+    expect(sent[1]).toEqual({ sessionID: "main", text: RESUMED_MESSAGE, resume: false })
+    expect(sent[2]).toMatchObject({ sessionID: "main", resume: true, text: expect.stringContaining("attempt 1 of 3") })
+  })
+
+  it("starts counting the blocks from zero after a resume", async () => {
+    const { ctx, run, sent, prompt, emit } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+    emit(SUCCEEDED, "main")
+    await settled()
+    emit(SUCCEEDED, "main")
+    await settled()
+    expect(sent.at(-1)?.text).toContain("attempt 2 of 3")
+
+    await prompt("interlint: pause")
+    await prompt("interlint: resume")
+    emit(SUCCEEDED, "main")
+    await settled()
+    await settled()
+
+    expect(sent.at(-1)?.text).toContain("attempt 1 of 3")
+  })
+
+  it("tells the user Interlint was not paused when they resume an active session", async () => {
+    const { ctx, run, runs, sent, prompt } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("interlint: resume")
+
+    expect(runs).toEqual([])
+    expect(sent).toEqual([{ sessionID: "main", text: NOT_PAUSED_MESSAGE, resume: false }])
+  })
+
+  it("ignores a mark in a subagent's prompt, which the agent writes", async () => {
+    const { ctx, run, runs, sent, prompt, emit } = pausable([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("interlint: pause", "writer")
+    emit(SUCCEEDED, "main")
+    await settled()
+    await settled()
+
+    expect(runs.map(({ args }) => args)).toEqual([TASK_END])
+    expect(sent).toEqual([expect.objectContaining({ sessionID: "main", resume: true })])
+  })
+
+  it("pauses only its own session", async () => {
+    const { ctx, run, runs, prompt, emit } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("interlint: pause", "main")
+    emit(SUCCEEDED, "other")
+    await settled()
+    await settled()
+
+    expect(runs.map(({ args }) => args)).toEqual([["check", "--when", "pause"], TASK_END])
+  })
+
+  it("leaves a prompt without a mark alone", async () => {
+    const { ctx, run, runs, sent, prompt } = pausable()
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("Add a discount to the order")
+
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
   })
 })

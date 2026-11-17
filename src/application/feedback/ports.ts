@@ -1,3 +1,5 @@
+import type { SessionMetric } from "../../domain/metric.js"
+
 /** Who an agent hook fires for: a session, and one of its subagents when `agentId` is set. */
 export interface AgentRef {
   sessionId: string
@@ -22,6 +24,19 @@ export interface SubagentFiles {
  * None when it cannot be read.
  */
 export type TranscriptModel = (transcript: { path: string; agentId?: string }) => string | undefined
+
+/**
+ * The sessions the user paused Interlint in (F26). Each hook run is its own process, so the store outlives it. A
+ * session it cannot read counts as active, so a lost record never leaves a session without checks.
+ */
+export interface SessionPauses {
+  isPaused(session: string): boolean
+  pause(session: string): void
+  resume(session: string): void
+}
+
+/** Keeps a session's pause or resume in the project's metrics. A metric it cannot keep is lost, and it never throws. */
+export type SessionMetrics = (projectDir: string, metric: SessionMetric) => void
 
 /** Counts the stops blocked in a row, per session and per subagent. */
 export interface StopCounter {

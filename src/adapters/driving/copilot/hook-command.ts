@@ -6,6 +6,7 @@ import {
   mainStop,
   sessionStart,
   subagentStop,
+  userPrompt,
 } from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
@@ -57,10 +58,17 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
       return COPILOT_HOOK_EXIT.pass
     }
 
+    // Copilot drops what a prompt hook writes on stdout, so the message goes to its log with the rest.
+    if (event === "user-prompt") {
+      const message = await userPrompt(projectDir, input.prompt ?? "", input, deps, context())
+      if (message !== "") io.stderr(`${message}\n`)
+      return COPILOT_HOOK_EXIT.pass
+    }
+
     if (event === "pre-edit") {
       const cwd = input.cwd ?? io.cwd
       const files = input.edits.flatMap(({ path }) => projectFiles(cwd, projectDir, [path]))
-      const guarded = beforeEdit(projectDir, [...new Set(files)], deps)
+      const guarded = beforeEdit(projectDir, [...new Set(files)], deps, input.sessionId)
       // Copilot asks the user before the tool runs. In autopilot and in the cloud agent nobody can answer: it denies.
       if (guarded.length > 0) answer(io, { permissionDecision: "ask", permissionDecisionReason: protectedEditQuestion(guarded) })
       return COPILOT_HOOK_EXIT.pass

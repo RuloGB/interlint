@@ -1,3 +1,4 @@
+import type { Config } from "../../domain/check.js"
 import type { AgentContext } from "../../domain/metric.js"
 import { formatProtectedChanges, formatProtectedEdit, PROTECTED_CHECK } from "../../domain/protected-files.js"
 import { formatNotices, formatOutcomes, formatPassed } from "./format-outcomes.js"
@@ -7,9 +8,10 @@ import {
   protectedEdit,
   protectedTaskEnd,
   recordProtectedChanges,
+  renewProtection,
   startProtection,
 } from "./protected-files.js"
-import { type CheckDeps, runEditChecks, runTaskEndChecks } from "./run-checks.js"
+import { type CheckDeps, restartTracking, runEditChecks, runTaskEndChecks } from "./run-checks.js"
 
 export interface CheckProjectDeps extends CheckDeps {
   loadConfig: ConfigSource
@@ -77,6 +79,17 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
     passed: first.length > 0 ? "" : formatPassed(outcomes),
     failed,
   }
+}
+
+/**
+ * When the user resumes Interlint in the main agent's `session` (F26): what changed while it was paused is taken as it
+ * is, so only the changes from now on are checked. The session's task end skips a project until it changes, no
+ * `edit` check waits for earlier edits, and the protected files are kept as they are now.
+ */
+export async function restartSession(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
+  await restartTracking(projectDir, config, session, deps)
+  const { protection } = deps
+  if (protection) await deps.lock(projectDir, async () => renewProtection(projectDir, config, session, protection))
 }
 
 /**

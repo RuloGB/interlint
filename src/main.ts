@@ -25,15 +25,15 @@ import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { findsCommand, runCommand } from "./adapters/driven/process/command-runner.js"
 import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
-import { fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
+import { fileSessionPauses, fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
 import { headlessPdf } from "./adapters/driven/browser/headless-pdf.js"
-import { fileMetrics, fileMetricsSource } from "./adapters/driven/state/file-metrics.js"
+import { fileMetrics, fileMetricsSource, fileSessionMetrics } from "./adapters/driven/state/file-metrics.js"
 import { interlintVersion } from "./adapters/driven/state/interlint-version.js"
 import { filePendingEdits } from "./adapters/driven/state/pending-edits.js"
 import { withProjectLock } from "./adapters/driven/state/project-lock.js"
 import { fileProtectedBaselines } from "./adapters/driven/state/protected-baselines.js"
-import { stateLocation } from "./adapters/driven/state/user-state.js"
+import { stateLocation, userStateDir } from "./adapters/driven/state/user-state.js"
 import { CONFIG_FILE, loadConfig, yamlConfigFile } from "./adapters/driven/yaml-config/config.js"
 import { type CliDeps, runCli } from "./adapters/driving/cli/cli.js"
 import type { Io } from "./adapters/driving/cli/cli-io.js"
@@ -60,6 +60,7 @@ const checking: CheckProjectDeps = {
   pending: filePendingEdits(),
   metrics: fileMetrics(),
   protection: { files: diskProtectedFiles, baselines: fileProtectedBaselines() },
+  resumes: fileProtectedBaselines(() => userStateDir(), "resumed"),
 }
 
 const agents = {
@@ -71,7 +72,14 @@ const agents = {
 
 const DEPS: CliDeps = {
   checking,
-  feedback: { checking, subagentFiles: fileSubagentFiles, stops: fileStopCounter, transcriptModel },
+  feedback: {
+    checking,
+    subagentFiles: fileSubagentFiles,
+    stops: fileStopCounter,
+    transcriptModel,
+    pauses: fileSessionPauses,
+    sessionMetrics: fileSessionMetrics(),
+  },
   copilotTranscriptModel,
   setup: {
     scan: scanMavenProjects,

@@ -2,17 +2,19 @@ import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { type CheckProjectDeps, checkProject, startSession } from "../../../application/checking/check-project.js"
 import { protectedAmong } from "../../../application/checking/protected-files.js"
+import { type FeedbackDeps, pauseSession, resumeSession } from "../../../application/feedback/agent-events.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { EXIT, type Io, UsageError } from "./cli-io.js"
 import { projectFiles } from "./project-paths.js"
 
-export async function check(args: string[], io: Io, deps: CheckProjectDeps): Promise<number> {
+export async function check(args: string[], io: Io, deps: CheckProjectDeps, feedback: FeedbackDeps): Promise<number> {
   const { values } = parseCheckArgs(args)
   const when = values.when ?? "task-end"
   const files = values.file ?? []
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
   if (when === "session-start" || when === "pre-edit") return await forPlugin(when, values, io, projectDir, deps)
+  if (when === "pause" || when === "resume") return await pauseForPlugin(when, values, io, projectDir, feedback)
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
@@ -76,6 +78,26 @@ async function forPlugin(
   if (deps.protection === undefined || files.length === 0) return EXIT.passed
   const guarded = protectedAmong(deps.loadConfig(projectDir), files)
   if (guarded.length > 0) io.stdout(`${protectedEditQuestion(guarded)}\n`)
+  return EXIT.passed
+}
+
+/**
+ * The pause and resume of a main session that the OpenCode plugin runs (F26), internal and left out of the usage like
+ * `--agent-context`, which gives the session. The plugin reads the marks in the user's prompt and decides; the CLI
+ * keeps the pause, restarts the session's state on resume and keeps the metrics. Writes nothing and exits 0.
+ */
+async function pauseForPlugin(
+  when: "pause" | "resume",
+  values: ReturnType<typeof parseCheckArgs>["values"],
+  io: Io,
+  projectDir: string,
+  deps: FeedbackDeps,
+): Promise<number> {
+  const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
+  const session = agent?.session
+  if (session === undefined) throw new UsageError(`--when ${when} needs the session in --agent-context`)
+  if (when === "pause") await pauseSession(projectDir, session, deps, agent)
+  else await resumeSession(projectDir, session, deps, agent)
   return EXIT.passed
 }
 

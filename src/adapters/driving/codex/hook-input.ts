@@ -18,6 +18,8 @@ export interface CodexHookInput {
   agentType?: string
   /** The active model, which Codex gives in every hook. */
   model?: string
+  /** The user's prompt, in a `UserPromptSubmit` hook. */
+  prompt?: string
   /** Whether an `apply_patch` input held no patch Interlint can read, so no file could be named. */
   unreadablePatch: boolean
 }
@@ -38,7 +40,7 @@ export function parseCodexHookInput(text: string): CodexHookInput {
     throw new CodexHookInputError("the hook input on stdin is not JSON")
   }
   if (!isObject(value)) throw new CodexHookInputError("the hook input on stdin is not a JSON object")
-  const { session_id, cwd, tool_name, tool_input, stop_hook_active, agent_id, agent_type, model } = value
+  const { session_id, cwd, tool_name, tool_input, stop_hook_active, agent_id, agent_type, model, prompt } = value
   const patch = tool_name === PATCH_TOOL ? patchOf(tool_input) : undefined
   return {
     sessionId: typeof session_id === "string" ? session_id : "",
@@ -49,6 +51,7 @@ export function parseCodexHookInput(text: string): CodexHookInput {
     agentType: nonEmpty(agent_type),
     model: nonEmpty(model),
     unreadablePatch: tool_name === PATCH_TOOL && patch === undefined,
+    ...(typeof prompt === "string" ? { prompt } : {}),
   }
 }
 

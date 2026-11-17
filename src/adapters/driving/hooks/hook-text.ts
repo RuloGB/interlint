@@ -1,7 +1,7 @@
 /** The texts the agent hooks give, the same for every agent that runs them. */
 
 /** The events the agent hook commands take. Codex takes all but `pre-edit`: its hooks cannot ask the user. */
-export const HOOK_EVENTS = ["session-start", "pre-edit", "post-edit", "stop", "subagent-stop"] as const
+export const HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "post-edit", "stop", "subagent-stop"] as const
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
 /** The events of Codex's hook command. */
