@@ -19,6 +19,12 @@
  *   what happened. If the subagent cannot fix them, the answer carries the failures to the agent that delegated
  *   the work, which answers for those files from then on. For a subagent in the background, a message does that.
  *
+ * The user pauses Interlint in a main session by writing `interlint: pause` in a prompt, and resumes it with
+ * `interlint: resume` (F26). The session's `prompt` hook reads the marks, only in main sessions: the prompt of a
+ * subagent's session is written by the agent. While paused, nothing runs in that session or its subagents, and each
+ * turn end of the main agent reminds the user. The pause lives in this plugin's memory; the CLI keeps it too, restarts
+ * the session's state on resume and keeps the metrics.
+ *
  * `session.idle` is not used: in OpenCode 2.1.4 it never reaches a plugin's event subscription.
  *
  * One OpenCode server runs the sessions of every open project, and its plugins get the events and tool calls of all
@@ -69,6 +75,25 @@ const MAIN_BLOCK_NOTE =
 const PROTECTED_APART_NOTE = " The protected files are a separate case: follow the instructions in their own message."
 /** Only the projects that changed since their checks last passed: a workspace may hold many. */
 const TASK_END_ARGS = ["check", "--when", "task-end", "--changed"]
+/** Tells the CLI the user paused or resumed Interlint in the main session of `--agent-context` (F26). */
+const PAUSE_ARGS = ["check", "--when", "pause"]
+const RESUME_ARGS = ["check", "--when", "resume"]
+/** The marks as the user writes them, in any case, anywhere in the prompt. The same as the CLI's. */
+const PAUSE_MARK = /interlint:[ \t]*(pause|resume)(?![\p{L}\p{N}_-])/giu
+/** The same words as the CLI's. */
+const PAUSED_MESSAGE =
+  'Interlint is paused in this session: no checks run and no protected file is guarded, in the agent and its subagents. Write "interlint: resume" to turn it back on.'
+/** The same words as the CLI's. */
+const RESUMED_MESSAGE =
+  "Interlint is active again in this session. It checks the changes made from now on: what changed while it was paused is not checked."
+/** The same words as the CLI's. */
+const NOT_PAUSED_MESSAGE = "Interlint is not paused in this session, so nothing changed."
+/** The same words as the CLI's. */
+const PAUSED_REMINDER = 'ℹ Interlint · paused in this session: no checks ran. Write "interlint: resume" to turn it back on.'
+/** The same words as the CLI's. */
+const PAUSE_ADVICE =
+  'If you do not want Interlint in this session for now, write "interlint: pause" in your message, and "interlint: resume" when you want it back.'
+
 /** Keeps the protected files of the session in the agent's context as they are. */
 const SESSION_START_ARGS = ["check", "--when", "session-start"]
 /** The permission OpenCode evaluates before the `edit`, `write` and `patch` tools change files. */
@@ -157,6 +182,14 @@ function subagentBlockText(attempt: number, output: string): string {
   )
 }
 
+/** The mark in a user's prompt: the last one when it holds both. None without a mark. The same as the CLI's. */
+export function pauseMark(text: unknown): "pause" | "resume" | undefined {
+  if (typeof text !== "string") return undefined
+  let mark: "pause" | "resume" | undefined
+  for (const match of text.matchAll(PAUSE_MARK)) mark = match[1]!.toLowerCase() as "pause" | "resume"
+  return mark
+}
+
 /** Decides what to do with a task-end check result. Keeps one block counter per session. */
 export class TaskEndGate {
   private readonly blocks = new Map<string, number>()
@@ -179,11 +212,17 @@ export class TaskEndGate {
       this.blocks.delete(sessionID)
       return {
         action: "report",
-        text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${run.output}`,
+        // Only the user reads it before the next prompt: the advice to pause goes nowhere the agent acts on (F26).
+        text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${run.output.trimEnd()}\n\n${PAUSE_ADVICE}\n`,
       }
     }
     this.blocks.set(sessionID, attempt)
     return { action: "continue", text: mainBlockText(attempt, run.output) }
+  }
+
+  /** Forgets the session's blocks, as when the user resumes Interlint in it. */
+  reset(sessionID: string): void {
+    this.blocks.delete(sessionID)
   }
 }
 
@@ -360,6 +399,8 @@ interface PluginContext {
     }>
     /** Absent on an OpenCode without session hooks: the metrics then ask `get` for the model. */
     hook?(name: "model.request", callback: (event: ModelRequest) => void): Promise<{ dispose(): Promise<void> }>
+    /** Fires for every prompt into a session, a subagent's included, before it is sent. */
+    hook?(name: "prompt", callback: (event: PromptEvent) => Promise<void> | void): Promise<{ dispose(): Promise<void> }>
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
   event: {
@@ -378,6 +419,12 @@ interface PluginContext {
       callback: (event: PermissionEvaluation) => Promise<void> | void,
     ): Promise<{ dispose(): Promise<void> }>
   }
+}
+
+/** A prompt about to go into a session. Only `text` is read. */
+export interface PromptEvent {
+  readonly sessionID: string
+  readonly prompt?: { text?: unknown }
 }
 
 /** A permission OpenCode is about to grant or ask for. Setting `effect` to `ask` makes it ask the user, with `message`. */
@@ -433,6 +480,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const deferTimers = new Map<string, ReturnType<typeof setTimeout>>()
       /** The sessions whose protected files Interlint keeps since their first turn, each until the CLI did it. */
       const started = new Map<string, Promise<void>>()
+      /** The main sessions the user paused Interlint in (F26). */
+      const paused = new Set<string>()
 
       const lookup = async (sessionID: string) => {
         const known = lookups.get(sessionID)
@@ -498,6 +547,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for (let parent = await parentOf(session); parent !== undefined; parent = await parentOf(session)) session = parent
         return session
       }
+
+      /** Whether the user paused Interlint in the session's main session. */
+      const isPaused = async (sessionID: string) => paused.size > 0 && paused.has(await rootOf(sessionID))
 
       /**
        * The main session of a session, as far as the lookups made so far tell: no new lookup, which may wait. A parent
@@ -649,6 +701,13 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const onTurnEnd = async (sessionID: string) => {
         const { parent, ours } = await lookup(sessionID)
         if (!ours) return
+        if (await isPaused(sessionID)) {
+          written.delete(sessionID)
+          if (parent) return
+          undefer(sessionID)
+          await ctx.session.synthetic({ sessionID, text: PAUSED_REMINDER, description: PAUSED_REMINDER, resume: false })
+          return
+        }
         if (parent) {
           // A subagent gets only the failures of the projects it changed, and none if it changed nothing.
           if (written.get(sessionID)?.size) settle(sessionID)
@@ -709,6 +768,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         // A subagent in the background is still working: its turn end checks its changes and tells its parent.
         if (status !== "completed" || typeof child !== "string") return
         if (!settling.has(child) && !written.get(child)?.size) return
+        if (await isPaused(event.sessionID)) return
         const entry = settle(child)
         entry.awaited = true
         const note = answerNote(await entry.done)
@@ -726,7 +786,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           console.error("[interlint] skipping a path the shell could misread:", file)
           return false
         })
-        if (files.length === 0 || !(await isOurs(event.sessionID))) return
+        if (files.length === 0 || !(await isOurs(event.sessionID)) || (await isPaused(event.sessionID))) return
         record(event.sessionID, files)
         // So an approved edit renews a fingerprint that exists. Every session's, as looking up its main one may wait.
         await Promise.all(started.values())
@@ -757,7 +817,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const onTurnStart = async (sessionID: string) => {
         if (started.has(sessionID)) return
         const { parent, ours } = await lookup(sessionID)
-        if (parent !== undefined || !ours || started.has(sessionID)) return
+        if (parent !== undefined || !ours || started.has(sessionID) || paused.has(sessionID)) return
         const done = (async () => {
           const run = await runChecks(directory, command, editTimeoutMs, SESSION_START_ARGS, await contextOf(sessionID))
           if (run.exitCode !== 0) console.error("[interlint] could not keep the protected files:", run.output)
@@ -774,7 +834,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         permissionHook = await ctx.permission?.hook?.("evaluate", async (event) => {
           if (event.action !== EDIT_PERMISSION || event.effect === "deny") return
           const files = event.resources.filter((file) => SHELL_SAFE_PATH.test(file) && !file.endsWith("\\"))
-          if (files.length === 0 || !(await isOurs(event.sessionID))) return
+          if (files.length === 0 || !(await isOurs(event.sessionID)) || (await isPaused(event.sessionID))) return
           const args = ["check", "--when", "pre-edit", ...files.flatMap((file) => ["--file", file])]
           const run = await runChecks(directory, command, editTimeoutMs, args)
           const question = run.exitCode === 0 ? run.output.trim() : ""
@@ -784,6 +844,43 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         })
       } catch (error) {
         console.error("[interlint] could not ask before protected files change", error)
+      }
+
+      /**
+       * Pauses or resumes Interlint in a main session and gives what the user reads. Resuming forgets the session's
+       * blocks and unchecked changes, and the CLI restarts its state, so only what changes from now on is checked.
+       */
+      const markSession = async (sessionID: string, mark: "pause" | "resume"): Promise<string> => {
+        if (mark === "pause") {
+          if (paused.has(sessionID)) return PAUSED_MESSAGE
+          paused.add(sessionID)
+        } else {
+          if (!paused.delete(sessionID)) return NOT_PAUSED_MESSAGE
+          gate.reset(sessionID)
+          for (const session of [...written.keys()]) if ((await rootOf(session)) === sessionID) written.delete(session)
+          undefer(sessionID)
+        }
+        // Awaited, so a resume restarts the session's state before the agent's turn changes anything.
+        const run = await runChecks(directory, command, editTimeoutMs, mark === "pause" ? PAUSE_ARGS : RESUME_ARGS, await contextOf(sessionID))
+        if (run.exitCode !== 0) console.error(`[interlint] could not ${mark} the session in the CLI:`, run.output)
+        return mark === "pause" ? PAUSED_MESSAGE : RESUMED_MESSAGE
+      }
+
+      // Only a main session's prompt is the user's: a subagent's is written by the agent that started it.
+      let promptHook: { dispose(): Promise<void> } | undefined
+      try {
+        promptHook = await ctx.session.hook?.("prompt", async (event) => {
+          const mark = pauseMark(event.prompt?.text)
+          if (mark === undefined) return
+          const { parent, ours } = await lookup(event.sessionID)
+          if (parent !== undefined || !ours) return
+          const text = await markSession(event.sessionID, mark)
+          ctx.session
+            .synthetic({ sessionID: event.sessionID, text, description: label(text), resume: false })
+            .catch((error) => console.error("[interlint]", error))
+        })
+      } catch (error) {
+        console.error("[interlint] could not read the pause marks in the user's prompts", error)
       }
 
       void (async () => {
@@ -823,6 +920,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         for (const timer of deferTimers.values()) clearTimeout(timer)
         void afterTool.dispose()
         void modelHook?.dispose()
+        void promptHook?.dispose()
         void permissionHook?.dispose()
       }
     },

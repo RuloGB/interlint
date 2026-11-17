@@ -439,3 +439,48 @@ describe("pausing Interlint in a GitHub Copilot session", () => {
     expect(JSON.parse(edited.stdout).additionalContext).toContain("Interlint: the checks fail after this edit.")
   })
 })
+
+describe("the pause steps the OpenCode plugin runs", () => {
+  const context = JSON.stringify({ agent: "opencode", session: "oc-1", model: "gpt-4.1" })
+
+  it("restarts the session on resume, so the changes made while paused do not run the task-end checks", async () => {
+    project(PASSING_XML, { when: "task-end" })
+    expect((await cli(["check", "--when", "task-end", "--changed"], "")).exitCode).toBe(0)
+    expect(await cli(["check", "--when", "pause", "--agent-context"], context)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    writeFile("report.xml", VIOLATIONS_XML)
+    writeFile(ORDER, "class Order { int broken; }\n")
+    forgetRun()
+
+    expect(await cli(["check", "--when", "resume", "--agent-context"], context)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    const taskEnd = await cli(["check", "--when", "task-end", "--changed"], "")
+
+    expect(taskEnd.exitCode).toBe(0)
+    expect(ran()).toBe(false)
+  })
+
+  it("keeps the pause and resume in the metrics with the plugin's context", async () => {
+    project(PASSING_XML)
+
+    await cli(["check", "--when", "pause", "--agent-context"], context)
+    await cli(["check", "--when", "resume", "--agent-context"], context)
+
+    const dir = join(stateDir, "interlint", "metrics")
+    const lines = readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((path) => path.endsWith(".jsonl"))
+      .flatMap((path) => readFileSync(join(dir, path), "utf8").trimEnd().split("\n"))
+      .map((line) => JSON.parse(line))
+    expect(lines).toEqual([
+      expect.objectContaining({ event: "pause", agent: "opencode", session: "oc-1", model: "gpt-4.1" }),
+      expect.objectContaining({ event: "resume", agent: "opencode", session: "oc-1", model: "gpt-4.1" }),
+    ])
+  })
+
+  it("needs the session in --agent-context", async () => {
+    project(PASSING_XML)
+
+    const { exitCode, stderr } = await cli(["check", "--when", "pause"], "")
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain("--when pause needs the session in --agent-context")
+  })
+})

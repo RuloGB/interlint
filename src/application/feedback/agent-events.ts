@@ -129,13 +129,26 @@ export async function userPrompt(
   const session = agent.sessionId
   if (mark === undefined || agent.agentId !== undefined || session === "") return ""
   if (mark === "pause") {
-    if (deps.pauses.isPaused(session)) return PAUSED_MESSAGE
-    deps.pauses.pause(session)
-    const config = configOf(projectDir, deps)
-    if (config) await keepSessionMetric(projectDir, config, "pause", context, deps)
+    if (!deps.pauses.isPaused(session)) await pauseSession(projectDir, session, deps, context)
     return PAUSED_MESSAGE
   }
   if (!deps.pauses.isPaused(session)) return NOT_PAUSED_MESSAGE
+  await resumeSession(projectDir, session, deps, context)
+  return RESUMED_MESSAGE
+}
+
+/** Pauses Interlint in the main agent's session, and keeps the pause in the metrics. */
+export async function pauseSession(projectDir: string, session: string, deps: FeedbackDeps, context?: AgentContext): Promise<void> {
+  deps.pauses.pause(session)
+  const config = configOf(projectDir, deps)
+  if (config) await keepSessionMetric(projectDir, config, "pause", context, deps)
+}
+
+/**
+ * Resumes Interlint in the main agent's session: its blocked stops count from zero and only what changes from now on
+ * is checked. Keeps the resume in the metrics.
+ */
+export async function resumeSession(projectDir: string, session: string, deps: FeedbackDeps, context?: AgentContext): Promise<void> {
   deps.pauses.resume(session)
   deps.stops.clear({ sessionId: session })
   // Without a valid interlint.yaml there is nothing to restart: the next hook reports it.
@@ -144,7 +157,6 @@ export async function userPrompt(
     await restartSession(projectDir, config, session, deps.checking)
     await keepSessionMetric(projectDir, config, "resume", context, deps)
   }
-  return RESUMED_MESSAGE
 }
 
 function configOf(projectDir: string, deps: FeedbackDeps): Config | undefined {

@@ -62,7 +62,7 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
       io.stdout(`${deps.version()}\n`)
       return EXIT.passed
     }
-    if (command === "check") return await check(rest, io, deps.checking)
+    if (command === "check") return await check(rest, io, deps.checking, deps.feedback)
     if (command === "init") return init(rest, io, deps.setup)
     if (command === "doctor") return doctor(rest, io, deps.doctor)
     if (command === "hook" && rest[0] === "copilot") {
