@@ -358,6 +358,8 @@ describe("the advice to pause after the main agent's last attempt", () => {
     const subagent = decideStop({ sessionId: "s", agentId: "a1", stopHookActive: true }, "✗ architecture\n", ["architecture"], counter)
 
     expect(main).toEqual({ action: "report", text: `Interlint: the checks still fail after 3 attempts, so the task may end.\n\n✗ architecture\n\n${PAUSE_ADVICE}\n` })
+    expect(PAUSE_ADVICE).toContain('"interlint: pause"')
+    expect(PAUSE_ADVICE).toContain('"interlint: resume"')
     expect(subagent).toEqual({ action: "report", text: "Interlint: the checks still fail after 3 attempts, so the task may end.\n\n✗ architecture\n" })
   })
 })

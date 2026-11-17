@@ -30,4 +30,4 @@ export const PAUSED_REMINDER = "ℹ Interlint · paused in this session."
  * The advice the user reads after the main agent's last attempt, never the agent: it would only ask the user whether
  * to pause instead of fixing. The same words as the OpenCode plugin's.
  */
-export const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this session.'
+export const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this session, and "interlint: resume" to turn it back on.'

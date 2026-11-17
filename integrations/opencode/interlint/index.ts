@@ -89,7 +89,7 @@ const NOT_PAUSED_MESSAGE = "Interlint is not paused in this session."
 /** The same words as the CLI's. */
 const PAUSED_REMINDER = "ℹ Interlint · paused in this session."
 /** The same words as the CLI's. */
-const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this session.'
+const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this session, and "interlint: resume" to turn it back on.'
 
 /** Keeps the protected files of the session in the agent's context as they are. */
 const SESSION_START_ARGS = ["check", "--when", "session-start"]
