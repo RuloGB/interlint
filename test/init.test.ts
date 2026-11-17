@@ -1089,6 +1089,29 @@ describe("interlint init with SpotBugs", () => {
     writeFile("pom.xml", `<project>\n  <artifactId>shop</artifactId>\n  <build>\n    <plugins>\n${build}    </plugins>\n  </build>\n</project>\n`)
   }
 
+  it("keeps OpenAPI Generator from regenerating an unchanged spec in the spotbugs check of a project without modules", async () => {
+    pom(spotbugs(execution("spotbugs")) + plugin("openapi-generator-maven-plugin"))
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+    ])
+  })
+
+  it("counts OpenAPI Generator that a project without modules only manages in pluginManagement", async () => {
+    writeFile(
+      "pom.xml",
+      `<project>\n  <build>\n    <pluginManagement>\n      <plugins>\n${plugin("openapi-generator-maven-plugin")}      </plugins>\n    </pluginManagement>\n    <plugins>\n${spotbugs(execution("spotbugs"))}    </plugins>\n  </build>\n</project>\n`,
+    )
+
+    await run("init")
+
+    expect(loadConfig(projectDir).checks.map((check) => check.run)).toEqual([
+      "mvn -q compile spotbugs:check@spotbugs -Dcheckstyle.skip -Dpmd.skip -Dcodegen.skipIfSpecIsUnchanged=true",
+    ])
+  })
+
   it("adds a spotbugs check that compiles first and skips Checkstyle and PMD, and the other checks skip SpotBugs", async () => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
