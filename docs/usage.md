@@ -42,7 +42,7 @@ checks:
     report: maven
     when: edit
   - name: pmd
-    run: ./mvnw -q compile pmd:check -Dcheckstyle.skip
+    run: ./mvnw -q compile pmd:check -Dcheckstyle.skip -Dpmd.analysisCache=true
     report: maven
     when: edit
     every: 5
@@ -56,6 +56,8 @@ checks:
 - Each check skips the plugins the other checks run (`-Dcheckstyle.skip`, `-Dpmd.skip`, `-Dspotbugs.skip`), so a failure shows in one check only. Without that, a build that binds `checkstyle:check` to an early phase such as `validate` would stop `test` and `compile` before ArchUnit, PMD or SpotBugs run, and show Checkstyle's failures under their names. A check skips only the plugins the build has: without Checkstyle, PMD or SpotBugs in the build, the `architecture` check has no `-D…skip`.
 - When the build runs a plugin's `check` goal in an `<execution>`, the check names that execution, as in `checkstyle:check@style`, so the configuration inside it applies: called plainly, Maven runs the goal with the plugin's defaults. An execution without `<id>` is `default`; one turned off with `<phase>none</phase>` is left out.
 - A plugin counts when it is in `<build>`, in `<plugins>` or `<pluginManagement>`. Plugins only in a comment, a `<profile>`, `<reporting>`, `<dependencies>` or `<dependencyManagement>` are left out, and so are plugins declared only in an external parent. A Checkstyle or PMD plugin with executions counts only when one of them runs `check`: one whose executions only write a report (the `checkstyle` or `pmd` goal) or run `cpd-check` gets no check, as the build does not enforce its rules. A plugin without executions counts, as you run its `check` goal yourself. In a project with modules, see [Multi-module projects and workspaces](#multi-module-projects-and-workspaces).
+- The `pmd` check turns on PMD's analysis cache with `-Dpmd.analysisCache=true`: PMD keeps its results in `target/pmd/pmd.cache` and analyses again only the files that changed. `mvn clean` deletes the cache, so the next run analyses every file. A build that sets `<analysisCache>` in the plugin's configuration keeps its own value.
+- When the build runs `openapi-generator-maven-plugin`, the checks that compile (`architecture`, `pmd`, `spotbugs` and `coverage`) get `-Dcodegen.skipIfSpecIsUnchanged=true`. By default the plugin writes its sources again on every build, so Maven compiles them, and every module that depends on them, even when nothing changed. With the property it generates only when the spec changed. It looks only at the spec: after changing the plugin's configuration in `pom.xml`, run `mvn clean` once so the sources are generated again. A plugin the parent of a multi-module project only manages counts when a module turns it on, as for the other plugins.
 - When the build runs `spotbugs:check`, it adds a `spotbugs` check that runs after 5 edited files or 100 written lines, as `pmd`. A SpotBugs plugin without an execution that runs `check` gets no check: the build only uses it for reports. See [SpotBugs](#spotbugs).
 - When the build runs `jacoco:check`, it adds a `coverage` check that runs at task end only. See [JaCoCo coverage](#jacoco-coverage).
 - In an npm project with ESLint, it writes an `eslint` check that runs after each edit. See [ESLint](#eslint).

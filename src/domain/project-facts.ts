@@ -40,6 +40,8 @@ export interface ProjectFacts {
   checkExecutions: Record<QualityPlugin, string[]>
   /** The ids of the build's executions that run `jacoco-maven-plugin`'s `check` goal: none when it has no coverage rules. */
   coverageExecutions: string[]
+  /** Whether the build runs `openapi-generator-maven-plugin`, which regenerates its sources on every build by default. */
+  generatesOpenApi?: boolean
   /**
    * The rule files the build's Checkstyle, PMD and SpotBugs settings name and the project holds, such as
    * `config/checkstyle.xml`, as `/`-separated paths relative to the project.
