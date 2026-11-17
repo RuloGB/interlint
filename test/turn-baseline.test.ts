@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { type CheckProjectDeps, startTurn } from "../src/application/checking/check-project.js"
+import type { Config } from "../src/domain/check.js"
 import { withChangesBetweenTurns } from "../src/domain/turn-baseline.js"
 import { main } from "../src/main.js"
 
@@ -242,6 +244,41 @@ describe("the turn step the OpenCode plugin runs", () => {
 
     expect(exitCode).toBe(2)
     expect(stderr).toContain("--when turn-start needs the session in --agent-context")
+  })
+})
+
+describe("starting a turn", () => {
+  const config = { checks: [] } as unknown as Config
+
+  it("never waits for the project lock when no turn ended since the last prompt", async () => {
+    const lock = vi.fn(async <T,>(_dir: string, work: () => Promise<T>) => work())
+    const turns = { read: () => undefined, save: vi.fn(), forget: vi.fn() }
+
+    await startTurn("/repo", config, "session-1", { lock, turns } as unknown as CheckProjectDeps)
+
+    expect(lock).not.toHaveBeenCalled()
+    expect(turns.forget).not.toHaveBeenCalled()
+  })
+
+  it("applies the turn end read under the lock, not a copy read before it", async () => {
+    const stale = { projects: {} }
+    const fresh = { projects: {}, protected: { "interlint.yaml": "h1" } }
+    let current: object = stale
+    const lock = vi.fn(async <T,>(_dir: string, work: () => Promise<T>) => {
+      current = fresh
+      return work()
+    })
+    const read = vi.fn(() => current)
+    const baselines = { read: () => ({ "interlint.yaml": "h0" }), save: vi.fn() }
+    const deps = {
+      lock,
+      turns: { read, save: vi.fn(), forget: vi.fn() },
+      protection: { files: () => ({ "interlint.yaml": "h2" }), baselines },
+    } as unknown as CheckProjectDeps
+
+    await startTurn("/repo", config, "session-1", deps)
+
+    expect(baselines.save).toHaveBeenCalledWith("/repo", "session-1", { "interlint.yaml": "h2" })
   })
 })
 

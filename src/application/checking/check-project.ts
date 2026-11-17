@@ -142,8 +142,9 @@ async function endTurn(projectDir: string, config: Config, session: string, deps
  */
 export async function startTurn(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
   const { turns, protection } = deps
-  if (turns === undefined) return
-  // Read under the lock, so a task end that saves a newer record meanwhile is never applied from a stale copy.
+  // Read first without the lock, so a prompt never waits for another session's checks when there is nothing to take.
+  if (turns === undefined || turns.read(projectDir, session) === undefined) return
+  // Read again under the lock, so a task end that saves a newer record meanwhile is never applied from a stale copy.
   await deps.lock(projectDir, async () => {
     const turnEnd = turns.read(projectDir, session)
     if (turnEnd === undefined) return
