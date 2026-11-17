@@ -36,8 +36,12 @@ const CHECK_GOAL = /(?:^|\s)(checkstyle|pmd|spotbugs):check(?:@\S+)?(?=\s|$)/g
 
 /** Maven's `--fail-never`, as a word of the command: Maven builds every module whatever fails, and exits 0. */
 const FAIL_NEVER = /(?:^|\s)(?:-fn|--fail-never)(?=\s|$)/
-/** Any goal that failed: the plugin's artifactId, the goal and the project Maven names, its artifactId. */
-const FAILED_GOAL = /Failed to execute goal [^:\s]+:([^:\s]+):[^:\s]+:([^\s:]+) \([^)]*\) on project ([^\s:]+)/g
+/** The line Maven prints for each module that failed, whatever the cause. */
+const FAILED_LINE = /^.*Failed to execute goal.*$/gm
+/** A plugin goal that failed: the plugin's artifactId, the goal and the project Maven names, its artifactId. */
+const FAILED_PLUGIN_GOAL = /Failed to execute goal [^:\s]+:([^:\s]+):[^:\s]+:([^\s:]+) \([^)]*\) on project ([^\s:]+)/
+/** An error line of Maven's output. */
+const ERROR_LINE = /^\[ERROR\]/m
 /** How Maven colors its output. */
 const ANSI_COLOR = /\u001b\[[\d;]*m/g
 
@@ -119,14 +123,19 @@ export function readQualityReports(projectDir: string, before: ReportSnapshot, o
 /**
  * With `--fail-never`, Maven runs a goal named on the command line in every module of a reactor, also in those whose
  * build never runs that plugin, such as a module of generated code, and exits 0 whatever fails. A `check` goal that
- * failed in such a module does not count, and neither does its report. Any other goal that failed counts, in any
- * module. Only the reports of the modules whose `check` failed are read: the others list only what the build accepted.
+ * failed in such a module does not count, and neither does its report. Any other failure counts, in any module: a
+ * goal that failed, a module whose dependencies cannot be resolved, or an error Maven prints without naming a failed
+ * goal, such as a plugin prefix it cannot find. Only the reports of the modules whose `check` failed are read: the
+ * others list only what the build accepted.
  */
 function readFailNever(projectDir: string, reports: string[], output: string): ReportResult {
+  const plain = output.replace(ANSI_COLOR, "")
+  const failedLines = [...plain.matchAll(FAILED_LINE)].map(([line]) => line)
   const modules = moduleDirs(projectDir).flatMap((dir) => buildModule(dir) ?? [])
   const failedChecks = new Set<string>()
-  let failed = false
-  for (const [, artifact = "", goal, project] of output.replace(ANSI_COLOR, "").matchAll(FAILED_GOAL)) {
+  let failed = failedLines.length === 0 && ERROR_LINE.test(plain)
+  for (const line of failedLines) {
+    const [, artifact = "", goal, project] = FAILED_PLUGIN_GOAL.exec(line) ?? []
     const plugin = QUALITY_PLUGINS.find((name) => QUALITY_PLUGIN_ARTIFACTS[name] === artifact)
     const module = modules.find(({ artifactId }) => artifactId === project)
     if (plugin !== undefined && goal === "check" && module !== undefined) {

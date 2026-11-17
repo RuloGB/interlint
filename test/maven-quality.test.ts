@@ -781,6 +781,21 @@ describe("a reactor checked with --fail-never", () => {
     expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), compile, COMMAND)).toEqual({ found: false, failures: [], failed: true })
   })
 
+  it("counts a module whose dependencies cannot be resolved, which Maven names without a plugin", () => {
+    reactor()
+    const unresolved =
+      "[ERROR] Failed to execute goal on project orders: Could not resolve dependencies for project com.acme:orders:jar:1.0.0"
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), unresolved, COMMAND).failed).toBe(true)
+  })
+
+  it("counts an error Maven prints without naming a failed goal, such as a plugin prefix it cannot find", () => {
+    reactor()
+    const noPlugin = "[ERROR] No plugin found for prefix 'spotbugs' in the current project and in the plugin groups"
+
+    expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), noPlugin, COMMAND).failed).toBe(true)
+  })
+
   it("counts the check of a module whose parent runs the plugin in its <build><plugins>", () => {
     reactor({ parentRuns: true })
     const before = snapshotQualityReports(projectDir)
