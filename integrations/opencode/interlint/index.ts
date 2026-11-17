@@ -81,18 +81,15 @@ const RESUME_ARGS = ["check", "--when", "resume"]
 /** The marks as the user writes them, in any case, anywhere in the prompt. The same as the CLI's. */
 const PAUSE_MARK = /interlint:[ \t]*(pause|resume)(?![\p{L}\p{N}_-])/giu
 /** The same words as the CLI's. */
-const PAUSED_MESSAGE =
-  'Interlint is paused in this session: no checks run and no protected file is guarded, in the agent and its subagents. Write "interlint: resume" to turn it back on.'
+const PAUSED_MESSAGE = "Interlint is paused in this session."
 /** The same words as the CLI's. */
-const RESUMED_MESSAGE =
-  "Interlint is active again in this session. It checks the changes made from now on: what changed while it was paused is not checked."
+const RESUMED_MESSAGE = "Interlint is active again in this session."
 /** The same words as the CLI's. */
-const NOT_PAUSED_MESSAGE = "Interlint is not paused in this session, so nothing changed."
+const NOT_PAUSED_MESSAGE = "Interlint is not paused in this session."
 /** The same words as the CLI's. */
-const PAUSED_REMINDER = 'ℹ Interlint · paused in this session: no checks ran. Write "interlint: resume" to turn it back on.'
+const PAUSED_REMINDER = "ℹ Interlint · paused in this session."
 /** The same words as the CLI's. */
-const PAUSE_ADVICE =
-  'If you do not want Interlint in this session for now, write "interlint: pause" in your message, and "interlint: resume" when you want it back.'
+const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this session.'
 
 /** Keeps the protected files of the session in the agent's context as they are. */
 const SESSION_START_ARGS = ["check", "--when", "session-start"]

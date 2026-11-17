@@ -141,7 +141,6 @@ describe("pausing Interlint in a Claude Code session", () => {
     expect(ran()).toBe(false)
     expect(stopped.exitCode).toBe(0)
     expect(systemMessage(stopped.stdout)).toBe(PAUSED_REMINDER)
-    expect(PAUSED_REMINDER).toContain("interlint: resume")
   })
 
   it("runs nothing for the session's subagents either", async () => {
