@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { AgentFiles } from "../../../application/setup/ports.js"
-import { type InterlintHook, withInterlintHooks } from "./claude-code-settings.js"
+import { type InterlintHook, RUNNING_CHECKS, withInterlintHooks } from "./claude-code-settings.js"
 
 /** The project's Codex hooks. Codex loads them once the user trusts the project's `.codex/` layer. */
 export const CODEX_HOOKS_FILE = ".codex/hooks.json"
@@ -15,9 +15,9 @@ export const CODEX_HOOKS_FILE = ".codex/hooks.json"
 const HOOKS: InterlintHook[] = [
   { event: "SessionStart", command: "interlint hook codex session-start", timeout: 30 },
   { event: "UserPromptSubmit", command: "interlint hook codex user-prompt", timeout: 120 },
-  { event: "PostToolUse", matcher: "apply_patch|Edit|Write", command: "interlint hook codex post-edit", timeout: 120 },
-  { event: "Stop", command: "interlint hook codex stop", timeout: 600 },
-  { event: "SubagentStop", command: "interlint hook codex subagent-stop", timeout: 600 },
+  { event: "PostToolUse", matcher: "apply_patch|Edit|Write", command: "interlint hook codex post-edit", timeout: 120, statusMessage: RUNNING_CHECKS },
+  { event: "Stop", command: "interlint hook codex stop", timeout: 600, statusMessage: RUNNING_CHECKS },
+  { event: "SubagentStop", command: "interlint hook codex subagent-stop", timeout: 600, statusMessage: RUNNING_CHECKS },
 ]
 
 /**

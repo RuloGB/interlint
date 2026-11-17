@@ -1425,3 +1425,179 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(sent).toEqual([])
   })
 })
+
+describe("telling the user that the task-end checks are running", () => {
+  const RUNNING = "Interlint: running checks"
+  const DELAY = 2_000
+  beforeEach(() => void vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }))
+  afterEach(() => void vi.useRealTimers())
+
+  type FakeContext = ReturnType<typeof fakeContext>["ctx"]
+  const FINISHED = "Interlint: checks finished"
+
+  /** Task-end checks that end with `result` once `finish` is called. */
+  function slowChecks(result: CheckRun) {
+    let finish!: () => void
+    const ended = new Promise<void>((resolve) => (finish = resolve))
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = []) => {
+      if (args[2] === "task-end") await ended
+      return result
+    }
+    return { run, finish }
+  }
+
+  async function turnEnd(run: RunChecks, options: Record<string, unknown> = {}, setUp?: (ctx: FakeContext) => void) {
+    const context = fakeContext([{ type: SUCCEEDED, data: { sessionID: "s1" } }])
+    context.ctx.options = options
+    setUp?.(context.ctx)
+    await createInterlintPlugin(run).setup(context.ctx)
+    await context.done
+    await settled()
+    return context
+  }
+
+  it("sends a message saying the checks are running when they take longer than 2 seconds, before their result", async () => {
+    const { run, finish } = slowChecks(PASSED_NAMED)
+    const { sent, labels } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    expect(sent).toEqual([{ sessionID: "s1", text: RUNNING, resume: false }])
+    expect(labels).toEqual([RUNNING])
+
+    finish()
+    await settled()
+    expect(sent).toEqual([
+      { sessionID: "s1", text: RUNNING, resume: false },
+      { sessionID: "s1", text: PASS_LINE, resume: false },
+    ])
+  })
+
+  it("says nothing more when the checks end within 2 seconds, such as when no project changed", async () => {
+    const { run, finish } = slowChecks(PASSED)
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY - 1)
+    finish()
+    await settled()
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+
+    expect(sent).toEqual([])
+  })
+
+  it("still makes the agent fix the failures after saying the checks are running", async () => {
+    const { run, finish } = slowChecks(VIOLATIONS)
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+
+    expect(sent.map(({ text, resume }) => ({ running: text === RUNNING, resume }))).toEqual([
+      { running: true, resume: false },
+      { running: false, resume: true },
+    ])
+  })
+
+  it("closes the notice with a line when the checks end with nothing to report, so the user is not left waiting", async () => {
+    const { run, finish } = slowChecks(PASSED)
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+
+    expect(sent).toEqual([
+      { sessionID: "s1", text: RUNNING, resume: false },
+      { sessionID: "s1", text: FINISHED, resume: false },
+    ])
+  })
+
+  it("follows the notice with the error when the checks cannot run", async () => {
+    const { run, finish } = slowChecks({ exitCode: 2, output: "Error: no interlint.yaml\n" })
+    const { sent } = await turnEnd(run)
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+
+    expect(sent.map(({ text, resume }) => ({ text: text.split("\n")[0], resume }))).toEqual([
+      { text: RUNNING, resume: false },
+      { text: "Interlint could not run the checks (exit code 2).", resume: false },
+    ])
+  })
+
+  it("waits as long as the runningNoticeMs option says before sending the notice", async () => {
+    const { run } = slowChecks(PASSED_NAMED)
+    const { sent } = await turnEnd(run, { runningNoticeMs: 500 })
+
+    vi.advanceTimersByTime(499)
+    await settled()
+    expect(sent).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    await settled()
+    expect(sent).toEqual([{ sessionID: "s1", text: RUNNING, resume: false }])
+  })
+
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY, "500"])(
+    "keeps the 2-second delay when runningNoticeMs is %s, which is not a delay",
+    async (runningNoticeMs) => {
+      const { run } = slowChecks(PASSED_NAMED)
+      const { sent } = await turnEnd(run, { runningNoticeMs })
+
+      vi.advanceTimersByTime(DELAY - 1)
+      await settled()
+      expect(sent).toEqual([])
+
+      vi.advanceTimersByTime(1)
+      await settled()
+      expect(sent).toEqual([{ sessionID: "s1", text: RUNNING, resume: false }])
+    },
+  )
+
+  it("still sends the result when the notice cannot be sent", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { run, finish } = slowChecks(PASSED_NAMED)
+    const { sent } = await turnEnd(run, {}, (ctx) => {
+      const synthetic = ctx.session.synthetic
+      ctx.session.synthetic = async (input) => {
+        if (input.text === RUNNING) throw new Error("synthetic failed")
+        return synthetic(input)
+      }
+    })
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+
+    expect(sent).toEqual([{ sessionID: "s1", text: PASS_LINE, resume: false }])
+    expect(errors).toHaveBeenCalled()
+    errors.mockRestore()
+  })
+
+  it("sends the result after 5 seconds when the notice never finishes sending", async () => {
+    const { run, finish } = slowChecks(VIOLATIONS)
+    const { sent } = await turnEnd(run, {}, (ctx) => {
+      const synthetic = ctx.session.synthetic
+      ctx.session.synthetic = (input) => (input.text === RUNNING ? new Promise<void>(() => {}) : synthetic(input))
+    })
+
+    vi.advanceTimersByTime(DELAY)
+    await settled()
+    finish()
+    await settled()
+    vi.advanceTimersByTime(4_999)
+    await settled()
+    expect(sent).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    await settled()
+    expect(sent.map(({ resume }) => resume)).toEqual([true])
+  })
+})

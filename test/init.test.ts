@@ -392,9 +392,9 @@ describe("interlint init --agent opencode", () => {
 
 describe("interlint init --agent claude-code", () => {
   const SETTINGS = join(".claude", "settings.json")
-  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
-  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
-  const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120, statusMessage: "Interlint: running checks" }
+  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600, statusMessage: "Interlint: running checks" }
+  const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }
   const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
   const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const USER_PROMPT = { type: "command", command: "interlint hook claude-code user-prompt", timeout: 120 }
@@ -627,11 +627,11 @@ describe("interlint init --agent codex", () => {
     PostToolUse: [
       {
         matcher: "apply_patch|Edit|Write",
-        hooks: [{ type: "command", command: "interlint hook codex post-edit", timeout: 120 }],
+        hooks: [{ type: "command", command: "interlint hook codex post-edit", timeout: 120, statusMessage: "Interlint: running checks" }],
       },
     ],
-    Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 600 }] }],
-    SubagentStop: [{ hooks: [{ type: "command", command: "interlint hook codex subagent-stop", timeout: 600 }] }],
+    Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 600, statusMessage: "Interlint: running checks" }] }],
+    SubagentStop: [{ hooks: [{ type: "command", command: "interlint hook codex subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }] }],
   }
 
   beforeEach(() => {
@@ -700,6 +700,15 @@ describe("interlint init --agent codex", () => {
     expect(stdout).toContain(TRUST_NOTE)
   })
 
+  it("replaces an Interlint hook written before the status message, so Codex shows that the checks are running", async () => {
+    const { statusMessage: _, ...older } = INTERLINT_HOOKS.Stop[0]!.hooks[0]!
+    writeFile(HOOKS_FILE, JSON.stringify({ hooks: { Stop: [{ hooks: [older] }] } }))
+
+    await run("init", "--agent", "codex")
+
+    expect(JSON.parse(readHooks()).hooks.Stop).toEqual(INTERLINT_HOOKS.Stop)
+  })
+
   it("stops with an error and writes nothing when .codex/hooks.json is not JSON", async () => {
     writeFile(HOOKS_FILE, "{ not json")
 
@@ -713,9 +722,9 @@ describe("interlint init --agent codex", () => {
 
 describe("interlint init --agent claude-code with an older hook next to the current one", () => {
   const SETTINGS = join(".claude", "settings.json")
-  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120 }
-  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600 }
-  const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600 }
+  const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120, statusMessage: "Interlint: running checks" }
+  const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600, statusMessage: "Interlint: running checks" }
+  const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }
   const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
   const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const USER_PROMPT = { type: "command", command: "interlint hook claude-code user-prompt", timeout: 120 }
@@ -723,6 +732,23 @@ describe("interlint init --agent claude-code with an older hook next to the curr
   beforeEach(() => {
     writeFile("mvnw", "")
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
+  })
+
+  it("replaces the hooks written before the status message, so Claude Code shows that the checks are running", async () => {
+    const { statusMessage: _post, ...olderPostEdit } = POST_EDIT
+    const { statusMessage: _stop, ...olderStop } = STOP
+    writeFile(
+      SETTINGS,
+      JSON.stringify({
+        hooks: { PostToolUse: [{ matcher: "Edit|Write", hooks: [olderPostEdit] }], Stop: [{ hooks: [olderStop] }] },
+      }),
+    )
+
+    await run("init", "--agent", "claude-code")
+
+    const hooks = JSON.parse(readFileSync(join(projectDir, SETTINGS), "utf8")).hooks
+    expect(hooks.PostToolUse).toEqual([{ matcher: "Edit|Write", hooks: [POST_EDIT] }])
+    expect(hooks.Stop).toEqual([{ hooks: [STOP] }])
   })
 
   it("removes the older copy, so each hook runs once", async () => {

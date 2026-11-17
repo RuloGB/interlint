@@ -450,7 +450,9 @@ describe("interlint hook codex", () => {
 
     expect(hooks.PostToolUse[0]).toEqual({
       matcher: "apply_patch|Edit|Write",
-      hooks: [{ type: "command", command: "interlint hook codex post-edit", timeout: 120 }],
+      hooks: [
+        { type: "command", command: "interlint hook codex post-edit", timeout: 120, statusMessage: "Interlint: running checks" },
+      ],
     })
     expect(hooks.Stop[0].hooks[0].command).toBe("interlint hook codex stop")
     expect(hooks.SubagentStop[0].hooks[0].command).toBe("interlint hook codex subagent-stop")

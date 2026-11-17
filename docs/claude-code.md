@@ -32,17 +32,17 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds six hooks 
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
-        "hooks": [{ "type": "command", "command": "interlint hook claude-code post-edit", "timeout": 120 }]
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code post-edit", "timeout": 120, "statusMessage": "Interlint: running checks" }]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "interlint hook claude-code stop", "timeout": 600 }]
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code stop", "timeout": 600, "statusMessage": "Interlint: running checks" }]
       }
     ],
     "SubagentStop": [
       {
-        "hooks": [{ "type": "command", "command": "interlint hook claude-code subagent-stop", "timeout": 600 }]
+        "hooks": [{ "type": "command", "command": "interlint hook claude-code subagent-stop", "timeout": 600, "statusMessage": "Interlint: running checks" }]
       }
     ]
   }
@@ -51,6 +51,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this adds six hooks 
 
 - Other settings and hooks in the file stay as they are.
 - Running `init` again leaves the file unchanged, and replaces an older Interlint hook instead of adding a second one.
+- `statusMessage` is what Claude Code shows while the hook runs, so you know the checks are still running after Claude writes its last message.
 - If you edited `interlint.yaml`, `init --agent claude-code` keeps it and still writes the hooks. Only `--force` replaces it.
 - If the file is not valid JSON, `init` writes nothing.
 
