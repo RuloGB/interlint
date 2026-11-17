@@ -113,9 +113,15 @@ function fingerprint(path: string): string {
  * did not fail according to `output`: when Maven failed for another reason, such as a module that does not
  * compile, the reports only hold what the build accepted.
  */
-export function readQualityReports(projectDir: string, before: ReportSnapshot, output: string, command = ""): ReportResult {
+export function readQualityReports(
+  projectDir: string,
+  before: ReportSnapshot,
+  output: string,
+  command = "",
+  cut = false,
+): ReportResult {
   const reports = reportFiles(projectDir).filter((path) => before.get(path) !== fingerprint(path))
-  if (FAIL_NEVER.test(command)) return readFailNever(projectDir, reports, output)
+  if (FAIL_NEVER.test(command)) return readFailNever(projectDir, reports, output, cut)
   const failed = new Set([...output.matchAll(FAILED_CHECK_GOAL)].map((match) => match[1] ?? match[2]))
   return { found: reports.length > 0, failures: failuresIn(reports, projectDir, failed) }
 }
@@ -127,13 +133,15 @@ export function readQualityReports(projectDir: string, before: ReportSnapshot, o
  * goal that failed, a module whose dependencies cannot be resolved, or an error Maven prints without naming a failed
  * goal, such as a plugin prefix it cannot find. Only the reports of the modules whose `check` failed are read: the
  * others list only what the build accepted.
+ * Maven prints every failed-goal line at the end of the build. When the start of the output was `cut` and some of
+ * those lines are there, others may have been cut, so a failure that would not count still fails the run.
  */
-function readFailNever(projectDir: string, reports: string[], output: string): ReportResult {
+function readFailNever(projectDir: string, reports: string[], output: string, cut: boolean): ReportResult {
   const plain = output.replace(ANSI_COLOR, "")
   const failedLines = [...plain.matchAll(FAILED_LINE)].map(([line]) => line)
   const modules = moduleDirs(projectDir).flatMap((dir) => buildModule(dir) ?? [])
   const failedChecks = new Set<string>()
-  let failed = failedLines.length === 0 && ERROR_LINE.test(plain)
+  let failed = failedLines.length === 0 ? ERROR_LINE.test(plain) : cut
   for (const line of failedLines) {
     const [, artifact = "", goal, project] = FAILED_PLUGIN_GOAL.exec(line) ?? []
     const plugin = QUALITY_PLUGINS.find((name) => QUALITY_PLUGIN_ARTIFACTS[name] === artifact)
@@ -212,7 +220,8 @@ function readReport(path: string, projectDir: string, parse: ParseReport): Findi
  */
 export const mavenQualityReader: ReportReader = {
   snapshot: snapshotQualityReports,
-  read: (projectDir, before, output, _run, command) => readQualityReports(projectDir, before, output, command),
+  read: (projectDir, before, output, run, command) =>
+    readQualityReports(projectDir, before, output, command, (run.droppedLines ?? 0) > 0),
   readFresh: readFreshQualityReports,
   alsoListsAccepted: true,
 }

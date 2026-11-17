@@ -3,11 +3,11 @@ import { dirname, join, resolve } from "node:path"
 
 const XML_COMMENTS = /<!--[\s\S]*?-->/g
 /**
- * Sections where a plugin's artifactId does not make the build run it: a profile may be off, reporting is for the
- * site, a dependency is a jar on a classpath, `pluginManagement` only configures, and settings may name other
- * plugins, as SpotBugs lists its own there.
+ * Sections where a plugin's artifactId does not make the build run it: reporting is for the site, a dependency is a
+ * jar on a classpath, `pluginManagement` only configures, and settings may name other plugins, as SpotBugs lists its
+ * own there. A profile's `<build><plugins>` counts: the profile may be on by default or turned on with `-P`.
  */
-const NOT_RUN = /<(profiles|reporting|dependencyManagement|dependencies|pluginManagement|configuration)>[\s\S]*?<\/\1>/g
+const NOT_RUN = /<(reporting|dependencyManagement|dependencies|pluginManagement|configuration)>[\s\S]*?<\/\1>/g
 const PARENT = /<parent>([\s\S]*?)<\/parent>/
 const ARTIFACT_ID = /<artifactId>\s*([^<]*?)\s*<\/artifactId>/
 const RELATIVE_PATH = /<relativePath>\s*([^<]*?)\s*<\/relativePath>|<relativePath\s*\/>/
@@ -30,8 +30,8 @@ function artifactIdOf(xml: string): string | undefined {
 }
 
 /**
- * Whether the build of the module in `dir` runs the plugin: its POM, or a parent's it inherits from, declares it in
- * `<build><plugins>`. A parent counts when it is the POM its `relativePath` names, `../pom.xml` by default, and that
+ * Whether the build of the module in `dir` may run the plugin: its POM, or a parent's it inherits from, declares it in
+ * `<build><plugins>`, outside a profile or in one. A parent counts when it is the POM its `relativePath` names, `../pom.xml` by default, and that
  * POM has the parent's artifactId; a parent from a repository declares none of the project's plugins.
  */
 export function runsPlugin(dir: string, artifactId: string): boolean {

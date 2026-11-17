@@ -796,6 +796,33 @@ describe("a reactor checked with --fail-never", () => {
     expect(readQualityReports(projectDir, snapshotQualityReports(projectDir), noPlugin, COMMAND).failed).toBe(true)
   })
 
+  it("counts a failure it would ignore when the output was cut, as the cut part may hold one that counts", () => {
+    reactor()
+    const before = mavenQualityReader.snapshot(projectDir)
+    const cut = { exitCode: 0, output: failedIn("contract"), droppedLines: 4000 }
+
+    expect(mavenQualityReader.read(projectDir, before, failedIn("contract"), cut, COMMAND).failed).toBe(true)
+  })
+
+  it("passes a cut output without failures, as Maven prints them all at the end", () => {
+    reactor()
+    const before = mavenQualityReader.snapshot(projectDir)
+
+    expect(mavenQualityReader.read(projectDir, before, "", { exitCode: 0, output: "", droppedLines: 4000 }, COMMAND).failed).toBe(false)
+  })
+
+  it("counts the check of a module that runs the plugin in a profile, which may be on", () => {
+    reactor()
+    write(
+      "contract/pom.xml",
+      `<project><parent><artifactId>shop</artifactId></parent><artifactId>contract</artifactId><profiles><profile><id>quality</id><activation><activeByDefault>true</activeByDefault></activation><build><plugins>${SPOTBUGS_PLUGIN}</plugins></build></profile></profiles></project>`,
+    )
+    const before = snapshotQualityReports(projectDir)
+    bugIn("contract", "XSS_SERVLET")
+
+    expect(readQualityReports(projectDir, before, failedIn("contract"), COMMAND).failed).toBe(true)
+  })
+
   it("counts the check of a module whose parent runs the plugin in its <build><plugins>", () => {
     reactor({ parentRuns: true })
     const before = snapshotQualityReports(projectDir)
