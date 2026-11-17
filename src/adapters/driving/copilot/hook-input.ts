@@ -21,6 +21,8 @@ export interface CopilotHookInput {
   agentType?: string
   /** The session's `events.jsonl`. */
   transcriptPath?: string
+  /** The user's prompt, in a `userPromptSubmitted` hook. */
+  prompt?: string
 }
 
 export class CopilotHookInputError extends UserFacingError {}
@@ -42,7 +44,7 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
     throw new CopilotHookInputError("the hook input on stdin is not JSON")
   }
   if (!isObject(value)) throw new CopilotHookInputError("the hook input on stdin is not a JSON object")
-  const { sessionId, parentAgentId, cwd, toolName, toolArgs, stop_hook_active, agentId, agentType, agentName, transcriptPath } =
+  const { sessionId, parentAgentId, cwd, toolName, toolArgs, stop_hook_active, agentId, agentType, agentName, transcriptPath, prompt } =
     value
   const session = nonEmpty(agentId) === undefined ? undefined : nonEmpty(parentAgentId)
   return {
@@ -53,6 +55,7 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
     agentId: nonEmpty(agentId),
     agentType: nonEmpty(agentType) ?? nonEmpty(agentName),
     transcriptPath: nonEmpty(transcriptPath),
+    ...(typeof prompt === "string" ? { prompt } : {}),
   }
 }
 

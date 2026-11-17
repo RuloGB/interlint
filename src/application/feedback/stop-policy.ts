@@ -1,4 +1,5 @@
 import { PROTECTED_CHECK } from "../../domain/protected-files.js"
+import { PAUSE_ADVICE } from "../../domain/session-pause.js"
 import type { AgentRef, StopCounter } from "./ports.js"
 
 /** The same limit as the OpenCode plugin. */
@@ -15,6 +16,7 @@ export interface StopRequest extends AgentRef {
  * Decides what a stop does with the task-end report, empty when every check passed. `failed` names the checks in it.
  * The blocks in a row are counted per session, and per subagent for a subagent's stop.
  * A stop that the agent did not reach by continuing after a blocked stop starts a new count.
+ * Only the main agent's report past the limit, which only the user reads, advises pausing Interlint (F26).
  * Past the limit the count stays, so stops in the same row (another stop hook may keep
  * the agent going) end quietly instead of blocking again.
  */
@@ -34,7 +36,7 @@ export function decideStop(
   if (attempt === MAX_CONSECUTIVE_BLOCKS + 1) {
     return {
       action: "report",
-      text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${report}`,
+      text: `Interlint: the checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts, so the task may end.\n\n${withPauseAdvice(request, report)}`,
     }
   }
   if (attempt > MAX_CONSECUTIVE_BLOCKS) return { action: "end" }
@@ -42,6 +44,14 @@ export function decideStop(
     action: "block",
     text: `Interlint: the task cannot end yet (attempt ${attempt} of ${MAX_CONSECUTIVE_BLOCKS}).\n\n${blockNote(request, failed)}${report}`,
   }
+}
+
+/** The report with the advice to pause Interlint after it, on its own paragraph. A subagent's report gets none. */
+function withPauseAdvice(request: StopRequest, report: string): string {
+  return request.agentId === undefined ? `${report.trimEnd()}
+
+${PAUSE_ADVICE}
+` : report
 }
 
 /**

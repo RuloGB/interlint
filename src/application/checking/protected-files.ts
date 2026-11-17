@@ -33,6 +33,11 @@ export function startProtection(projectDir: string, config: Config, session: str
   deps.baselines.save(projectDir, session, deps.files(projectDir, protectedPatterns(config.protected)))
 }
 
+/** Keeps the protected files as they are now as the session's fingerprint, whatever it held before (F26). */
+export function renewProtection(projectDir: string, config: Config, session: string, deps: ProtectionDeps): void {
+  deps.baselines.save(projectDir, session, deps.files(projectDir, protectedPatterns(config.protected)))
+}
+
 /**
  * After the agent's edit tool changed `files`, in the main agent's `session`: the protected ones it changed without
  * asking the user, for a warning. Only those the session's fingerprint holds can block the task end, so a file new

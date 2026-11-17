@@ -7,7 +7,7 @@ export const SETTINGS_FILE = ".claude/settings.json"
 
 /** A hook in the format Claude Code and Codex share: matcher groups of handlers, keyed by event. */
 export interface InterlintHook {
-  event: "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop" | "SubagentStop"
+  event: "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "SubagentStop"
   matcher?: string
   command: string
   /** Seconds. The edit one matches the OpenCode plugin's edit timeout; the stop ones give Maven time. */
@@ -18,9 +18,11 @@ export interface InterlintHook {
  * `Edit` and `Write` are the tools that change source files; `NotebookEdit` only changes notebooks.
  * `Stop` fires for the main agent only; a subagent fires `SubagentStop`, so it gets the failures of its own changes.
  * `SessionStart` keeps the protected files as they are, and `PreToolUse` asks the user before an edit changes one.
+ * `UserPromptSubmit` reads `interlint: pause` and `interlint: resume` in the user's prompt.
  */
 const HOOKS: InterlintHook[] = [
   { event: "SessionStart", command: "interlint hook claude-code session-start", timeout: 30 },
+  { event: "UserPromptSubmit", command: "interlint hook claude-code user-prompt", timeout: 120 },
   { event: "PreToolUse", matcher: "Edit|Write", command: "interlint hook claude-code pre-edit", timeout: 30 },
   { event: "PostToolUse", matcher: "Edit|Write", command: "interlint hook claude-code post-edit", timeout: 120 },
   { event: "Stop", command: "interlint hook claude-code stop", timeout: 600 },

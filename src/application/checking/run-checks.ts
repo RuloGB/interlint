@@ -263,6 +263,22 @@ function withEdits(pending: PendingEdit[], edited: string[], linesWritten: Reado
  * Forgets the pending files of the checks with `every` or `lines` that passed. A check that failed keeps them, so each next
  * edit of one of its sources runs it again on them all, until it passes. Called under the project lock.
  */
+/**
+ * Starts tracking the project's changes again from its files as they are now (F26): every project counts as unchanged,
+ * as if its checks had just passed, and no `edit` check waits for earlier edits any more.
+ */
+export async function restartTracking(projectDir: string, config: Config, deps: CheckDeps): Promise<void> {
+  await deps.lock(projectDir, async () => {
+    const present = config.checks.filter((check) => deps.hasDirectory(checkDirOf(projectDir, check)))
+    for (const dir of new Set(present.map((check) => checkDirOf(projectDir, check)))) {
+      deps.changes.accept(dir, deps.changes.lookup(dir))
+    }
+    for (const check of config.checks.filter(waitsForEdits)) {
+      if ((deps.pending.list(projectDir, check.name)?.length ?? 1) > 0) deps.pending.save(projectDir, check.name, [])
+    }
+  })
+}
+
 function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {
   for (const { check, status } of outcomes) {
     if (status !== "passed" || !waitsForEdits(check)) continue

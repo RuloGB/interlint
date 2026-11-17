@@ -2,7 +2,8 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import type { MetricsSink } from "../../../application/checking/ports.js"
 import type { MetricsRead, MetricsScope, MetricsSource } from "../../../application/metrics/ports.js"
-import { METRICS_FORMAT_VERSION, type MetricEvent, metricEventOf } from "../../../domain/metric.js"
+import type { SessionMetrics } from "../../../application/feedback/ports.js"
+import { isSessionMetricLine, METRICS_FORMAT_VERSION, metricEventOf } from "../../../domain/metric.js"
 import { interlintVersion } from "./interlint-version.js"
 import { projectKey, userStateDir } from "./user-state.js"
 
@@ -18,21 +19,29 @@ function metricsDir(stateDir: string | undefined): string {
  * (decision 40). Any error loses the metrics and throws nothing.
  */
 export function fileMetrics(stateDir?: string, now: () => Date = () => new Date()): MetricsSink {
-  return (projectDir, metrics) => {
-    if (metrics.length === 0) return
-    try {
-      const at = now().toISOString()
-      const key = projectKey(projectDir)
-      const envelope = { v: METRICS_FORMAT_VERSION, at, interlint: interlintVersion(), projectKey: key, project: basename(resolve(projectDir)) }
-      const dir = join(metricsDir(stateDir), key)
-      // Only the user may read the metrics.
-      mkdirSync(dir, { recursive: true, mode: 0o700 })
-      // One write for the whole run, made under the project lock, so two runs never mix their lines.
-      const lines = metrics.map((metric) => `${JSON.stringify({ ...envelope, ...metric })}\n`).join("")
-      appendFileSync(join(dir, `${at.slice(0, 7)}.jsonl`), lines)
-    } catch {
-      // Lost on purpose: a metric never changes what the checks give.
-    }
+  return (projectDir, metrics) => appendLines(stateDir, now, projectDir, metrics)
+}
+
+/** Keeps a session's pause or resume (F26) as a line of its own in the same files as the checks' metrics. */
+export function fileSessionMetrics(stateDir?: string, now: () => Date = () => new Date()): SessionMetrics {
+  return (projectDir, metric) => appendLines(stateDir, now, projectDir, [metric])
+}
+
+function appendLines(stateDir: string | undefined, now: () => Date, projectDir: string, records: readonly object[]): void {
+  if (records.length === 0) return
+  try {
+    const at = now().toISOString()
+    const key = projectKey(projectDir)
+    const envelope = { v: METRICS_FORMAT_VERSION, at, interlint: interlintVersion(), projectKey: key, project: basename(resolve(projectDir)) }
+    const dir = join(metricsDir(stateDir), key)
+    // Only the user may read the metrics.
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // One write for the whole run, made under the project lock, so two runs never mix their lines.
+    const lines = records.map((record) => `${JSON.stringify({ ...envelope, ...record })}
+`).join("")
+    appendFileSync(join(dir, `${at.slice(0, 7)}.jsonl`), lines)
+  } catch {
+    // Lost on purpose: a metric never changes what the checks give.
   }
 }
 
@@ -75,15 +84,18 @@ function readLines(file: string, read: MetricsRead): void {
   }
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue
-    const event = parse(line)
+    const value = parse(line)
+    // A session's pause or resume is no check's metric, and no unreadable line either.
+    if (isSessionMetricLine(value)) continue
+    const event = metricEventOf(value)
     if (event === undefined) read.unreadable++
     else read.events.push(event)
   }
 }
 
-function parse(line: string): MetricEvent | undefined {
+function parse(line: string): unknown {
   try {
-    return metricEventOf(JSON.parse(line))
+    return JSON.parse(line)
   } catch {
     return undefined
   }

@@ -6,6 +6,7 @@ import {
   mainStop,
   sessionStart,
   subagentStop,
+  userPrompt,
 } from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
@@ -70,9 +71,16 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
       return HOOK_EXIT.pass
     }
 
+    // Only the user reads what it says: the JSON's systemMessage never reaches Claude.
+    if (event === "user-prompt") {
+      tellUser(io, await userPrompt(projectDir, input.prompt ?? "", input, deps, context()))
+      return HOOK_EXIT.pass
+    }
+
     if (event === "pre-edit") {
       if (input.filePath === undefined) return HOOK_EXIT.pass
-      const guarded = beforeEdit(projectDir, projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath]), deps)
+      const files = projectFiles(input.cwd ?? io.cwd, projectDir, [input.filePath])
+      const guarded = beforeEdit(projectDir, files, deps, input.sessionId)
       if (guarded.length === 0) return HOOK_EXIT.pass
       // Claude Code shows the reason to the user in its permission prompt; the edit runs only if they allow it.
       const decision = {

@@ -556,6 +556,20 @@ describe("interlint doctor", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("names the fix when the hooks come from an init without the prompt hook that pauses Interlint (F26 S11)", async () => {
+    await setUpProject()
+    const settingsFile = join(projectDir, ".claude", "settings.json")
+    const settings = JSON.parse(readFileSync(settingsFile, "utf8"))
+    delete settings.hooks.UserPromptSubmit
+    writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`)
+
+    const { exitCode, stdout } = await run([])
+
+    expect(stdout).toContain("✗ Claude Code: .claude/settings.json is missing or from another version of Interlint")
+    expect(stdout).toContain("→ run `interlint init --agent claude-code`")
+    expect(exitCode).toBe(1)
+  })
+
   it("exits 1 and names the fix when the agent's hooks were removed (S2, S4)", async () => {
     await setUpProject()
     writeFileSync(join(projectDir, ".claude", "settings.json"), "{}\n")
