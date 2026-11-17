@@ -11,6 +11,8 @@ import {
 } from "../../domain/check.js"
 import { MAVEN_DAEMON, usesMaven, withMavenDaemon } from "../../domain/maven-command.js"
 import type { AgentContext } from "../../domain/metric.js"
+import type { Fingerprint } from "../../domain/protected-files.js"
+import { withChangesBetweenTurns } from "../../domain/turn-baseline.js"
 import type { RuleFailure, Violation } from "../../domain/violation.js"
 import { recordRun, type RunEntry } from "./check-metrics.js"
 import type {
@@ -275,9 +277,8 @@ function withEdits(pending: PendingEdit[], edited: string[], linesWritten: Reado
  */
 export async function restartTracking(projectDir: string, config: Config, session: string, deps: CheckDeps): Promise<void> {
   await deps.lock(projectDir, async () => {
-    const present = config.checks.filter((check) => deps.hasDirectory(checkDirOf(projectDir, check)))
     const fingerprints: Record<string, string> = {}
-    for (const dir of new Set(present.map((check) => checkDirOf(projectDir, check)))) {
+    for (const dir of presentProjects(projectDir, config, deps)) {
       fingerprints[dir] = deps.changes.lookup(dir).fingerprint
     }
     deps.resumes?.save(projectDir, session, fingerprints)
@@ -285,6 +286,41 @@ export async function restartTracking(projectDir: string, config: Config, sessio
       if ((deps.pending.list(projectDir, check.name)?.length ?? 1) > 0) deps.pending.save(projectDir, check.name, [])
     }
   })
+}
+
+/**
+ * When the main agent's turn ends in `session`: the fingerprint of each project the session leaves with nothing to
+ * check, because its checks passed or it has not changed since the user resumed Interlint. A project left changed,
+ * such as one whose checks still fail, is left out, so the user's changes never hide the agent's. Call it under the
+ * project lock.
+ */
+export function projectsAtTurnEnd(projectDir: string, config: Config, session: string, deps: CheckDeps): Record<string, string> {
+  const resumed = deps.resumes?.read(projectDir, session)
+  const projects: Record<string, string> = {}
+  for (const dir of presentProjects(projectDir, config, deps)) {
+    const seen = deps.changes.lookup(dir)
+    if (!seen.changed || resumed?.[dir] === seen.fingerprint) projects[dir] = seen.fingerprint
+  }
+  return projects
+}
+
+/**
+ * When the user sends the next prompt in `session`: the projects that changed since the turn ended in `turnEnd` are
+ * taken as they are now, as a resume takes them (F26), so the session's task end skips each until the agent changes
+ * it. Call it under the project lock.
+ */
+export function takeProjectsBetweenTurns(projectDir: string, session: string, turnEnd: Fingerprint, deps: CheckDeps): void {
+  if (deps.resumes === undefined) return
+  const now: Record<string, string> = {}
+  for (const dir of Object.keys(turnEnd)) now[dir] = deps.changes.lookup(dir).fingerprint
+  if (Object.keys(now).every((dir) => now[dir] === turnEnd[dir])) return
+  deps.resumes.save(projectDir, session, withChangesBetweenTurns(deps.resumes.read(projectDir, session) ?? {}, turnEnd, now))
+}
+
+/** The directories the checks of the project run in that exist, each once. */
+function presentProjects(projectDir: string, config: Config, deps: CheckDeps): string[] {
+  const present = config.checks.filter((check) => deps.hasDirectory(checkDirOf(projectDir, check)))
+  return [...new Set(present.map((check) => checkDirOf(projectDir, check)))]
 }
 
 function clearPassed(projectDir: string, outcomes: CheckOutcome[], deps: CheckDeps): void {

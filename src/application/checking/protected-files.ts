@@ -1,6 +1,7 @@
 import type { Config } from "../../domain/check.js"
 import type { AgentContext, CheckMetric } from "../../domain/metric.js"
 import {
+  type Fingerprint,
   hasProtectedChanges,
   isProtected,
   normalized,
@@ -10,6 +11,7 @@ import {
   protectedPatterns,
   withApprovedEdits,
 } from "../../domain/protected-files.js"
+import { withChangesBetweenTurns } from "../../domain/turn-baseline.js"
 import type { MetricsSink, ProjectLock, ProtectedBaselines, ProtectedFiles } from "./ports.js"
 
 /** The adapters that keep the protected files' fingerprint. */
@@ -36,6 +38,26 @@ export function startProtection(projectDir: string, config: Config, session: str
 /** Keeps the protected files as they are now as the session's fingerprint, whatever it held before (F26). */
 export function renewProtection(projectDir: string, config: Config, session: string, deps: ProtectionDeps): void {
   deps.baselines.save(projectDir, session, deps.files(projectDir, protectedPatterns(config.protected)))
+}
+
+/** The protected files as they are now. */
+export function protectedNow(projectDir: string, config: Config, deps: ProtectionDeps): Fingerprint {
+  return deps.files(projectDir, protectedPatterns(config.protected))
+}
+
+/**
+ * When the user sends the next prompt in `session`: the protected files changed since the turn ended in `turnEnd`, as
+ * by a `git pull`, become the session's reference, so its task end never blames the agent for them. What the agent
+ * changed in its turn is still told apart. Call it under the project lock.
+ */
+export function renewBetweenTurns(projectDir: string, config: Config, session: string, turnEnd: Fingerprint, deps: ProtectionDeps): void {
+  const before = deps.baselines.read(projectDir, session)
+  if (before === undefined) return
+  const now = protectedNow(projectDir, config, deps)
+  const renewed = withChangesBetweenTurns(before, turnEnd, now)
+  if (Object.keys(renewed).length !== Object.keys(before).length || Object.keys(renewed).some((path) => renewed[path] !== before[path])) {
+    deps.baselines.save(projectDir, session, renewed)
+  }
 }
 
 /**

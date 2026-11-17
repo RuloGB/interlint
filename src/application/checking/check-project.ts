@@ -2,21 +2,32 @@ import type { Config } from "../../domain/check.js"
 import type { AgentContext } from "../../domain/metric.js"
 import { formatProtectedChanges, formatProtectedEdit, PROTECTED_CHECK } from "../../domain/protected-files.js"
 import { formatNotices, formatOutcomes, formatPassed } from "./format-outcomes.js"
-import type { ConfigSource } from "./ports.js"
+import type { ConfigSource, TurnEnds } from "./ports.js"
 import {
   type ProtectionDeps,
   protectedEdit,
+  protectedNow,
   protectedTaskEnd,
   recordProtectedChanges,
+  renewBetweenTurns,
   renewProtection,
   startProtection,
 } from "./protected-files.js"
-import { type CheckDeps, restartTracking, runEditChecks, runTaskEndChecks } from "./run-checks.js"
+import {
+  type CheckDeps,
+  projectsAtTurnEnd,
+  restartTracking,
+  runEditChecks,
+  runTaskEndChecks,
+  takeProjectsBetweenTurns,
+} from "./run-checks.js"
 
 export interface CheckProjectDeps extends CheckDeps {
   loadConfig: ConfigSource
   /** Absent, no file is protected. */
   protection?: ProtectionDeps
+  /** Absent, what changes between two turns of a session is checked like what the agent changes. */
+  turns?: TurnEnds
 }
 
 /**
@@ -59,6 +70,9 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
     outcomes = await runEditChecks(projectDir, config, request.files, deps, request.linesWritten, request.agent)
     const unasked = protection ? await protectedEdit(projectDir, config, request.files, request.rootSession ?? request.agent?.session, request.asked === true, protection, deps.lock) : []
     if (unasked.length > 0) first = [formatProtectedEdit(unasked)]
+    // An edit after the last turn ended, as in a turn the user interrupted, makes the turn's end no reference.
+    const session = request.rootSession ?? request.agent?.session
+    if (session !== undefined) deps.turns?.forget(projectDir, session)
   } else {
     outcomes = await runTaskEndChecks(projectDir, config, deps, {
       changedOnly: request.changedOnly,
@@ -69,6 +83,10 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
     if (changes) {
       first = [formatProtectedChanges(changes, request.asked === true)]
       await recordProtectedChanges(projectDir, config, changes, request.agent, deps.metrics, deps.lock)
+    }
+    const { agent } = request
+    if (request.changedOnly === true && request.files === undefined && agent?.session !== undefined && agent.subagent !== true) {
+      await endTurn(projectDir, config, agent.session, deps)
     }
   }
   const failedChecks = outcomes.filter((outcome) => outcome.status !== "passed").map((outcome) => outcome.check.name)
@@ -88,6 +106,7 @@ export async function checkProject(projectDir: string, request: CheckRequest, de
  */
 export async function restartSession(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
   await restartTracking(projectDir, config, session, deps)
+  deps.turns?.forget(projectDir, session)
   const { protection } = deps
   if (protection) await deps.lock(projectDir, async () => renewProtection(projectDir, config, session, protection))
 }
@@ -100,4 +119,37 @@ export function startSession(projectDir: string, agent: AgentContext | undefined
   const session = agent?.session
   if (session === undefined || deps.protection === undefined) return
   startProtection(projectDir, deps.loadConfig(projectDir), session, deps.protection)
+}
+
+/**
+ * When the main agent's turn ends in `session`: keeps the projects it leaves with nothing to check and the protected
+ * files as they are, so the user's next prompt can tell what changed between the two turns.
+ */
+async function endTurn(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
+  const { turns, protection } = deps
+  if (turns === undefined) return
+  await deps.lock(projectDir, async () => {
+    const projects = projectsAtTurnEnd(projectDir, config, session, deps)
+    turns.save(projectDir, session, { projects, ...(protection ? { protected: protectedNow(projectDir, config, protection) } : {}) })
+  })
+}
+
+/**
+ * When the user sends a prompt to the main agent in `session`: what changed since the agent's last turn ended was not
+ * the agent's doing, as a `git pull` or the user's own edits. The session's task end skips the projects it changed
+ * until the agent changes them, and the protected files it changed become the reference. Nothing when no turn ended
+ * since the last prompt or since an edit.
+ */
+export async function startTurn(projectDir: string, config: Config, session: string, deps: CheckProjectDeps): Promise<void> {
+  const { turns, protection } = deps
+  // Read first without the lock, so a prompt never waits for another session's checks when there is nothing to take.
+  if (turns === undefined || turns.read(projectDir, session) === undefined) return
+  // Read again under the lock, so a task end that saves a newer record meanwhile is never applied from a stale copy.
+  await deps.lock(projectDir, async () => {
+    const turnEnd = turns.read(projectDir, session)
+    if (turnEnd === undefined) return
+    takeProjectsBetweenTurns(projectDir, session, turnEnd.projects, deps)
+    if (protection && turnEnd.protected) renewBetweenTurns(projectDir, config, session, turnEnd.protected, protection)
+    turns.forget(projectDir, session)
+  })
 }

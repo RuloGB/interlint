@@ -13,11 +13,7 @@ const BASELINE_TTL_MS = 30 * 24 * 60 * 60 * 1000
  * resume baselines (F26) use the same format under another kind.
  */
 export function fileProtectedBaselines(stateDir: () => string = userStateDir, kind = "protected"): ProtectedBaselines {
-  const fileOf = (projectDir: string, session: string) => {
-    // Hashed, because the session ID comes from the hook input and goes into a path.
-    const name = createHash("sha256").update(`${projectKey(projectDir)}\0${session}`).digest("hex").slice(0, 32)
-    return join(stateDir(), "interlint", kind, `${name}.json`)
-  }
+  const fileOf = (projectDir: string, session: string) => sessionFile(stateDir(), kind, projectDir, session)
   return {
     read(projectDir, session) {
       try {
@@ -34,7 +30,14 @@ export function fileProtectedBaselines(stateDir: () => string = userStateDir, ki
   }
 }
 
-function isFingerprint(value: unknown): value is Fingerprint {
+/** The JSON file of a project and session in `interlint/<kind>` under the state directory. */
+export function sessionFile(stateDir: string, kind: string, projectDir: string, session: string): string {
+  // Hashed, because the session ID comes from the hook input and goes into a path.
+  const name = createHash("sha256").update(`${projectKey(projectDir)}\0${session}`).digest("hex").slice(0, 32)
+  return join(stateDir, "interlint", kind, `${name}.json`)
+}
+
+export function isFingerprint(value: unknown): value is Fingerprint {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -43,7 +46,8 @@ function isFingerprint(value: unknown): value is Fingerprint {
   )
 }
 
-function forgetStale(dir: string) {
+/** Removes the files of `dir` nobody wrote for longer than the baselines' time to live. */
+export function forgetStale(dir: string) {
   const now = Date.now()
   try {
     for (const name of readdirSync(dir)) {

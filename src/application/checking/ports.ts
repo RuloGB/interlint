@@ -178,6 +178,23 @@ export type ProtectedFiles = (projectDir: string, patterns: readonly string[]) =
  */
 export type ResumeBaselines = ProtectedBaselines
 
+/**
+ * A main session as its last turn ended: the fingerprint of each project, by the directory its checks run in, that the
+ * session left with nothing to check, and the protected files' fingerprint.
+ */
+export interface TurnEnd {
+  projects: Fingerprint
+  protected?: Fingerprint
+}
+
+/** The end of each main session's last turn, kept per project and session until the user's next prompt. */
+export interface TurnEnds {
+  /** `undefined` when none was saved, it was forgotten, or it cannot be read. */
+  read(projectDir: string, session: string): TurnEnd | undefined
+  save(projectDir: string, session: string, turnEnd: TurnEnd): void
+  forget(projectDir: string, session: string): void
+}
+
 /** The protected files' fingerprint of each agent session, kept across the processes of its hooks. */
 export interface ProtectedBaselines {
   /** The session's fingerprint: `undefined` when none was saved or it cannot be read. */

@@ -450,6 +450,18 @@ interlint check --when task-end --changed --file orders/src/main/java/shop/Order
 
 A project Interlint has not seen before counts as unchanged until something above happens, so the first task end does not run every project. A project whose checks fail stays changed, so they run again at the next task end, and so does a project changed while its checks ran, by an edit or any other means: a project is remembered with its files as the checks saw them. A check that writes files outside `target/` therefore makes its project run once more at the next task end. The state is kept in your user's state directory (`%LOCALAPPDATA%\interlint\projects` on Windows, `$XDG_STATE_HOME/interlint/projects` or `~/.local/state/interlint/projects` elsewhere), never in the project.
 
+### Changes made between two turns
+
+What changes between two turns of an agent session is yours, not the agent's: a `git pull`, a branch switch or your own edits while the agent waits for your next message. When you send that message, the agent hooks take those changes as they are, for that session:
+
+- A project that changed since the agent's last turn ended is not checked at that session's task end until the agent changes it again. When it does, the whole project is checked, your changes included.
+- A [protected file](#protected-files) that changed since then, such as `interlint.yaml` updated by a pull, becomes the new reference: it does not block.
+- A project the agent left with unchecked changes or failing checks at the end of its turn stays changed, so your message never hides the agent's own changes. The same goes for a protected file the agent changed in its turn.
+- An edit by the agent after its turn ended, such as in a turn you interrupted, keeps everything as it is until its next turn ends.
+- Another session in the same project, and `interlint check` run by hand, still see those changes.
+
+The state is kept per session in your user's state directory, in `interlint/turn-end`. Hooks set up by an older `interlint init` already read your messages, but an OpenCode plugin from an older Interlint does not: run `init --agent opencode` again.
+
 ### Reports from the agent's own build
 
 With `--changed`, a check does not run when a build since the project's last change already left its reports, such as `mvn clean verify` run by the agent because your `AGENTS.md` asks it to. The check passes, and the project is remembered as passing, when all of these hold:
@@ -478,7 +490,7 @@ protected:
 - Each entry is a path or a glob relative to `interlint.yaml`, inside the project. `**` matches any number of directories, `*` any characters within one, and `?` one character. Case does not matter. Globs do not look inside `node_modules`, `.git` or `target`.
 - `interlint.yaml` is always protected, even without `protected:`.
 - **Before an edit,** the agent asks you whether it may change a protected file, with a message that names it. Claude Code and GitHub Copilot ask through Interlint's `pre-edit` hook, and the OpenCode TUI through the plugin. Codex cannot ask, and OpenCode Desktop grants the question without showing it. In Codex and OpenCode the agent is told right after the edit that it changed a protected file, and the edit never counts as approved, even one you allowed in the OpenCode TUI: the plugin cannot tell your answer from Desktop's.
-- **When the session starts,** the agent hooks keep a hash of each protected file. A resumed or compacted session keeps the first one.
+- **When the session starts,** the agent hooks keep a hash of each protected file. A resumed or compacted session keeps the first one. When you send a message, what changed since the agent's last turn ended becomes the new reference (see [Changes made between two turns](#changes-made-between-two-turns)).
 - **At task end,** a protected file that differs from that hash, or was deleted, blocks the main agent's task end. The message names each file and asks the agent to put it back as it was. A change you approved in the agent's prompt does not count: it becomes the new reference. A change made any other way, such as from the terminal, does. A file created since the session started that matches a glob does not block.
 - The block counts towards the same limit of 3 as the checks: after 3 blocks in a row, the task may end and you see the files. A new session starts from the files as they are then.
 - A subagent's stop does not check protected files: its main agent's task end does.
