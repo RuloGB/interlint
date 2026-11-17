@@ -33,9 +33,9 @@ export const SLOW_CHECK_EVERY = 5
 
 /**
  * How many written lines a slow check waits for, if it reaches them before `SLOW_CHECK_EVERY` files: a few small
- * edits, such as a log line in three files, wait for task end, while a new class runs the check at once.
+ * edits, such as a log line in three files, wait for task end, while a large new class runs the check at once.
  */
-export const SLOW_CHECK_LINES = 100
+export const SLOW_CHECK_LINES = 200
 
 /**
  * The `every` of each quality check: Checkstyle checks only the changed files, in under a second, so it has none.

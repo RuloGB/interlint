@@ -112,7 +112,7 @@ Requires Node 22 or later and one of these:
 
 | When | What runs | What the agent gets |
 |---|---|---|
-| **After each edit** | Checkstyle, ESLint and dependency-cruiser, with the failures of the changed files. ArchUnit, PMD and SpotBugs, which are slower, after 5 edited files or 100 written lines. The Maven checks need `mvnd`. | The violations, right away, in the same session. |
+| **After each edit** | Checkstyle, ESLint and dependency-cruiser, with the failures of the changed files. ArchUnit, PMD and SpotBugs, which are slower, after 5 edited files or 200 written lines. The Maven checks need `mvnd`. | The violations, right away, in the same session. |
 | **At task end** | Every check of the projects the agent changed, including the [JaCoCo coverage rules](docs/usage.md#jacoco-coverage) of your `pom.xml`. | It cannot finish until everything is green. |
 
 **No endless loops.** After 3 blocks in a row, Interlint lets the task end and shows you what is still failing.
@@ -169,7 +169,7 @@ Known limits:
 - Only Maven projects and npm projects with ESLint or dependency-cruiser. On npm projects `init` writes no test, `tsc` or coverage check: add your tests or `tsc --noEmit` as [a command check](docs/usage.md#any-command). In a monorepo whose root has ESLint, `init` writes one check for the root and does not look for a configuration in each package. Below a root with dependency-cruiser alone, it still writes each package's ESLint check.
 - `init` finds ESLint only with its flat configuration (`eslint.config.*`). With `.eslintrc`, [write the check yourself](docs/usage.md#eslint).
 - dependency-cruiser 18 does not support TypeScript 7 yet. With it, the `depcruise` check blocks and says it analyzed no source: [use TypeScript 5](docs/usage.md#dependency-cruiser).
-- PMD and SpotBugs cannot be limited to one file from the command line, so they check the whole project each time they run. `init` gives them [`every: 5` and `lines: 100`](docs/usage.md#every-n-files-or-lines), so they wait for 5 edited files or 100 written lines and shows the failures of all of them.
+- PMD and SpotBugs cannot be limited to one file from the command line, so they check the whole project each time they run. `init` gives them [`every: 5` and `lines: 200`](docs/usage.md#every-n-files-or-lines), so they wait for 5 edited files or 200 written lines and shows the failures of all of them.
 
 ## Documentation
 
