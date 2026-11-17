@@ -72,6 +72,15 @@ function reactorArgs(facts: ProjectFacts): string {
   return onlyModules ? ` -pl ${[...modules].sort().join(",")} -am` : ""
 }
 
+/**
+ * In a reactor, Maven runs a goal named on the command line in every module, also in those whose build never runs the
+ * plugin, such as a module of generated code. `--fail-never` keeps a failure there from stopping the modules after
+ * it, and the report reader counts only the failures of the modules whose build runs the plugin.
+ */
+function failNever(facts: ProjectFacts): string {
+  return facts.hasModules ? " -fn" : ""
+}
+
 /** Skips the Checkstyle, PMD and SpotBugs plugins the build declares, for a check that runs the lifecycle for something else. */
 function qualitySkips(facts: ProjectFacts): string {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin))
@@ -105,7 +114,7 @@ export function architectureCheck(facts: ProjectFacts): Check | undefined {
 export function qualityChecks(facts: ProjectFacts): Check[] {
   return QUALITY_PLUGINS.filter((plugin) => facts.qualityPlugins.includes(plugin)).map((plugin) => ({
     name: plugin,
-    run: `${mavenCommand(facts)} -q ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin), facts)}`,
+    run: `${mavenCommand(facts)} -q${failNever(facts)} ${QUALITY_COMMANDS[plugin](checkGoal(facts, plugin), facts)}`,
     report: "maven",
     ...afterEdits(QUALITY_EVERY[plugin]),
   }))

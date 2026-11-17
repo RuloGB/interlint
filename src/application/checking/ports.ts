@@ -106,6 +106,11 @@ export interface ReportResult {
    * compile. Present, as true, only then: the report cannot tell, so its failures alone do not explain the exit code.
    */
   otherFailure?: boolean
+  /**
+   * For a command that always exits 0, such as Maven with `--fail-never`, which builds every module whatever fails:
+   * whether its output shows a failure that counts. Present only for such a command; otherwise the exit code decides.
+   */
+  failed?: boolean
 }
 
 /**
@@ -129,9 +134,9 @@ export interface ReportReader {
   snapshot(projectDir: string): ReportSnapshot
   /**
    * `output` is the end of the command's output, for reports that cannot say on their own why the command failed, and
-   * `run` how it ended, for a command whose result is its exit code.
+   * `run` how it ended, for a command whose result is its exit code. `command` is the command that ran.
    */
-  read(projectDir: string, before: ReportSnapshot, output: string, run: CommandResult): ReportResult
+  read(projectDir: string, before: ReportSnapshot, output: string, run: CommandResult, command?: string): ReportResult
   /**
    * Reads the reports `command` writes from those a build already left, such as one the agent ran itself, when each
    * of them is there and was written after `sinceMs`; otherwise nothing. A report that also lists what the build

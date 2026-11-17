@@ -181,7 +181,7 @@ async function passedOnRecheck(
     const startedAt = performance.now()
     const ran = await deps.run(command, dir)
     const { exitCode, output } = ran
-    const { found, failures, otherFailure } = reader.read(dir, new Map(), output, ran)
+    const { found, failures, otherFailure } = reader.read(dir, new Map(), output, ran, command)
     if (exitCode === 0 && found && failures.length === 0 && otherFailure !== true) {
       passed.set(check, Math.round(performance.now() - startedAt))
     }
@@ -373,7 +373,10 @@ async function attempt(checkDir: string, check: Check, command: string, { run, r
   const startedAt = performance.now()
   const ran = await run(command, checkDir)
   const durationMs = Math.round(performance.now() - startedAt)
-  return { exitCode: ran.exitCode, output: ran.output, durationMs, ...reader.read(checkDir, before, ran.output, ran) }
+  const read = reader.read(checkDir, before, ran.output, ran, command)
+  // A command that always exits 0 failed when its output says so: it then counts as having exited with 1.
+  const exitCode = read.failed === true && ran.exitCode === 0 ? 1 : ran.exitCode
+  return { exitCode, output: ran.output, durationMs, ...read }
 }
 
 function outcomeOf(

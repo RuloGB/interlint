@@ -454,7 +454,7 @@ With `--changed`, a check does not run when a build since the project's last cha
 
 - Each report the check's command writes is in `target/`, written after the last change to the project's files. Removing a file counts as a change too.
   - `report: archunit`: the Surefire report of every class that `-Dtest` names, as `init` writes it. A command without `-Dtest`, or with a pattern or a method in it, always runs.
-  - `report: maven`: the report of each `checkstyle:check`, `pmd:check` or `spotbugs:check` goal of the command, in every module where it is. A command without one of those goals always runs.
+  - `report: maven`: the report of each `checkstyle:check`, `pmd:check` or `spotbugs:check` goal of the command, in every module where it is. A command without one of those goals always runs. With `-fn`, only the modules whose build runs the plugin count.
   - `report: jacoco`: JaCoCo writes its result to no report, so Interlint checks again instead. When every module with tests (`src/test/java`) has a `target/jacoco.exec`, each written after the last change, and that module's Surefire reports (`target/surefire-reports/TEST-*.xml`) were all written after it too and list no failed test, it runs the command without its lifecycle phases, as in `./mvnw jacoco:check@check -fae -Djacoco.append=false`: its `jacoco:check` goals read that data and no test runs, and its profiles and properties still apply. The check passes when they do. Otherwise, or when they fail, the check runs as usual: a build with `-DskipTests` or `-Djacoco.skip`, or one that stopped before `test`, leaves no new data, and a build with a failing test or that ran only some tests fails the Surefire condition. A command without a `jacoco:check` goal always runs. A build without `clean` adds its coverage to the data already in `jacoco.exec`, so tests deleted since an earlier build would still count: ask the agent for `mvn clean install` or `mvn clean verify`.
 - The reports were written whole, not cut short by a build that stopped, and list no failure. A Checkstyle, PMD or SpotBugs report must list no finding at all: without Maven's exit code, Interlint cannot tell what the build accepted.
 
@@ -508,6 +508,7 @@ Start Interlint, and your agent, in the root of either layout:
 
 - **A Maven reactor**: a `pom.xml` with `<modules>`. `init` looks for `@ArchTest` classes in `src/test/java` of every module, and for Checkstyle, PMD and SpotBugs in the build of every module.
   - A plugin the parent only declares in `<pluginManagement>` counts when a module turns it on in `<build><plugins>`; one no module turns on is left out. The checks name the executions the parent manages, as in `checkstyle:check@style`.
+  - Maven runs a goal named on the command line in every module, also in a module whose build never runs that plugin, such as one of generated code. So the Checkstyle, PMD and SpotBugs checks get `-fn` (`--fail-never`): a failure in one module does not stop the others, and Maven always exits with 0. Interlint then reads Maven's output: a `check` goal that failed counts only in a module whose `pom.xml`, or a parent `pom.xml` in the project, runs the plugin in `<build><plugins>`. Any other goal that failed, such as `compile`, counts in every module. Run `init` again to add `-fn` to checks written by an older Interlint.
   - The `architecture` check builds only the modules with the `@ArchTest` classes and the modules they depend on (`-pl launcher -am`), and tells Surefire not to fail in the modules without them (`-Dsurefire.failIfNoSpecifiedTests=false`).
   - `report: archunit` and `report: maven` read the reports of every module and show each source path from the root, such as `infrastructure/src/main/java/com/acme/Order.java:12`.
 - **A workspace**: a directory without `pom.xml` that holds several Maven projects, each a single project or a reactor with its own Maven Wrapper, for example as Git submodules. Other projects, such as a Node front end, are ignored. `init` writes the checks of every Maven project it finds up to three levels down, each with its `dir`, and names them after it:
@@ -524,12 +525,12 @@ checks:
     lines: 100
   - name: orders/checkstyle
     dir: orders
-    run: ./mvnw -q checkstyle:check@style
+    run: ./mvnw -q -fn checkstyle:check@style
     report: maven
     when: edit
   - name: billing/checkstyle
     dir: billing
-    run: ./mvnw -q checkstyle:check@style
+    run: ./mvnw -q -fn checkstyle:check@style
     report: maven
     when: edit
 ```

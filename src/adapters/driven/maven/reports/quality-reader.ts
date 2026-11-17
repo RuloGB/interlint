@@ -2,8 +2,10 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path"
 import { XMLParser } from "fast-xml-parser"
 import type { ReportReader, ReportResult, ReportSnapshot } from "../../../../application/checking/ports.js"
+import { QUALITY_PLUGIN_ARTIFACTS, QUALITY_PLUGINS } from "../../../../domain/project-facts.js"
 import type { RuleFailure, RuleType, Violation } from "../../../../domain/violation.js"
 import { moduleDirs } from "../modules.js"
+import { buildModule, runsPlugin } from "../plugin-modules.js"
 
 const CHECKSTYLE_REPORT = join("target", "checkstyle-result.xml")
 const PMD_REPORT = join("target", "pmd.xml")
@@ -31,6 +33,13 @@ const FAILED_CHECK_GOAL =
   /Failed to execute goal [^:\s]+:(?:maven-(checkstyle|pmd)-plugin|(spotbugs)-maven-plugin):[^:\s]+:check\b/g
 /** A Checkstyle, PMD or SpotBugs `check` goal, plain or naming an execution (`checkstyle:check@style`), as a word of a command. */
 const CHECK_GOAL = /(?:^|\s)(checkstyle|pmd|spotbugs):check(?:@\S+)?(?=\s|$)/g
+
+/** Maven's `--fail-never`, as a word of the command: Maven builds every module whatever fails, and exits 0. */
+const FAIL_NEVER = /(?:^|\s)(?:-fn|--fail-never)(?=\s|$)/
+/** Any goal that failed: the plugin's artifactId, the goal and the project Maven names, its artifactId. */
+const FAILED_GOAL = /Failed to execute goal [^:\s]+:([^:\s]+):[^:\s]+:([^\s:]+) \([^)]*\) on project ([^\s:]+)/g
+/** How Maven colors its output. */
+const ANSI_COLOR = /\u001b\[[\d;]*m/g
 
 /** Checkstyle severities, most severe first. `ignore` is never shown. */
 const CHECKSTYLE_SEVERITIES = ["error", "warning", "info"]
@@ -100,10 +109,40 @@ function fingerprint(path: string): string {
  * did not fail according to `output`: when Maven failed for another reason, such as a module that does not
  * compile, the reports only hold what the build accepted.
  */
-export function readQualityReports(projectDir: string, before: ReportSnapshot, output: string): ReportResult {
+export function readQualityReports(projectDir: string, before: ReportSnapshot, output: string, command = ""): ReportResult {
   const reports = reportFiles(projectDir).filter((path) => before.get(path) !== fingerprint(path))
+  if (FAIL_NEVER.test(command)) return readFailNever(projectDir, reports, output)
   const failed = new Set([...output.matchAll(FAILED_CHECK_GOAL)].map((match) => match[1] ?? match[2]))
   return { found: reports.length > 0, failures: failuresIn(reports, projectDir, failed) }
+}
+
+/**
+ * With `--fail-never`, Maven runs a goal named on the command line in every module of a reactor, also in those whose
+ * build never runs that plugin, such as a module of generated code, and exits 0 whatever fails. A `check` goal that
+ * failed in such a module does not count, and neither does its report. Any other goal that failed counts, in any
+ * module. Only the reports of the modules whose `check` failed are read: the others list only what the build accepted.
+ */
+function readFailNever(projectDir: string, reports: string[], output: string): ReportResult {
+  const modules = moduleDirs(projectDir).flatMap((dir) => buildModule(dir) ?? [])
+  const failedChecks = new Set<string>()
+  let failed = false
+  for (const [, artifact = "", goal, project] of output.replace(ANSI_COLOR, "").matchAll(FAILED_GOAL)) {
+    const plugin = QUALITY_PLUGINS.find((name) => QUALITY_PLUGIN_ARTIFACTS[name] === artifact)
+    const module = modules.find(({ artifactId }) => artifactId === project)
+    if (plugin !== undefined && goal === "check" && module !== undefined) {
+      if (!runsPlugin(module.dir, artifact)) continue
+      failedChecks.add(join(module.dir, PLUGIN_REPORTS[plugin] ?? ""))
+    }
+    failed = true
+  }
+  const counted = reports.filter((path) => failedChecks.has(path))
+  return { found: reports.length > 0, failures: failuresIn(counted, projectDir, new Set(QUALITY_PLUGINS)), failed }
+}
+
+/** Whether the build of the module that wrote the report runs the report's plugin. */
+function runsPluginOf(report: string): boolean {
+  const plugin = QUALITY_PLUGINS.find((name) => report.endsWith(PLUGIN_REPORTS[name] ?? ""))
+  return plugin !== undefined && runsPlugin(dirname(dirname(report)), QUALITY_PLUGIN_ARTIFACTS[plugin])
 }
 
 /**
@@ -115,7 +154,9 @@ export function readFreshQualityReports(projectDir: string, command: string, sin
   const plugins = new Set([...command.matchAll(CHECK_GOAL)].map((match) => match[1]))
   if (plugins.size === 0) return undefined
   const wanted = [...plugins].flatMap((plugin) => PLUGIN_REPORTS[plugin ?? ""] ?? [])
-  const reports = reportFiles(projectDir).filter((path) => wanted.some((report) => path.endsWith(report)))
+  const reports = reportFiles(projectDir)
+    .filter((path) => wanted.some((report) => path.endsWith(report)))
+    .filter((path) => !FAIL_NEVER.test(command) || runsPluginOf(path))
   if (!wanted.every((report) => reports.some((path) => path.endsWith(report)))) return undefined
   if (!reports.every((path) => statSync(path).mtimeMs > sinceMs && isComplete(path))) {
     return undefined
@@ -162,7 +203,7 @@ function readReport(path: string, projectDir: string, parse: ParseReport): Findi
  */
 export const mavenQualityReader: ReportReader = {
   snapshot: snapshotQualityReports,
-  read: readQualityReports,
+  read: (projectDir, before, output, _run, command) => readQualityReports(projectDir, before, output, command),
   readFresh: readFreshQualityReports,
   alsoListsAccepted: true,
 }
