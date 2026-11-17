@@ -34,7 +34,7 @@ The agent waits for these checks, so they give up after 2 minutes. If they canno
 
 The plugin runs `interlint check --when task-end --changed`: the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If a check fails, it sends the failures back to the session and the agent goes on to fix them. The message tells it to fix them even if you asked it to change nothing else: asking you whether to fix them does not end the task.
 
-- OpenCode shows the turn as ended while the checks run. If they take longer than 2 seconds, the plugin sends `Interlint: running checks` as a message in the session, without making the agent continue, so you know they are still running. Their result follows it. Checks that end sooner, such as when no project changed, add no message.
+- OpenCode shows the turn as ended while the checks run. If they take longer than 2 seconds, the plugin sends `Interlint: running checks` as a message in the session, without making the agent continue, so you know they are still running. Their result follows it, or `Interlint: checks finished` when they end with nothing to report. Checks that end sooner, such as when no project changed, add no message.
 - After 3 failed attempts in a row it reports the failures and lets the task end.
 - If the CLI cannot run, or takes longer than 10 minutes, the plugin reports it without making the agent continue.
 - If the checks pass, the plugin sends the line that names them as a message in the session, without making the agent continue. When no project changed, no check runs and there is no message.

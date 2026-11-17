@@ -56,6 +56,8 @@ export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000
  * turn as ended while they run; a run that ends sooner, such as one with no changed project, adds no message.
  */
 export const DEFAULT_RUNNING_NOTICE_MS = 2 * 1000
+/** How long the result of the checks waits for the running notice to be sent, so a stuck notice cannot hold it. */
+export const RUNNING_NOTICE_WAIT_MS = 5 * 1000
 
 const TURN_START = "session.execution.started"
 type TurnEnd = "succeeded" | "failed" | "interrupted"
@@ -75,6 +77,8 @@ const NOTICE_MARK = "ℹ Interlint · for the user:"
 const PASSED_MARK = "✓ Interlint · "
 /** The message that tells the user the task-end checks are still running after the agent's turn ended. */
 const RUNNING_MESSAGE = "Interlint: running checks"
+/** Closes the running notice when the checks end with nothing else to say, such as when no project changed. */
+const FINISHED_MESSAGE = "Interlint: checks finished"
 /** The name the CLI gives the failure of the protected files in its report. */
 const PROTECTED_CHECK = "protected files"
 /** What the main agent is told before its task-end failures. */
@@ -473,8 +477,11 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         typeof ctx.options?.editTimeoutMs === "number" ? ctx.options.editTimeoutMs : DEFAULT_EDIT_TIMEOUT_MS
       const subagentTimeoutMs =
         typeof ctx.options?.subagentTimeoutMs === "number" ? ctx.options.subagentTimeoutMs : DEFAULT_SUBAGENT_TIMEOUT_MS
+      const noticeOption = ctx.options?.runningNoticeMs
       const runningNoticeMs =
-        typeof ctx.options?.runningNoticeMs === "number" ? ctx.options.runningNoticeMs : DEFAULT_RUNNING_NOTICE_MS
+        typeof noticeOption === "number" && Number.isFinite(noticeOption) && noticeOption >= 0
+          ? noticeOption
+          : DEFAULT_RUNNING_NOTICE_MS
       const directory = ctx.location.directory
       const gate = new TaskEndGate()
       const running = new Set<string>()
@@ -714,22 +721,37 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
 
       /**
        * Runs `checks` and, when they take longer than runningNoticeMs, tells the user in the session that they are
-       * running. The notice is sent before the result, so the two never arrive out of order.
+       * running. The result waits for the notice, up to RUNNING_NOTICE_WAIT_MS, so the two arrive in order. `noticed`
+       * is false only when no notice was sent, or sending it failed.
        */
       const withRunningNotice = async (sessionID: string, checks: () => Promise<CheckRun>) => {
-        let notice: Promise<unknown> | undefined
+        let notice: Promise<boolean> | undefined
         const timer = setTimeout(() => {
           notice = ctx.session
             .synthetic({ sessionID, text: RUNNING_MESSAGE, description: RUNNING_MESSAGE, resume: false })
-            .catch((error) => console.error("[interlint] could not say the checks are running", error))
+            .then(
+              () => true,
+              (error) => {
+                console.error("[interlint] could not say the checks are running", error)
+                return false
+              },
+            )
         }, runningNoticeMs)
         timer.unref?.()
+        let run: CheckRun
         try {
-          return await checks()
+          run = await checks()
         } finally {
           clearTimeout(timer)
-          await notice
         }
+        if (notice === undefined) return { run, noticed: false }
+        let waitTimer: ReturnType<typeof setTimeout> | undefined
+        const gaveUp = new Promise<boolean>((resolve) => {
+          waitTimer = setTimeout(() => resolve(true), RUNNING_NOTICE_WAIT_MS)
+          waitTimer.unref?.()
+        })
+        const noticed = await Promise.race([notice, gaveUp]).finally(() => clearTimeout(waitTimer))
+        return { run, noticed }
       }
 
       const onTurnEnd = async (sessionID: string) => {
@@ -759,9 +781,16 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         running.add(sessionID)
         try {
           const context = await contextOf(sessionID)
-          const run = await withRunningNotice(sessionID, () => runChecks(directory, command, timeoutMs, TASK_END_ARGS, context))
+          const { run, noticed } = await withRunningNotice(sessionID, () =>
+            runChecks(directory, command, timeoutMs, TASK_END_ARGS, context),
+          )
           const decision = gate.decide(sessionID, run)
-          if (decision.action === "none") return
+          if (decision.action === "none") {
+            if (noticed) {
+              await ctx.session.synthetic({ sessionID, text: FINISHED_MESSAGE, description: FINISHED_MESSAGE, resume: false })
+            }
+            return
+          }
           await ctx.session.synthetic({
             sessionID,
             text: decision.text,
