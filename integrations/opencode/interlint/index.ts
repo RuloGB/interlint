@@ -821,9 +821,55 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (settled.kind === "failing" || settled.kind === "stopped") await handOver(sessionID)
         // The main agent's task end reports it, so nobody waits for these changes any more.
         if (settled.kind === "error") written.delete(sessionID)
-        if (background.has(sessionID)) await tellParent(sessionID, settled).catch((error) => console.error("[interlint]", error))
+        // A later call that continues this subagent in the foreground gets the failures in its answer.
+        if (background.delete(sessionID)) await tellParent(sessionID, settled).catch((error) => console.error("[interlint]", error))
         else if (settled.kind !== "clean") outcomes.set(sessionID, settled)
         await flushDeferred()
+      }
+
+      /** Runs a held subagent's checks. One that throws counts as checks that could not run. */
+      const checkHeld = async (sessionID: string, hold: Hold): Promise<CheckRun> => {
+        hold.checking = true
+        try {
+          const files = [...(written.get(sessionID) ?? [])]
+          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
+          return await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
+        } catch (error) {
+          console.error("[interlint]", error)
+          return { exitCode: 2, output: `${String(error)}\n` }
+        } finally {
+          hold.checking = false
+        }
+      }
+
+      /**
+       * Gives a held subagent its failures to fix in the same execution, or lets it go when they pass, cannot run,
+       * or stay after its last attempt. It is released once: a failure to give it its failures releases it instead.
+       */
+      const holdUntilChecked = async (sessionID: string, hold: Hold) => {
+        const run = await checkHeld(sessionID, hold)
+        const ended = hold.stopped
+        if (run.exitCode === 0) {
+          written.delete(sessionID)
+          const settled: Settled = hold.attempts === 0 ? { kind: "clean" } : { kind: "fixed" }
+          return await release(sessionID, settled, subagentResultLine(run, false), ended)
+        }
+        if (!isReport(run)) {
+          return await release(sessionID, { kind: "error", run }, `Interlint could not run the checks (exit code ${run.exitCode}).`, ended)
+        }
+        if (ended) return await release(sessionID, { kind: "stopped", output: run.output }, undefined, true)
+        if (hold.attempts >= MAX_CONSECUTIVE_BLOCKS) {
+          return await release(sessionID, { kind: "failing", output: run.output }, subagentGaveUpLine(run))
+        }
+        hold.attempts++
+        hold.output = run.output
+        const text = subagentBlockText(hold.attempts, run.output)
+        try {
+          await ctx.session.synthetic({ sessionID, text, description: label(text), resume: true })
+        } catch (error) {
+          console.error("[interlint]", error)
+          await release(sessionID, { kind: "error", run: { exitCode: 2, output: `${String(error)}\n` } }, undefined)
+        }
       }
 
       /**
@@ -832,42 +878,15 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
        * hook would fail the subagent's execution.
        */
       const onIdle = async (sessionID: string) => {
-        if (settling.has(sessionID) || holds.get(sessionID)?.checking) return
-        const { parent, ours } = await lookup(sessionID)
-        if (parent === undefined || !ours || !written.get(sessionID)?.size || (await isPaused(sessionID))) return
-        const hold = holds.get(sessionID) ?? { attempts: 0, output: "", checking: false, stopped: false }
-        holds.set(sessionID, hold)
-        hold.checking = true
         try {
-          const files = [...(written.get(sessionID) ?? [])]
-          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
-          let run: CheckRun
-          try {
-            run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
-          } finally {
-            hold.checking = false
-          }
-          const ended = hold.stopped
-          if (run.exitCode === 0) {
-            written.delete(sessionID)
-            const settled: Settled = hold.attempts === 0 ? { kind: "clean" } : { kind: "fixed" }
-            return await release(sessionID, settled, subagentResultLine(run, false), ended)
-          }
-          if (!isReport(run)) {
-            return await release(sessionID, { kind: "error", run }, `Interlint could not run the checks (exit code ${run.exitCode}).`, ended)
-          }
-          if (ended) return await release(sessionID, { kind: "stopped", output: run.output }, undefined, true)
-          if (hold.attempts >= MAX_CONSECUTIVE_BLOCKS) {
-            return await release(sessionID, { kind: "failing", output: run.output }, subagentGaveUpLine(run))
-          }
-          hold.attempts++
-          hold.output = run.output
-          const text = subagentBlockText(hold.attempts, run.output)
-          await ctx.session.synthetic({ sessionID, text, description: label(text), resume: true })
+          if (settling.has(sessionID) || holds.get(sessionID)?.checking) return
+          const { parent, ours } = await lookup(sessionID)
+          if (parent === undefined || !ours || !written.get(sessionID)?.size || (await isPaused(sessionID))) return
+          const hold = holds.get(sessionID) ?? { attempts: 0, output: "", checking: false, stopped: false }
+          holds.set(sessionID, hold)
+          await holdUntilChecked(sessionID, hold)
         } catch (error) {
           console.error("[interlint]", error)
-          const run = { exitCode: 2, output: `${String(error)}\n` }
-          await release(sessionID, { kind: "error", run }, undefined, hold.stopped).catch((error) => console.error("[interlint]", error))
         }
       }
 
@@ -1002,10 +1021,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         const { sessionID: child, status } = event.result?.metadata ?? {}
         if (typeof child !== "string") return
         // A subagent in the background is still working: its checks end before it does, and a message tells its parent.
-        if (status !== "completed") {
-          background.add(child)
-          return
-        }
+        if (status === "running") background.add(child)
+        if (status !== "completed") return
+        background.delete(child)
         // The idle hook held it until its checks passed, so its answer is already the last one.
         const held = outcomes.get(child)
         if (held) {
