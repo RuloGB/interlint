@@ -614,6 +614,74 @@ process.exit(1)
   })
 })
 
+describe("interlint lock", () => {
+  const ORDER = join("src", "main", "java", "shop", "Order.java")
+
+  /** Starts `interlint lock`, whose stdin closes when `close` is called. Resolves `held` once it wrote `locked`. */
+  function startLock() {
+    let stdout = ""
+    let close!: () => void
+    let wrote!: () => void
+    const held = new Promise<void>((resolve) => (wrote = resolve))
+    const exited = main(["lock"], {
+      cwd: projectDir,
+      stdout: (text) => {
+        stdout += text
+        if (stdout.includes("locked\n")) wrote()
+      },
+      stderr: () => {},
+      stdin: () => new Promise<string>((resolve) => (close = () => resolve(""))),
+    })
+    return { held, exited, close: () => close(), stdout: () => stdout }
+  }
+
+  it("holds the project lock until its stdin closes", async () => {
+    const lock = startLock()
+
+    await lock.held
+    expect(existsSync(lockFileFor(projectDir))).toBe(true)
+    lock.close()
+
+    expect(await lock.exited).toBe(0)
+    expect(lock.stdout()).toBe("locked\n")
+    expect(existsSync(lockFileFor(projectDir))).toBe(false)
+  })
+
+  it("makes a check wait until the agent's build ends", async () => {
+    const log = join(projectDir, "builds.log")
+    writeFileSync(join(projectDir, "check.mjs"), `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, "check\\n")\n`)
+    writeConfig({ name: "check", run: "node check.mjs", report: "exit-code", when: "edit" })
+    const lock = startLock()
+    await lock.held
+
+    const checked = run("check", "--when", "edit", "--file", ORDER)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(existsSync(log)).toBe(false)
+    lock.close()
+
+    expect((await checked).exitCode).toBe(0)
+    expect(readFileSync(log, "utf8")).toBe("check\n")
+    await lock.exited
+  })
+
+  it("waits for the checks that hold the lock before it writes locked", async () => {
+    writeConfig({ name: "slow", run: "node -e \"setTimeout(() => {}, 400)\"", report: "exit-code", when: "edit" })
+    const checked = run("check", "--when", "edit", "--file", ORDER)
+    await vi.waitFor(() => expect(existsSync(lockFileFor(projectDir))).toBe(true))
+
+    const lock = startLock()
+    let locked = false
+    void lock.held.then(() => (locked = true))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(locked).toBe(false)
+
+    await checked
+    await lock.held
+    lock.close()
+    expect(await lock.exited).toBe(0)
+  })
+})
+
 describe("interlint usage", () => {
   it("prints the usage with --help", async () => {
     const { exitCode, stdout } = await run("--help")

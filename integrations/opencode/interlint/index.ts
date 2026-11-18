@@ -124,6 +124,27 @@ const PATCH_FILE_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to):
  */
 const SHELL_SAFE_PATH = /^[\p{L}\p{N} _\-./\\:@+,()[\]~#]+$/u
 
+/** OpenCode V2's built-in tool that runs a shell command, in the foreground or in the background. */
+const SHELL_TOOL = "shell"
+/** The events of a shell that ended or was removed: one the agent ran in the background holds no lock after them. */
+const SHELL_ENDS = new Set(["shell.exited", "shell.deleted"])
+/**
+ * Maven, the Maven Wrapper or the Maven Daemon run anywhere in a shell command line, with an optional path, `.cmd` or
+ * `.bat`, such as `mvn test`, `cd api && ./mvnw verify` or `& .\mvnw.cmd test`.
+ */
+const MAVEN_IN_SHELL = /(?:^|[\s;&|()`"'])(?:[^\s;&|()`"']*[\\/])?(?:mvn|mvnw|mvnd)(?:\.cmd|\.bat)?(?=$|[\s;&|()`"'])/i
+/**
+ * A Maven goal that starts a server and runs until it is stopped, such as `spring-boot:run`, `quarkus:dev` or
+ * `jetty:run`. Left in the background, it would hold the project lock for good and stop every check.
+ */
+const SERVER_GOAL = /(?:^|\s)[\w.-]+:(?:run|dev)(?=$|[\s;&|)])/i
+/** What `interlint lock` writes once it holds the project lock. */
+const LOCKED = "locked"
+/** How long `interlint lock` gets to end after its stdin closes before it is stopped. */
+const UNLOCK_GRACE_MS = 5 * 1000
+/** A Maven command that waited this long for the checks is told so, as its result would not say why it took long. */
+export const LOCK_WAIT_NOTE_MS = 1000
+
 export interface CheckRun {
   exitCode: number
   output: string
@@ -381,16 +402,45 @@ export function editNote(run: CheckRun): string | undefined {
 }
 
 type ToolContent = string | readonly { type: string; text?: string }[]
-type ToolResult = { content?: ToolContent; metadata?: { sessionID?: unknown; status?: unknown } }
+/** `status` is `running` and `shellID` set when the `shell` tool left its command running in the background. */
+type ToolResult = { content?: ToolContent; metadata?: { sessionID?: unknown; status?: unknown; shellID?: unknown } }
+
+/** What OpenCode passes to an `execute.before` hook, which it waits for before the tool runs. */
+export interface ToolCalled {
+  readonly tool: string
+  readonly sessionID: string
+  /** The tool call, the same in its `execute.after`. */
+  readonly id?: string
+  readonly input: unknown
+}
 
 /** What OpenCode passes to an `execute.after` hook. Replacing `result` changes what the agent sees. */
 interface ToolExecuted {
   readonly tool: string
   /** The session of the agent that called the tool. */
   readonly sessionID: string
+  readonly id?: string
   readonly input: unknown
   readonly status: "completed" | "error"
   result?: ToolResult
+}
+
+/** The project lock held for a build the agent runs itself. */
+export interface LockHold {
+  release(): void
+}
+
+/** Takes the project lock, once the checks that hold it end. A lock it cannot take holds nothing and waits for nothing. */
+export type HoldLock = (directory: string, command: string) => Promise<LockHold>
+
+/** Whether a shell command line runs Maven, the Maven Wrapper or the Maven Daemon. Case does not matter, as on Windows. */
+export function runsMaven(command: unknown): boolean {
+  return typeof command === "string" && MAVEN_IN_SHELL.test(command)
+}
+
+/** The note added to the result of a Maven command that waited for Interlint's checks. */
+export function lockWaitNote(waitedMs: number): string {
+  return `Interlint: this command waited ${Math.round(waitedMs / 1000)} s for Interlint's checks on this project to finish, so the two builds did not share target/.`
 }
 
 function withNote(result: ToolResult | undefined, text: string): ToolResult {
@@ -456,13 +506,15 @@ interface PluginContext {
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
   event: {
-    subscribe(input: { signal: AbortSignal }): AsyncIterable<{ type: string; data?: { sessionID?: string } }>
+    /** `id` is the shell of a `shell.*` event, which has no `sessionID`. */
+    subscribe(input: { signal: AbortSignal }): AsyncIterable<{ type: string; data?: { sessionID?: string; id?: unknown } }>
   }
   tool: {
     hook(
       name: "execute.after",
       callback: (event: ToolExecuted) => Promise<void> | void,
     ): Promise<{ dispose(): Promise<void> }>
+    hook(name: "execute.before", callback: (event: ToolCalled) => Promise<void> | void): Promise<{ dispose(): Promise<void> }>
   }
   /** Absent on an OpenCode without permission hooks: the user is then not asked before a protected file changes. */
   permission?: {
@@ -519,7 +571,7 @@ interface Hold {
   stopped: boolean
 }
 
-export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
+export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdLock: HoldLock = holdProjectLock) {
   return {
     id: "interlint",
     async setup(ctx: PluginContext) {
@@ -553,6 +605,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const outcomes = new Map<string, Settled>()
       /** The subagents started in the background: their parent is told what happened in a message. */
       const background = new Set<string>()
+      /** The project locks held for the agent's Maven commands, by tool call, until the `shell` tool returns. */
+      const callLocks = new Map<string, { hold: LockHold; waitedMs: number }>()
+      /** The project locks held for the Maven commands the agent left running in the background, by shell. */
+      const shellLocks = new Map<string, LockHold>()
+      /** The shells that ended while a Maven command's `shell` tool had not returned yet, which may be its own. */
+      const endedShells = new Set<string>()
       /** The sessions Interlint resumed, waiting for the end of the turn that resume started. */
       const resumed = new Map<string, { started: boolean; resolve: (end: TurnEnd) => void }>()
       /** Main sessions whose turn end waited for a subagent with unchecked changes. */
@@ -1040,8 +1098,51 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         if (note) event.result = withNote(event.result, note)
       }
 
+      // A Maven command the agent runs in this project waits for the checks that run, and holds the project lock while
+      // it runs, so its build and Interlint's never share `target/`. OpenCode waits for this hook before the tool runs.
+      const beforeTool = await ctx.tool.hook("execute.before", async (event) => {
+        if (event.tool !== SHELL_TOOL || event.id === undefined) return
+        const input = event.input as { command?: unknown; workdir?: unknown } | undefined
+        if (!runsMaven(input?.command)) return
+        const workdir = typeof input?.workdir === "string" ? resolvePath(directory, input.workdir) : directory
+        if (!isWithin(workdir, directory) || !(await isOurs(event.sessionID))) return
+        const startedAt = Date.now()
+        const hold = await holdLock(directory, command)
+        callLocks.set(event.id, { hold, waitedMs: Date.now() - startedAt })
+      })
+
+      /** Releases the lock of a Maven command once it ends, or once its shell ends when it went to the background. */
+      const afterMaven = (event: ToolExecuted, held: { hold: LockHold; waitedMs: number }) => {
+        const metadata = event.status === "completed" ? event.result?.metadata : undefined
+        const shellID = metadata?.status === "running" ? metadata.shellID : undefined
+        // A server never ends: it waited for the checks before it started, and runs from then on without the lock.
+        const server = SERVER_GOAL.test(String((event.input as { command?: unknown } | undefined)?.command ?? ""))
+        if (typeof shellID === "string" && !server && !endedShells.has(shellID)) shellLocks.set(shellID, held.hold)
+        else held.hold.release()
+        if (callLocks.size === 0) endedShells.clear()
+        if (event.status === "completed" && held.waitedMs >= LOCK_WAIT_NOTE_MS) {
+          event.result = withNote(event.result, lockWaitNote(held.waitedMs))
+        }
+      }
+
+      const onShellEnd = (shellID: unknown) => {
+        if (typeof shellID !== "string") return
+        const hold = shellLocks.get(shellID)
+        if (hold !== undefined) {
+          shellLocks.delete(shellID)
+          hold.release()
+        } else if (callLocks.size > 0) {
+          endedShells.add(shellID)
+        }
+      }
+
       // OpenCode waits for this hook before it sends the tool result to the agent.
       const afterTool = await ctx.tool.hook("execute.after", async (event) => {
+        const held = event.id === undefined ? undefined : callLocks.get(event.id)
+        if (held !== undefined && event.id !== undefined) {
+          callLocks.delete(event.id)
+          return afterMaven(event, held)
+        }
         if (event.status !== "completed") return
         // Only this project's edits are recorded, so a subagent it checks is always this project's.
         if (event.tool === SUBAGENT_TOOL) return await afterSubagent(event)
@@ -1140,8 +1241,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           if (parent !== undefined || !ours) return
           if (mark === undefined) {
             if (paused.has(event.sessionID)) return
-            // Awaited, so the CLI takes the user's changes before the agent's turn changes anything.
-            const run = await runChecks(directory, command, editTimeoutMs, TURN_START_ARGS, await contextOf(event.sessionID))
+            // Awaited, so the CLI takes the user's changes before the agent's turn changes anything. It waits for any
+            // task-end checks that run, as long as they may take, so the agent never starts while they are running.
+            const run = await runChecks(directory, command, timeoutMs, TURN_START_ARGS, await contextOf(event.sessionID))
             if (run.exitCode !== 0) console.error("[interlint] could not start the turn in the CLI:", run.output)
             return
           }
@@ -1164,6 +1266,10 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
 
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          if (SHELL_ENDS.has(event.type)) {
+            onShellEnd(event.data?.id)
+            continue
+          }
           const sessionID = event.data?.sessionID
           if (!sessionID) continue
           if (event.type === SESSION_DELETED) {
@@ -1198,6 +1304,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         controller.abort()
         for (const timer of deferTimers.values()) clearTimeout(timer)
         void afterTool.dispose()
+        void beforeTool.dispose()
+        for (const { hold } of callLocks.values()) hold.release()
+        for (const hold of shellLocks.values()) hold.release()
         void modelHook?.dispose()
         void promptHook?.dispose()
         void idleHook?.dispose()
@@ -1293,6 +1402,52 @@ export function runInterlint(
     child.stderr.on("data", append)
     child.on("error", (error) => finish({ exitCode: 2, output: `${output}${error.message}\n` }))
     child.on("close", (code) => finish({ exitCode: code ?? 2, output }))
+  })
+}
+
+/** A lock that could not be taken: the agent's build runs without waiting. */
+const NO_HOLD: LockHold = { release: () => {} }
+
+/**
+ * Takes the project lock with `interlint lock`, which holds it until its stdin closes. If OpenCode dies, the pipe
+ * closes and the lock goes with it. An Interlint that cannot take it, such as one older than this plugin, holds
+ * nothing, so the agent's build never waits for an error.
+ */
+export function holdProjectLock(directory: string, command: string): Promise<LockHold> {
+  return new Promise((resolve) => {
+    let output = ""
+    let stdout = ""
+    let settled = false
+    let closed = false
+    const settle = (hold: LockHold) => {
+      if (settled) return
+      settled = true
+      resolve(hold)
+    }
+    const child = spawn(`${command} lock`, { cwd: directory, shell: true, windowsHide: true })
+    const release = () => {
+      child.stdin.end()
+      // A holder that does not end on its own is stopped: a waiter then finds its lock stale.
+      const timer = setTimeout(() => void (closed ? undefined : killTree(child.pid)), UNLOCK_GRACE_MS)
+      timer.unref()
+    }
+    child.stdin.on("error", () => {})
+    child.stdout.on("data", (chunk: Buffer) => {
+      // Only stdout says the lock is held: an error message on stderr could name it too.
+      stdout += chunk.toString("utf8")
+      output += chunk.toString("utf8")
+      if (stdout.includes(LOCKED)) settle({ release })
+    })
+    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")))
+    child.on("error", (error) => {
+      console.error("[interlint] could not hold the project lock:", error.message)
+      settle(NO_HOLD)
+    })
+    child.on("close", () => {
+      closed = true
+      if (!settled) console.error("[interlint] could not hold the project lock:", output)
+      settle(NO_HOLD)
+    })
   })
 }
 

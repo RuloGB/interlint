@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { withProjectLock } from "../src/adapters/driven/state/project-lock.js"
 import { type CheckProjectDeps, startTurn } from "../src/application/checking/check-project.js"
 import type { Config } from "../src/domain/check.js"
 import { withChangesBetweenTurns } from "../src/domain/turn-baseline.js"
@@ -222,6 +223,37 @@ describe("the turn step the OpenCode plugin runs", () => {
 
     expect(taskEnd.exitCode).toBe(0)
     expect(ran()).toBe(false)
+  })
+
+  it("waits for the checks that run, so the agent's turn never starts while they do", async () => {
+    project(PASSING_XML)
+    writeFile(ORDER, "class Order {}\n")
+    expect((await cli(["check", "--when", "task-end", "--changed", "--agent-context"], context)).exitCode).toBe(0)
+    let endChecks!: () => void
+    let checksStarted!: () => void
+    const started = new Promise<void>((resolve) => (checksStarted = resolve))
+    // Checks that run hold the project lock until they end.
+    const checks = withProjectLock(projectDir, () => {
+      checksStarted()
+      return new Promise<void>((resolve) => (endChecks = resolve))
+    })
+    await started
+
+    let turnStarted = false
+    const turn = cli(["check", "--when", "turn-start", "--agent-context"], context).then((result) => {
+      turnStarted = true
+      return result
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      expect(turnStarted).toBe(false)
+    } finally {
+      // Released even when the expectation fails, so a failure is reported instead of a test that never ends.
+      endChecks()
+      await checks
+    }
+
+    expect(await turn).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
 
   it("takes nothing in a session the CLI keeps paused, even when the plugin forgot the pause", async () => {

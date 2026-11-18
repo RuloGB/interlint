@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -15,7 +15,12 @@ import plugin, {
   MAX_OUTPUT_CHARS,
   pauseMark,
   type RunChecks,
+  holdProjectLock,
+  type LockHold,
+  LOCK_WAIT_NOTE_MS,
+  lockWaitNote,
   runInterlint,
+  runsMaven,
   TaskEndGate,
 } from "../integrations/opencode/interlint/index.js"
 import {
@@ -176,7 +181,7 @@ describe("runInterlint", () => {
   })
 })
 
-type PluginEvent = { type: string; data?: { sessionID?: string } }
+type PluginEvent = { type: string; data?: { sessionID?: string; id?: string } }
 
 /**
  * A fake OpenCode V2 plugin context that records what the plugin sends to the session.
@@ -259,23 +264,33 @@ function fakeContext(
     queue.push({ type, data: { sessionID } })
     wake?.()
   }
+  /** Delivers an event of a shell, which names the shell in `id` and has no session. */
+  const emitShell = (type: string, id: string) => {
+    queue.push({ type, data: { id } })
+    wake?.()
+  }
+  /** Calls the plugin's `execute.before` hook the way OpenCode does before a tool runs. */
+  const beforeTool = async (tool: string, input: unknown, { sessionID = "s1", id = "call-1" } = {}) => {
+    await hooks.get("execute.before")?.({ tool, sessionID, id, input } as unknown as ToolEvent)
+  }
   /** Calls the plugin's `execute.after` hook the way OpenCode does after a tool call, and returns the event. */
   const afterTool = async (
     tool: string,
     input: unknown,
     status: "completed" | "error" = "completed",
-    { sessionID = "s1", result = { content: [{ type: "text", text: "Edited the file" }] } }: Partial<ToolCall> = {},
+    { sessionID = "s1", result = { content: [{ type: "text", text: "Edited the file" }] }, id }: Partial<ToolCall> = {},
   ) => {
     const event: ToolEvent =
-      status === "completed" ? { tool, sessionID, input, status, result } : { tool, sessionID, input, status, error: new Error("failed") }
+      status === "completed" ? { tool, sessionID, id, input, status, result } : { tool, sessionID, id, input, status, error: new Error("failed") }
     await hooks.get("execute.after")?.(event)
     return event
   }
-  return { ctx, sent, labels, done, emit, afterTool, release }
+  return { ctx, sent, labels, done, emit, emitShell, beforeTool, afterTool, release }
 }
 
 interface ToolCall {
   sessionID: string
+  id: string
   result: { content?: string | { type: string; text?: string }[]; metadata?: Record<string, unknown> }
 }
 
@@ -283,6 +298,7 @@ interface ToolCall {
 interface ToolEvent {
   tool: string
   sessionID: string
+  id?: string
   input: unknown
   status: "completed" | "error"
   result?: ToolCall["result"]
@@ -1742,6 +1758,16 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(sent).toEqual([])
   })
 
+  it("gives the turn start the task-end timeout, so it may wait for the task-end checks that run", async () => {
+    const { ctx, prompt } = pausable()
+    const timeouts: number[] = []
+    await createInterlintPlugin(async (_directory, _command, timeoutMs) => (timeouts.push(timeoutMs), PASSED)).setup(ctx)
+
+    await prompt("Add a discount to the order")
+
+    expect(timeouts).toEqual([DEFAULT_TIMEOUT_MS])
+  })
+
   it("starts no turn for a subagent's prompt or in a paused session", async () => {
     const { ctx, run, runs, prompt } = pausable([], SESSIONS)
     await createInterlintPlugin(run).setup(ctx)
@@ -2074,5 +2100,258 @@ describe("telling the user that the task-end checks are running", () => {
       expect(answered).toBe(true)
       expect((await answer).result).toEqual(subagentAnswer)
     })
+  })
+})
+
+describe("runsMaven", () => {
+  it.each([
+    "mvn test",
+    "./mvnw -q verify",
+    "cd orders && mvn test",
+    ".\\mvnw.cmd test",
+    "& '.\\mvnw.cmd' test",
+    "mvnd verify",
+    "(cd api; mvn.cmd package)",
+    "MVN test",
+    ".\\Mvnw.cmd verify",
+  ])("finds Maven in %s", (command) => {
+    expect(runsMaven(command)).toBe(true)
+  })
+
+  it.each(["npm test", "echo mvnrepository", "cat pom.xml", "ls mvnw-notes", "git log --grep=mvn-fix"])(
+    "finds no Maven in %s",
+    (command) => {
+      expect(runsMaven(command)).toBe(false)
+    },
+  )
+
+  it("finds none in what is not a command line", () => {
+    expect(runsMaven(undefined)).toBe(false)
+  })
+})
+
+describe("OpenCode plugin with the agent's own Maven commands", () => {
+  /** A fake project lock: records who takes it and releases it, and gives it at once unless `wait` was called. */
+  function fakeLock() {
+    const events: string[] = []
+    let grant: (() => void) | undefined
+    let waiting = false
+    const holdLock = async (directory: string) => {
+      events.push(`take ${directory}`)
+      if (waiting) await new Promise<void>((resolve) => (grant = resolve))
+      return { release: () => void events.push("release") } satisfies LockHold
+    }
+    return {
+      events,
+      holdLock,
+      wait: () => (waiting = true),
+      grant: () => grant?.(),
+    }
+  }
+
+  const MVN = { command: "./mvnw test" }
+  const SHELL_RESULT = { content: [{ type: "text", text: "BUILD SUCCESS" }], metadata: { status: "completed" } }
+  const BACKGROUND_RESULT = {
+    content: [{ type: "text", text: "Command moved to the background" }],
+    metadata: { status: "running", shellID: "sh-1" },
+  }
+
+  async function setUp(sessions: Parameters<typeof fakeContext>[1] = {}) {
+    const lock = fakeLock()
+    const context = fakeContext([], sessions)
+    await createInterlintPlugin(async () => PASSED, lock.holdLock).setup(context.ctx)
+    return { lock, ...context }
+  }
+
+  it("holds the project lock while the agent's Maven command runs", async () => {
+    const { lock, beforeTool, afterTool } = await setUp()
+
+    await beforeTool("shell", MVN)
+    expect(lock.events).toEqual(["take /repo"])
+    const event = await afterTool("shell", MVN, "completed", { id: "call-1", result: SHELL_RESULT })
+
+    expect(lock.events).toEqual(["take /repo", "release"])
+    expect(event.result).toEqual(SHELL_RESULT)
+  })
+
+  it("does not let the command run until the checks that hold the lock end", async () => {
+    const { lock, beforeTool } = await setUp()
+    lock.wait()
+
+    let ran = false
+    const before = beforeTool("shell", MVN).then(() => (ran = true))
+    await settled()
+    expect(ran).toBe(false)
+    lock.grant()
+    await before
+
+    expect(ran).toBe(true)
+  })
+
+  it("tells the agent when its command waited for the checks", async () => {
+    const { beforeTool, afterTool } = await setUp()
+    const now = vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_000 + 12_000)
+
+    await beforeTool("shell", MVN)
+    now.mockRestore()
+    const event = await afterTool("shell", MVN, "completed", { id: "call-1", result: SHELL_RESULT })
+
+    expect(event.result?.content).toEqual([...SHELL_RESULT.content, { type: "text", text: lockWaitNote(12_000) }])
+    expect(lockWaitNote(12_000)).toBe(
+      "Interlint: this command waited 12 s for Interlint's checks on this project to finish, so the two builds did not share target/.",
+    )
+  })
+
+  it("adds no note when the command did not wait for the checks", async () => {
+    const { beforeTool, afterTool } = await setUp()
+    const now = vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_000 + LOCK_WAIT_NOTE_MS - 1)
+
+    await beforeTool("shell", MVN)
+    now.mockRestore()
+    const event = await afterTool("shell", MVN, "completed", { id: "call-1", result: SHELL_RESULT })
+
+    expect(event.result).toEqual(SHELL_RESULT)
+  })
+
+  it("takes no lock for a command that does not run Maven", async () => {
+    const { lock, beforeTool, afterTool } = await setUp()
+
+    await beforeTool("shell", { command: "npm test" })
+    await beforeTool("edit", { path: "pom.xml", command: "mvn test" }, { id: "call-2" })
+    await afterTool("shell", { command: "npm test" }, "completed", { id: "call-1", result: SHELL_RESULT })
+
+    expect(lock.events).toEqual([])
+  })
+
+  it("takes no lock for a Maven command that runs outside the project", async () => {
+    const { lock, beforeTool } = await setUp({ other: { directory: "/elsewhere" } })
+
+    await beforeTool("shell", { command: "mvn test", workdir: "../other-repo" })
+    await beforeTool("shell", MVN, { sessionID: "other", id: "call-2" })
+
+    expect(lock.events).toEqual([])
+  })
+
+  it("takes the lock for a Maven command in a folder of the project", async () => {
+    const { lock, beforeTool } = await setUp()
+
+    await beforeTool("shell", { command: "mvn test", workdir: "orders" })
+
+    expect(lock.events).toEqual(["take /repo"])
+  })
+
+  it("releases the lock when the command fails to run", async () => {
+    const { lock, beforeTool, afterTool } = await setUp()
+
+    await beforeTool("shell", MVN)
+    await afterTool("shell", MVN, "error", { id: "call-1" })
+
+    expect(lock.events).toEqual(["take /repo", "release"])
+  })
+
+  it("holds the lock of a command left in the background until its shell ends", async () => {
+    const { lock, beforeTool, afterTool, emitShell } = await setUp()
+
+    await beforeTool("shell", MVN)
+    await afterTool("shell", MVN, "completed", { id: "call-1", result: BACKGROUND_RESULT })
+    expect(lock.events).toEqual(["take /repo"])
+    emitShell("shell.exited", "sh-2")
+    await settled()
+    expect(lock.events).toEqual(["take /repo"])
+    emitShell("shell.exited", "sh-1")
+    await settled()
+
+    expect(lock.events).toEqual(["take /repo", "release"])
+  })
+
+  it.each(["./mvnw spring-boot:run", "mvn quarkus:dev", "cd web && mvn jetty:run"])(
+    "releases the lock of a server left in the background once it started: %s",
+    async (command) => {
+      const { lock, beforeTool, afterTool } = await setUp()
+
+      await beforeTool("shell", { command })
+      expect(lock.events).toEqual(["take /repo"])
+      await afterTool("shell", { command }, "completed", { id: "call-1", result: BACKGROUND_RESULT })
+
+      expect(lock.events).toEqual(["take /repo", "release"])
+    },
+  )
+
+  it("releases the lock of a background command whose shell ended before the tool returned", async () => {
+    const { lock, beforeTool, afterTool, emitShell } = await setUp()
+
+    await beforeTool("shell", MVN)
+    emitShell("shell.exited", "sh-1")
+    await settled()
+    await afterTool("shell", MVN, "completed", { id: "call-1", result: BACKGROUND_RESULT })
+
+    expect(lock.events).toEqual(["take /repo", "release"])
+  })
+
+  it("releases the lock of a background shell that was removed", async () => {
+    const { lock, beforeTool, afterTool, emitShell } = await setUp()
+
+    await beforeTool("shell", MVN)
+    await afterTool("shell", MVN, "completed", { id: "call-1", result: BACKGROUND_RESULT })
+    emitShell("shell.deleted", "sh-1")
+    await settled()
+
+    expect(lock.events).toEqual(["take /repo", "release"])
+  })
+
+  it("releases every lock it holds when OpenCode disposes of the plugin", async () => {
+    const lock = fakeLock()
+    const { ctx, beforeTool, afterTool } = fakeContext()
+    const dispose = await createInterlintPlugin(async () => PASSED, lock.holdLock).setup(ctx)
+
+    await beforeTool("shell", MVN)
+    await beforeTool("shell", MVN, { id: "call-2" })
+    await afterTool("shell", MVN, "completed", { id: "call-2", result: BACKGROUND_RESULT })
+    dispose()
+
+    expect(lock.events).toEqual(["take /repo", "take /repo", "release", "release"])
+  })
+})
+
+describe("holdProjectLock", () => {
+  let scratch: string
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "interlint-plugin-lock-"))
+  })
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it("holds the lock until it releases it", async () => {
+    // A stand-in for `interlint lock`: writes `locked`, and a file once its stdin closes.
+    writeFileSync(
+      join(scratch, "holder.mjs"),
+      [
+        'import { writeFileSync } from "node:fs"',
+        'process.stdout.write("locked\\n")',
+        "process.stdin.resume()",
+        'process.stdin.on("end", () => writeFileSync("released", "yes"))',
+        "",
+      ].join("\n"),
+    )
+
+    const hold = await holdProjectLock(scratch, "node holder.mjs")
+    expect(existsSync(join(scratch, "released"))).toBe(false)
+    hold.release()
+
+    await vi.waitFor(() => expect(existsSync(join(scratch, "released"))).toBe(true), { timeout: 5_000 })
+  })
+
+  it("holds nothing when the lock cannot be taken, so the agent's build does not wait", async () => {
+    writeFileSync(join(scratch, "old.mjs"), 'process.stderr.write("interlint: unknown command\\n")\nprocess.exitCode = 2\n')
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const hold = await holdProjectLock(scratch, "node old.mjs")
+    hold.release()
+
+    expect(errors).toHaveBeenCalledWith("[interlint] could not hold the project lock:", "interlint: unknown command\n")
+    errors.mockRestore()
   })
 })
