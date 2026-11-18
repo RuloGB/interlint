@@ -11,6 +11,7 @@ import { check } from "./check-command.js"
 import { EXIT, type Io, reportError, UsageError } from "./cli-io.js"
 import { doctor } from "./doctor-command.js"
 import { init } from "./init-command.js"
+import { lock } from "./lock-command.js"
 import { metrics } from "./metrics-command.js"
 
 const USAGE = `Usage:
@@ -65,6 +66,7 @@ export async function runCli(args: string[], io: Io, deps: CliDeps): Promise<num
     if (command === "check") return await check(rest, io, deps.checking, deps.feedback)
     if (command === "init") return init(rest, io, deps.setup)
     if (command === "doctor") return doctor(rest, io, deps.doctor)
+    if (command === "lock") return await lock(rest, io, deps.checking.lock)
     if (command === "hook" && rest[0] === "copilot") {
       return await copilotHook(rest, io, { ...deps.feedback, transcriptModel: deps.copilotTranscriptModel })
     }

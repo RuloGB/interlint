@@ -30,6 +30,15 @@ After the `edit`, `write` or `patch` tool changes files, the plugin runs `interl
 
 The agent waits for these checks, so they give up after 2 minutes. If they cannot run, the edit result stays as it was and the task-end check reports the problem.
 
+## The agent's own Maven commands
+
+Interlint's checks and a Maven build the agent runs itself must not share `target/` at the same time: the two builds would mix their classes and both could fail. So before the `shell` tool runs a command with `mvn`, `mvnw` or `mvnd` in this project, such as `./mvnw test` or `cd orders && mvn verify`, the plugin runs `interlint lock`, an internal command that takes the same lock as the checks.
+
+- If checks are running, the command waits for them to end. Its result then says so, such as `Interlint: this command waited 12 s for Interlint's checks on this project to finish, so the two builds did not share target/.`
+- While the command runs, the checks wait for it. An edit check that waits longer than its 2 minutes gives up, and the task-end check runs the checks later.
+- A command the agent leaves in the background holds the lock until its shell ends. A goal that starts a server and runs until it is stopped, such as `spring-boot:run`, `quarkus:dev` or `jetty:run`, only waits for the checks before it starts: it would otherwise hold the lock for good.
+- If OpenCode closes, the lock is released. If `interlint lock` cannot run, such as with an Interlint older than this plugin, the command runs without waiting.
+
 ## When a turn ends
 
 The plugin runs `interlint check --when task-end --changed`: the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If a check fails, it sends the failures back to the session and the agent goes on to fix them. The message tells it to fix them even if you asked it to change nothing else: asking you whether to fix them does not end the task.
