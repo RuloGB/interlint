@@ -15,7 +15,8 @@
  *   user in a message that they are running.
  * - When a subagent's turn ends, it runs the task-end checks of the projects holding the files that subagent changed
  *   with an edit tool, and resumes the subagent with the failures, up to MAX_CONSECUTIVE_BLOCKS times. A subagent
- *   that changed no file, such as a read-only reviewer, runs nothing.
+ *   that changed no file, such as a read-only reviewer, runs nothing. The user sees in the subagent's session that
+ *   the checks are running and how they ended, as in the main agent's.
  * - OpenCode has no hook that keeps a session from ending, and the `subagent` tool returns the subagent's first answer.
  *   So the plugin holds that answer in the tool's `execute.after` hook until the subagent's checks pass, and adds
  *   what happened. If the subagent cannot fix them, the answer carries the failures to the agent that delegated
@@ -192,6 +193,22 @@ function subagentBlockText(attempt: number, output: string): string {
     attempt,
     `Fix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n${output}`,
   )
+}
+
+/**
+ * What the user reads in a subagent's session when its task-end checks pass: the line that names them, a notice for
+ * the user, or the line that closes the running notice. Nothing when there is nothing to say.
+ */
+function subagentResultLine(run: CheckRun, noticed: boolean): string | undefined {
+  if (run.output.startsWith(NOTICE_MARK)) return run.output
+  return passedLine(run) ?? (noticed ? FINISHED_MESSAGE : undefined)
+}
+
+/** What the user reads in a subagent's session when its checks still fail after its last attempt. */
+function subagentGaveUpLine(run: CheckRun): string {
+  const names = failedNames(run.output)
+  const which = names.length === 0 ? "" : `: ${names.join(", ")}`
+  return `${REPORT_MARK}Interlint · checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts${which}. They go to the agent that delegated this work.`
 }
 
 /** The mark in a user's prompt: the last one when it holds both. None without a mark. The same as the CLI's. */
@@ -668,13 +685,24 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           const files = [...(written.get(sessionID) ?? [])]
           if (files.length === 0) return { kind: "clean" }
           const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
-          const run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
+          const context = await contextOf(sessionID)
+          const { run, noticed } = await withRunningNotice(sessionID, () =>
+            runChecks(directory, command, timeoutMs, args, context),
+          )
           if (run.exitCode === 0) {
             written.delete(sessionID)
+            // Awaited, so the user reads it in the subagent's session before its answer reaches the parent.
+            await tellUser(sessionID, subagentResultLine(run, noticed))
             return attempt === 1 ? { kind: "clean" } : { kind: "fixed" }
           }
-          if (!isReport(run)) return { kind: "error", run }
-          if (attempt > MAX_CONSECUTIVE_BLOCKS) return { kind: "failing", output: run.output }
+          if (!isReport(run)) {
+            await tellUser(sessionID, `Interlint could not run the checks (exit code ${run.exitCode}).`)
+            return { kind: "error", run }
+          }
+          if (attempt > MAX_CONSECUTIVE_BLOCKS) {
+            await tellUser(sessionID, subagentGaveUpLine(run))
+            return { kind: "failing", output: run.output }
+          }
           // Registered before the resume, so the turn it starts cannot end unseen.
           const turnEnd = new Promise<TurnEnd>((resolve) => resumed.set(sessionID, { started: false, resolve }))
           try {
@@ -690,6 +718,23 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           }
           if ((await resumedTurnEnd(sessionID, turnEnd)) !== "succeeded") return { kind: "stopped", output: run.output }
         }
+      }
+
+      /**
+       * Shows the user a line in the session without resuming its agent. A line that cannot be sent is only logged,
+       * and one still sending after RUNNING_NOTICE_WAIT_MS is not waited for, so it never holds the subagent's answer.
+       */
+      const tellUser = async (sessionID: string, text: string | undefined) => {
+        if (text === undefined) return
+        const sending = ctx.session
+          .synthetic({ sessionID, text, description: label(text), resume: false })
+          .catch((error) => console.error("[interlint]", error))
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const gaveUp = new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, RUNNING_NOTICE_WAIT_MS)
+          timer.unref?.()
+        })
+        await Promise.race([sending, gaveUp]).finally(() => clearTimeout(timer))
       }
 
       const tellParent = async (sessionID: string, settled: Settled) => {
