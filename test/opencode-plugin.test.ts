@@ -580,13 +580,19 @@ describe("OpenCode plugin with subagents", () => {
     emit(SUCCEEDED, "writer")
 
     const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+    await settled()
     for (let attempt = 0; attempt < MAX_CONSECUTIVE_BLOCKS; attempt++) await writerTurn(emit)
 
     expect((await answer).result?.content).toBe(
       `${ANSWER}\n\nInterlint: the subagent could not make the checks pass after ${MAX_CONSECUTIVE_BLOCKS} attempts, so they are yours to fix.\n\n${VIOLATIONS.output}`,
     )
     expect(runs).toHaveLength(MAX_CONSECUTIVE_BLOCKS + 1)
-    expect(sent.map((message) => message.sessionID)).toEqual(["writer", "writer", "writer"])
+    expect(sent.map((message) => message.sessionID)).toEqual(["writer", "writer", "writer", "writer"])
+    expect(sent.at(-1)).toEqual({
+      sessionID: "writer",
+      text: `✗ Interlint · checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts: architecture. They go to the agent that delegated this work.`,
+      resume: false,
+    })
   })
 
   it("sends a background subagent's failures to its parent when the subagent cannot fix them", async () => {
@@ -619,6 +625,7 @@ describe("OpenCode plugin with subagents", () => {
     await settled()
 
     expect(sent).toEqual([
+      { sessionID: "writer", text: "Interlint could not run the checks (exit code 2).", resume: false },
       {
         sessionID: "main",
         text: `Interlint could not run the checks of subagent session writer (exit code 2).\n\n${broken.output}`,
@@ -1611,5 +1618,82 @@ describe("telling the user that the task-end checks are running", () => {
     vi.advanceTimersByTime(1)
     await settled()
     expect(sent.map(({ resume }) => resume)).toEqual([true])
+  })
+
+  describe("in a subagent", () => {
+    /** The subagent `writer` edits a file and ends its turn; its task-end checks give `results` in turn. */
+    async function writerTurnEnd(...results: CheckRun[]) {
+      let finish!: () => void
+      const ended = new Promise<void>((resolve) => (finish = resolve))
+      const run: RunChecks = async (_directory, _command, _timeoutMs, args = []) => {
+        if (args[2] !== "task-end") return PASSED
+        await ended
+        return results.shift() ?? PASSED
+      }
+      const context = fakeContext([], SESSIONS)
+      await createInterlintPlugin(run).setup(context.ctx)
+      await context.done
+      await context.afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+      context.emit(SUCCEEDED, "writer")
+      await settled()
+      return { ...context, finish }
+    }
+
+    it("says the checks are running after 2 seconds and then which passed, before the answer reaches the main agent", async () => {
+      const { sent, afterTool, finish } = await writerTurnEnd(PASSED_NAMED)
+      let answered = false
+      const answer = afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+      void answer.then(() => (answered = true))
+
+      vi.advanceTimersByTime(DELAY)
+      await settled()
+      expect(sent).toEqual([{ sessionID: "writer", text: RUNNING, resume: false }])
+      expect(answered).toBe(false)
+
+      finish()
+      await settled()
+      expect(sent).toEqual([
+        { sessionID: "writer", text: RUNNING, resume: false },
+        { sessionID: "writer", text: PASS_LINE, resume: false },
+      ])
+      expect((await answer).result).toEqual(subagentAnswer)
+    })
+
+    it("says which checks passed even when they end within 2 seconds", async () => {
+      const { sent, finish } = await writerTurnEnd(PASSED_NAMED)
+
+      finish()
+      await settled()
+
+      expect(sent).toEqual([{ sessionID: "writer", text: PASS_LINE, resume: false }])
+    })
+
+    it("closes the notice when the checks pass with nothing to name", async () => {
+      const { sent, finish } = await writerTurnEnd(PASSED)
+
+      vi.advanceTimersByTime(DELAY)
+      await settled()
+      finish()
+      await settled()
+
+      expect(sent).toEqual([
+        { sessionID: "writer", text: RUNNING, resume: false },
+        { sessionID: "writer", text: FINISHED, resume: false },
+      ])
+    })
+
+    it("follows the notice with the failures that resume the subagent", async () => {
+      const { sent, finish } = await writerTurnEnd(VIOLATIONS)
+
+      vi.advanceTimersByTime(DELAY)
+      await settled()
+      finish()
+      await settled()
+
+      expect(sent.map(({ sessionID, text, resume }) => ({ sessionID, text: text.split("\n")[0], resume }))).toEqual([
+        { sessionID: "writer", text: RUNNING, resume: false },
+        { sessionID: "writer", text: `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).`, resume: true },
+      ])
+    })
   })
 })
