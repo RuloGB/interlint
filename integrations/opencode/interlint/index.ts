@@ -13,14 +13,18 @@
  *   While one of its subagents has changes whose checks have not passed yet, it waits for that subagent first.
  *   OpenCode shows the turn as ended meanwhile, so checks that run longer than DEFAULT_RUNNING_NOTICE_MS tell the
  *   user in a message that they are running.
- * - When a subagent's turn ends, it runs the task-end checks of the projects holding the files that subagent changed
- *   with an edit tool, and resumes the subagent with the failures, up to MAX_CONSECUTIVE_BLOCKS times. A subagent
- *   that changed no file, such as a read-only reviewer, runs nothing. The user sees in the subagent's session that
- *   the checks are running and how they ended, as in the main agent's.
- * - OpenCode has no hook that keeps a session from ending, and the `subagent` tool returns the subagent's first answer.
- *   So the plugin holds that answer in the tool's `execute.after` hook until the subagent's checks pass, and adds
- *   what happened. If the subagent cannot fix them, the answer carries the failures to the agent that delegated
- *   the work, which answers for those files from then on. For a subagent in the background, a message does that.
+ * - Just before a subagent that changed files with an edit tool would go idle, the `experimental.idle` session hook
+ *   (OpenCode 2.2.1 and later) runs the task-end checks of the projects holding those files. OpenCode waits for the
+ *   hook, and input it admits runs in the same execution, so the subagent fixes the failures before it ends, up to
+ *   MAX_CONSECUTIVE_BLOCKS times. Its answer, in the foreground or in the background, reaches the agent that
+ *   delegated the work only then. Every message admitted to a session is input, even with `resume: false`, so what
+ *   the user reads waits for the subagent's turn end. A subagent that changed no file, such as a read-only reviewer,
+ *   runs nothing. If the subagent cannot fix them, the failures go to the agent that delegated the work, which
+ *   answers for those files from then on: in the `subagent` tool's answer, or in a message for one in the background.
+ * - On an OpenCode without that hook, the checks run when the subagent's turn ends, and resume it with the failures.
+ *   Its `subagent` tool has returned its first answer by then, so the plugin holds that answer in the tool's
+ *   `execute.after` hook until the subagent's checks pass. The user sees in the subagent's session that the checks
+ *   are running and how they ended, as in the main agent's.
  *
  * The user pauses Interlint in a main session by writing `interlint: pause` in a prompt, and resumes it with
  * `interlint: resume` (F26). The session's `prompt` hook reads the marks, only in main sessions: the prompt of a
@@ -284,6 +288,14 @@ export function answerNote(settled: Settled): string | undefined {
   }
 }
 
+/** What the plugin adds to the answer of a foreground subagent it held until its checks passed. */
+export function heldAnswerNote(settled: Settled): string | undefined {
+  if (settled.kind === "fixed") {
+    return "Interlint: the checks failed when the subagent first finished, so it fixed them before this answer. They pass now."
+  }
+  return answerNote(settled)
+}
+
 /** What the plugin sends to the parent of a background subagent, or nothing when there is nothing to tell. */
 export function parentNote(sessionID: string, settled: Settled): { text: string; resume: boolean } | undefined {
   switch (settled.kind) {
@@ -436,6 +448,11 @@ interface PluginContext {
     hook?(name: "model.request", callback: (event: ModelRequest) => void): Promise<{ dispose(): Promise<void> }>
     /** Fires for every prompt into a session, a subagent's included, before it is sent. */
     hook?(name: "prompt", callback: (event: PromptEvent) => Promise<void> | void): Promise<{ dispose(): Promise<void> }>
+    /**
+     * Fires just before a session that ran the model would go idle, and OpenCode waits for it. A message admitted
+     * meanwhile makes the session go on in the same execution. Experimental, since OpenCode 2.2.1.
+     */
+    hook?(name: "experimental.idle", callback: (event: IdleEvent) => Promise<void> | void): Promise<{ dispose(): Promise<void> }>
     synthetic(input: { sessionID: string; text: string; description?: string; resume?: boolean }): Promise<unknown>
   }
   event: {
@@ -462,6 +479,11 @@ export interface PromptEvent {
   readonly prompt?: { text?: unknown }
 }
 
+/** A session about to go idle. Only `sessionID` is read. */
+export interface IdleEvent {
+  readonly sessionID: string
+}
+
 /** A permission OpenCode is about to grant or ask for. Setting `effect` to `ask` makes it ask the user, with `message`. */
 export interface PermissionEvaluation {
   readonly sessionID: string
@@ -484,6 +506,17 @@ export type RunChecks = (
 interface Settling {
   awaited: boolean
   done: Promise<Settled>
+}
+
+/**
+ * A subagent held before it goes idle until its checks pass: the failures it was given to fix, the last of them, and
+ * whether its checks are running now. `stopped` is set when its turn failed or was interrupted while they ran.
+ */
+interface Hold {
+  attempts: number
+  output: string
+  checking: boolean
+  stopped: boolean
 }
 
 export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
@@ -512,6 +545,14 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       /** The model of each session's last own request, for the metrics. */
       const models = new Map<string, { model?: string; provider?: string }>()
       const settling = new Map<string, Settling>()
+      /** The subagents the idle hook holds until their checks pass. */
+      const holds = new Map<string, Hold>()
+      /** What the user reads in a held subagent's session, sent when its turn ends: sent before, it would be input. */
+      const lines = new Map<string, string>()
+      /** How the checks of a held foreground subagent ended, for its `subagent` tool's answer. */
+      const outcomes = new Map<string, Settled>()
+      /** The subagents started in the background: their parent is told what happened in a message. */
+      const background = new Set<string>()
       /** The sessions Interlint resumed, waiting for the end of the turn that resume started. */
       const resumed = new Map<string, { started: boolean; resolve: (end: TurnEnd) => void }>()
       /** Main sessions whose turn end waited for a subagent with unchecked changes. */
@@ -767,6 +808,70 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       }
 
       /**
+       * Lets a held subagent go: its failures go to its parent when it could not fix them, and the parent hears what
+       * happened, in the subagent's answer or, in the background, in a message. The user's line waits for the
+       * subagent's turn end, unless that turn already ended.
+       */
+      const release = async (sessionID: string, settled: Settled, line: string | undefined, ended = false) => {
+        holds.delete(sessionID)
+        if (line !== undefined) {
+          if (ended) await tellUser(sessionID, line)
+          else lines.set(sessionID, line)
+        }
+        if (settled.kind === "failing" || settled.kind === "stopped") await handOver(sessionID)
+        // The main agent's task end reports it, so nobody waits for these changes any more.
+        if (settled.kind === "error") written.delete(sessionID)
+        if (background.has(sessionID)) await tellParent(sessionID, settled).catch((error) => console.error("[interlint]", error))
+        else if (settled.kind !== "clean") outcomes.set(sessionID, settled)
+        await flushDeferred()
+      }
+
+      /**
+       * Runs a subagent's checks before it goes idle, and gives it the failures to fix in the same execution. A
+       * subagent the old fix loop handles, or one whose checks already run, is left to it. Never throws: a failing
+       * hook would fail the subagent's execution.
+       */
+      const onIdle = async (sessionID: string) => {
+        if (settling.has(sessionID) || holds.get(sessionID)?.checking) return
+        const { parent, ours } = await lookup(sessionID)
+        if (parent === undefined || !ours || !written.get(sessionID)?.size || (await isPaused(sessionID))) return
+        const hold = holds.get(sessionID) ?? { attempts: 0, output: "", checking: false, stopped: false }
+        holds.set(sessionID, hold)
+        hold.checking = true
+        try {
+          const files = [...(written.get(sessionID) ?? [])]
+          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
+          let run: CheckRun
+          try {
+            run = await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
+          } finally {
+            hold.checking = false
+          }
+          const ended = hold.stopped
+          if (run.exitCode === 0) {
+            written.delete(sessionID)
+            const settled: Settled = hold.attempts === 0 ? { kind: "clean" } : { kind: "fixed" }
+            return await release(sessionID, settled, subagentResultLine(run, false), ended)
+          }
+          if (!isReport(run)) {
+            return await release(sessionID, { kind: "error", run }, `Interlint could not run the checks (exit code ${run.exitCode}).`, ended)
+          }
+          if (ended) return await release(sessionID, { kind: "stopped", output: run.output }, undefined, true)
+          if (hold.attempts >= MAX_CONSECUTIVE_BLOCKS) {
+            return await release(sessionID, { kind: "failing", output: run.output }, subagentGaveUpLine(run))
+          }
+          hold.attempts++
+          hold.output = run.output
+          const text = subagentBlockText(hold.attempts, run.output)
+          await ctx.session.synthetic({ sessionID, text, description: label(text), resume: true })
+        } catch (error) {
+          console.error("[interlint]", error)
+          const run = { exitCode: 2, output: `${String(error)}\n` }
+          await release(sessionID, { kind: "error", run }, undefined, hold.stopped).catch((error) => console.error("[interlint]", error))
+        }
+      }
+
+      /**
        * Runs `checks` and, when they take longer than runningNoticeMs, tells the user in the session that they are
        * running. The result waits for the notice, up to RUNNING_NOTICE_WAIT_MS, so the two arrive in order. `noticed`
        * is false only when no notice was sent, or sending it failed.
@@ -812,7 +917,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
           return
         }
         if (parent) {
-          // A subagent gets only the failures of the projects it changed, and none if it changed nothing.
+          // The idle hook let it go: the execution that held it is over, so what the user reads is input no more.
+          holds.delete(sessionID)
+          const line = lines.get(sessionID)
+          lines.delete(sessionID)
+          await tellUser(sessionID, line)
+          // Without the idle hook, a subagent gets the failures of the projects it changed now, and none if it changed nothing.
           if (written.get(sessionID)?.size) settle(sessionID)
           return
         }
@@ -853,6 +963,14 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       const onTurnStopped = async (sessionID: string) => {
         const { parent, ours } = await lookup(sessionID)
         if (!ours || !parent || settling.has(sessionID)) return
+        lines.delete(sessionID)
+        const hold = holds.get(sessionID)
+        // Its checks still run: when they end, the idle hook lets it go instead of giving it the failures.
+        if (hold?.checking) {
+          hold.stopped = true
+          return
+        }
+        if (hold) return await release(sessionID, { kind: "stopped", output: hold.output }, undefined, true)
         await handOver(sessionID)
         await flushDeferred()
       }
@@ -862,6 +980,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
        * cannot be found any more, the main agent's checks, which cover every changed project, do.
        */
       const onDeleted = async (sessionID: string) => {
+        lines.delete(sessionID)
+        outcomes.delete(sessionID)
+        background.delete(sessionID)
+        const hold = holds.get(sessionID)
+        if (hold?.checking) hold.stopped = true
+        else holds.delete(sessionID)
         const waiting = resumed.get(sessionID)
         if (waiting) {
           resumed.delete(sessionID)
@@ -876,8 +1000,20 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
       /** Holds a foreground subagent's answer until its checks pass, and says what happened. */
       const afterSubagent = async (event: ToolExecuted) => {
         const { sessionID: child, status } = event.result?.metadata ?? {}
-        // A subagent in the background is still working: its turn end checks its changes and tells its parent.
-        if (status !== "completed" || typeof child !== "string") return
+        if (typeof child !== "string") return
+        // A subagent in the background is still working: its checks end before it does, and a message tells its parent.
+        if (status !== "completed") {
+          background.add(child)
+          return
+        }
+        // The idle hook held it until its checks passed, so its answer is already the last one.
+        const held = outcomes.get(child)
+        if (held) {
+          outcomes.delete(child)
+          const note = heldAnswerNote(held)
+          if (note) event.result = withNote(event.result, note)
+          return
+        }
         if (!settling.has(child) && !written.get(child)?.size) return
         if (await isPaused(event.sessionID)) return
         const entry = settle(child)
@@ -1000,6 +1136,14 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         console.error("[interlint] could not read the pause marks in the user's prompts", error)
       }
 
+      // Holds a subagent before it goes idle until its checks pass. Without it, its turn end runs them.
+      let idleHook: { dispose(): Promise<void> } | undefined
+      try {
+        idleHook = await ctx.session.hook?.("experimental.idle", (event) => onIdle(event.sessionID))
+      } catch (error) {
+        console.error("[interlint] could not hold subagents until their checks pass", error)
+      }
+
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           const sessionID = event.data?.sessionID
@@ -1038,6 +1182,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         void afterTool.dispose()
         void modelHook?.dispose()
         void promptHook?.dispose()
+        void idleHook?.dispose()
         void permissionHook?.dispose()
       }
     },

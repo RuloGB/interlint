@@ -830,6 +830,210 @@ describe("OpenCode plugin with subagents", () => {
   })
 })
 
+/**
+ * The fake context with OpenCode's `experimental.idle` session hook. `idle` fires it for a session the way OpenCode does
+ * just before that session would go idle, and resolves when the plugin's hook returns, as OpenCode waits for it.
+ */
+function withIdleHook(fake: ReturnType<typeof fakeContext>) {
+  let onIdle: ((event: { sessionID: string; background: unknown[] }) => Promise<void> | void) | undefined
+  Object.assign(fake.ctx.session, {
+    hook: async (name: string, callback: typeof onIdle) => {
+      if (name === "experimental.idle") onIdle = callback
+      return { dispose: async () => {} }
+    },
+  })
+  const idle = async (sessionID: string) => {
+    await onIdle?.({ sessionID, background: [] })
+  }
+  return { ...fake, idle }
+}
+
+/** Fake checks whose task-end runs wait until `finish` gives their result, the oldest first. Edit checks pass. */
+function heldChecks() {
+  const runs: string[][] = []
+  const waiting: ((run: CheckRun) => void)[] = []
+  const run: RunChecks = async (_directory, _command, _timeoutMs, args = []) => {
+    if (args[2] === "edit") return PASSED
+    runs.push(args)
+    return new Promise<CheckRun>((resolve) => waiting.push(resolve))
+  }
+  const finish = (result: CheckRun) => waiting.shift()?.(result)
+  return { runs, run, finish }
+}
+
+const BACKGROUND_STARTED = { content: "started", metadata: { sessionID: "writer", status: "running" } }
+const WRITER_BLOCK = `Interlint: the task cannot end yet (attempt 1 of ${MAX_CONSECUTIVE_BLOCKS}).\n\nFix these failures yourself before you answer: asking how to proceed does not end the task. After ${MAX_CONSECUTIVE_BLOCKS} attempts they go to the agent that delegated this work.\n\n${VIOLATIONS.output}`
+
+describe("OpenCode plugin holding a subagent until its checks pass", () => {
+  it("runs a subagent's checks before it goes idle, and gives it the failures to fix in the same execution", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    await idle("writer")
+
+    expect(runs).toEqual([WRITER_RUN])
+    expect(sent).toEqual([{ sessionID: "writer", text: WRITER_BLOCK, resume: true }])
+
+    await idle("writer")
+
+    expect(runs).toEqual([WRITER_RUN, WRITER_RUN])
+    expect(sent).toHaveLength(1)
+  })
+
+  it("keeps the subagent from going idle while its checks run, and tells the user only after its turn ends", async () => {
+    const { runs, run, finish } = heldChecks()
+    const { ctx, sent, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    ctx.options.runningNoticeMs = 0
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    let idled = false
+    const going = idle("writer").then(() => (idled = true))
+    await settled()
+    expect(idled).toBe(false)
+
+    finish(PASSED_NAMED)
+    await going
+    // A message admitted before the subagent goes idle would make it answer again.
+    expect(sent).toEqual([])
+
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    expect(sent).toEqual([{ sessionID: "writer", text: PASS_LINE, resume: false }])
+    expect(runs).toEqual([WRITER_RUN])
+  })
+
+  it("tells the main agent in a foreground subagent's answer that it fixed its checks, without holding the answer", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    await idle("writer")
+    await idle("writer")
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
+
+    expect(answer.result?.content).toBe(
+      `${ANSWER}\n\nInterlint: the checks failed when the subagent first finished, so it fixed them before this answer. They pass now.`,
+    )
+    expect(runs).toEqual([WRITER_RUN, WRITER_RUN])
+  })
+
+  it("sends a background subagent's failures to its parent when it cannot fix them, then lets it go idle", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS, VIOLATIONS, VIOLATIONS, VIOLATIONS)
+    const { ctx, sent, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("subagent", {}, "completed", { sessionID: "main", result: BACKGROUND_STARTED })
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    for (let attempt = 0; attempt <= MAX_CONSECUTIVE_BLOCKS; attempt++) await idle("writer")
+
+    expect(runs).toHaveLength(MAX_CONSECUTIVE_BLOCKS + 1)
+    expect(sent.filter((message) => message.sessionID === "writer")).toHaveLength(MAX_CONSECUTIVE_BLOCKS)
+    expect(sent.at(-1)).toEqual({
+      sessionID: "main",
+      text: `Interlint: subagent session writer could not make the checks pass after ${MAX_CONSECUTIVE_BLOCKS} attempts, so they are yours to fix.\n\n${VIOLATIONS.output}`,
+      resume: true,
+    })
+
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    expect(sent.at(-1)).toEqual({
+      sessionID: "writer",
+      text: `✗ Interlint · checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts: architecture. They go to the agent that delegated this work.`,
+      resume: false,
+    })
+  })
+
+  it("hands a subagent's failures to its parent when it is interrupted while its checks run", async () => {
+    const { run, finish } = heldChecks()
+    const { ctx, sent, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("subagent", {}, "completed", { sessionID: "main", result: BACKGROUND_STARTED })
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    const going = idle("writer")
+    await settled()
+    emit("session.execution.interrupted", "writer")
+    await settled()
+    finish(VIOLATIONS)
+    await going
+    await settled()
+
+    expect(sent).toEqual([
+      {
+        sessionID: "main",
+        text: `Interlint: subagent session writer stopped before the checks passed, so they are yours to fix.\n\n${VIOLATIONS.output}`,
+        resume: true,
+      },
+    ])
+  })
+
+  it("makes the main agent's checks wait while a subagent is held, and runs them once it lets go", async () => {
+    const { runs, run, finish } = heldChecks()
+    const { ctx, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    const going = idle("writer")
+    await settled()
+    emit(SUCCEEDED, "main")
+    await settled()
+    expect(runs).toEqual([WRITER_RUN])
+
+    finish(PASSED)
+    await going
+    await settled()
+
+    expect(runs).toEqual([WRITER_RUN, TASK_END])
+  })
+
+  it("lets a subagent go idle when its checks throw, and stops making the main agent wait for it", async () => {
+    const runs: string[][] = []
+    const run: RunChecks = async (_directory, _command, _timeoutMs, args = []) => {
+      if (args[2] === "edit") return PASSED
+      runs.push(args)
+      if (args.includes("--file")) throw new Error("spawn failed")
+      return PASSED
+    }
+    const { ctx, done, emit, idle, afterTool } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    await expect(idle("writer")).resolves.toBeUndefined()
+    emit(SUCCEEDED, "main")
+    await settled()
+
+    expect(runs).toEqual([WRITER_RUN, TASK_END])
+  })
+
+  it("runs nothing when a main session, or a subagent that changed no file, would go idle", async () => {
+    const { runs, run } = checksGiving(VIOLATIONS)
+    const { ctx, sent, done, idle } = withIdleHook(fakeContext([], SESSIONS))
+    await createInterlintPlugin(run).setup(ctx)
+    await done
+
+    await idle("main")
+    await idle("reviewer")
+
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+  })
+})
+
 describe("changedFiles", () => {
   it("reads the path of edit and write", () => {
     expect(changedFiles("edit", { path: "src/main/java/shop/Order.java", oldString: "a", newString: "b" })).toEqual([
