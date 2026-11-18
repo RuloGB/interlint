@@ -1758,6 +1758,16 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(sent).toEqual([])
   })
 
+  it("waits for the task-end checks that run as long as they may, so the agent never starts while they run", async () => {
+    const { ctx, prompt } = pausable()
+    const timeouts: number[] = []
+    await createInterlintPlugin(async (_directory, _command, timeoutMs) => (timeouts.push(timeoutMs), PASSED)).setup(ctx)
+
+    await prompt("Add a discount to the order")
+
+    expect(timeouts).toEqual([DEFAULT_TIMEOUT_MS])
+  })
+
   it("starts no turn for a subagent's prompt or in a paused session", async () => {
     const { ctx, run, runs, prompt } = pausable([], SESSIONS)
     await createInterlintPlugin(run).setup(ctx)

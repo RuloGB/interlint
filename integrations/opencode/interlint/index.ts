@@ -1241,8 +1241,9 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
           if (parent !== undefined || !ours) return
           if (mark === undefined) {
             if (paused.has(event.sessionID)) return
-            // Awaited, so the CLI takes the user's changes before the agent's turn changes anything.
-            const run = await runChecks(directory, command, editTimeoutMs, TURN_START_ARGS, await contextOf(event.sessionID))
+            // Awaited, so the CLI takes the user's changes before the agent's turn changes anything. It waits for any
+            // task-end checks that run, as long as they may take, so the agent never starts while they are running.
+            const run = await runChecks(directory, command, timeoutMs, TURN_START_ARGS, await contextOf(event.sessionID))
             if (run.exitCode !== 0) console.error("[interlint] could not start the turn in the CLI:", run.output)
             return
           }
