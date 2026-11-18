@@ -1758,7 +1758,7 @@ describe("pausing Interlint in an OpenCode session", () => {
     expect(sent).toEqual([])
   })
 
-  it("waits for the task-end checks that run as long as they may, so the agent never starts while they run", async () => {
+  it("gives the turn start the task-end timeout, so it may wait for the task-end checks that run", async () => {
     const { ctx, prompt } = pausable()
     const timeouts: number[] = []
     await createInterlintPlugin(async (_directory, _command, timeoutMs) => (timeouts.push(timeoutMs), PASSED)).setup(ctx)
