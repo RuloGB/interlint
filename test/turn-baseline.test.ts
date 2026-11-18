@@ -244,10 +244,14 @@ describe("the turn step the OpenCode plugin runs", () => {
       turnStarted = true
       return result
     })
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    expect(turnStarted).toBe(false)
-    endChecks()
-    await checks
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      expect(turnStarted).toBe(false)
+    } finally {
+      // Released even when the expectation fails, so a failure is reported instead of a test that never ends.
+      endChecks()
+      await checks
+    }
 
     expect(await turn).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
