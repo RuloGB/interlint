@@ -206,7 +206,9 @@ function subagentResultLine(run: CheckRun, noticed: boolean): string | undefined
 
 /** What the user reads in a subagent's session when its checks still fail after its last attempt. */
 function subagentGaveUpLine(run: CheckRun): string {
-  return `${REPORT_MARK}Interlint · checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts: ${failedNames(run.output).join(", ")}. They go to the agent that delegated this work.`
+  const names = failedNames(run.output)
+  const which = names.length === 0 ? "" : `: ${names.join(", ")}`
+  return `${REPORT_MARK}Interlint · checks still fail after ${MAX_CONSECUTIVE_BLOCKS} attempts${which}. They go to the agent that delegated this work.`
 }
 
 /** The mark in a user's prompt: the last one when it holds both. None without a mark. The same as the CLI's. */
@@ -718,12 +720,21 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint) {
         }
       }
 
-      /** Shows the user a line in the session without resuming its agent. A line that cannot be sent is only logged. */
+      /**
+       * Shows the user a line in the session without resuming its agent. A line that cannot be sent is only logged,
+       * and one still sending after RUNNING_NOTICE_WAIT_MS is not waited for, so it never holds the subagent's answer.
+       */
       const tellUser = async (sessionID: string, text: string | undefined) => {
         if (text === undefined) return
-        await ctx.session
+        const sending = ctx.session
           .synthetic({ sessionID, text, description: label(text), resume: false })
           .catch((error) => console.error("[interlint]", error))
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const gaveUp = new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, RUNNING_NOTICE_WAIT_MS)
+          timer.unref?.()
+        })
+        await Promise.race([sending, gaveUp]).finally(() => clearTimeout(timer))
       }
 
       const tellParent = async (sessionID: string, settled: Settled) => {
