@@ -1,5 +1,13 @@
 import { resolve } from "node:path"
-import { afterEdit, type FeedbackDeps, mainStop, sessionStart, subagentStop, userPrompt } from "../../../application/feedback/agent-events.js"
+import {
+  afterEdit,
+  type FeedbackDeps,
+  mainStop,
+  sessionStart,
+  subagentStart,
+  subagentStop,
+  userPrompt,
+} from "../../../application/feedback/agent-events.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
@@ -51,6 +59,12 @@ export async function codexHook(args: string[], io: Io, deps: FeedbackDeps): Pro
     // Codex also starts it for each subagent, with the session's ID: the fingerprint is kept only once.
     if (event === "session-start") {
       sessionStart(projectDir, context, deps)
+      return CODEX_HOOK_EXIT.pass
+    }
+
+    // The subagent's stop then also checks what it changes without an edit tool, such as through a shell command.
+    if (event === "subagent-start") {
+      subagentStart(projectDir, input, deps)
       return CODEX_HOOK_EXIT.pass
     }
 

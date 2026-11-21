@@ -354,7 +354,7 @@ describe("protected files in Codex", () => {
     const { exitCode, stderr } = await codex("pre-edit", patch(ARCH_TEST))
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("codex hooks are session-start, user-prompt, post-edit, stop and subagent-stop")
+    expect(stderr).toContain("codex hooks are session-start, user-prompt, post-edit, stop, subagent-start and subagent-stop")
   })
 })
 

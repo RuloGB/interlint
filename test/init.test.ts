@@ -637,6 +637,7 @@ describe("interlint init --agent codex", () => {
       },
     ],
     Stop: [{ hooks: [{ type: "command", command: "interlint hook codex stop", timeout: 600, statusMessage: "Interlint: running checks" }] }],
+    SubagentStart: [{ hooks: [{ type: "command", command: "interlint hook codex subagent-start", timeout: 30 }] }],
     SubagentStop: [{ hooks: [{ type: "command", command: "interlint hook codex subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }] }],
   }
 
@@ -645,7 +646,7 @@ describe("interlint init --agent codex", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the session-start, user-prompt, post-edit, stop and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
+  it("writes the session-start, user-prompt, post-edit, stop, subagent-start and subagent-stop hooks to .codex/hooks.json, with time for Maven, and says to trust them", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "codex")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -675,6 +676,7 @@ describe("interlint init --agent codex", () => {
         Stop: [...team.hooks.Stop, ...INTERLINT_HOOKS.Stop],
         UserPromptSubmit: INTERLINT_HOOKS.UserPromptSubmit,
         PostToolUse: INTERLINT_HOOKS.PostToolUse,
+        SubagentStart: INTERLINT_HOOKS.SubagentStart,
         SubagentStop: INTERLINT_HOOKS.SubagentStop,
       },
     })

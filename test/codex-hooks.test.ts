@@ -350,6 +350,70 @@ describe("interlint hook codex subagent-stop", () => {
 
     expect(JSON.parse((await hook("subagent-stop", subagentStopInput("writer-2", true))).stdout).reason).toContain("(attempt 1 of 3)")
   })
+
+  /** A `SubagentStart` input, as Codex 0.149 gives it: the same session_id and agent_id as the subagent's stop. */
+  function subagentStartInput(agentId = "writer-1") {
+    return JSON.stringify({
+      session_id: "session-1",
+      transcript_path: null,
+      cwd: projectDir,
+      hook_event_name: "SubagentStart",
+      model: "gpt-6-codex-mini",
+      permission_mode: "default",
+      turn_id: "turn-1",
+      agent_id: agentId,
+      agent_type: "worker",
+    })
+  }
+
+  it("blocks a subagent that changed a file with a shell command, with the failures of only the projects it changed", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    expect(await hook("subagent-start", subagentStartInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    // A shell command writes the file: no post-edit hook runs.
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    const { exitCode, stdout } = await hook("subagent-stop", subagentStopInput())
+
+    expect(exitCode).toBe(0)
+    const { decision, reason } = JSON.parse(stdout)
+    expect(decision).toBe("block")
+    expect(reason).toContain("orders/checkstyle")
+    expect(reason).not.toContain("billing/checkstyle")
+  })
+
+  it("gives a subagent that wrote through a shell the same 3 attempts", async () => {
+    writeWorkspace({ orders: true, billing: false })
+    await hook("subagent-start", subagentStartInput())
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    const attempts = [await hook("subagent-stop", subagentStopInput())]
+    for (let index = 0; index < 3; index++) attempts.push(await hook("subagent-stop", subagentStopInput("writer-1", true)))
+
+    expect(attempts.map(({ stdout }) => (stdout === "" ? "end" : JSON.parse(stdout).decision ?? "end"))).toEqual(["block", "block", "block", "end"])
+  })
+
+  it("runs nothing when a subagent that changed no file, by any means, stops", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput())
+
+    expect(await hook("subagent-stop", subagentStopInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("does not check another subagent's shell changes made before it started", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput("writer-1"))
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+    await hook("subagent-start", subagentStartInput("reviewer-1"))
+
+    expect(await hook("subagent-stop", subagentStopInput("reviewer-1"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("checks only the files the edit tool changed for a subagent whose start it never saw, as with older hooks", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    expect(await hook("subagent-stop", subagentStopInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
 })
 
 describe("the metrics of the Codex hooks", () => {
@@ -441,7 +505,7 @@ describe("interlint hook codex", () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("codex hooks are session-start, user-prompt, post-edit, stop and subagent-stop")
+    expect(stderr).toContain("codex hooks are session-start, user-prompt, post-edit, stop, subagent-start and subagent-stop")
   })
 
   it("writes hooks that run interlint hook codex for each event", () => {
@@ -455,6 +519,7 @@ describe("interlint hook codex", () => {
       ],
     })
     expect(hooks.Stop[0].hooks[0].command).toBe("interlint hook codex stop")
+    expect(hooks.SubagentStart[0].hooks[0].command).toBe("interlint hook codex subagent-start")
     expect(hooks.SubagentStop[0].hooks[0].command).toBe("interlint hook codex subagent-stop")
   })
 })
