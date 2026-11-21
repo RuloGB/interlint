@@ -5,12 +5,14 @@ const ALL_HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "post-edit"
 export type HookEvent = (typeof ALL_HOOK_EVENTS)[number]
 
 /** The events of Claude Code's hook command. */
-export const CLAUDE_CODE_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter((event) => event !== "subagent-start")
+export const CLAUDE_CODE_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS
 
-/** The events of Codex's hook command: its hooks cannot ask the user, so it has no `pre-edit`. */
-export const CODEX_HOOK_EVENTS: readonly HookEvent[] = CLAUDE_CODE_HOOK_EVENTS.filter((event) => event !== "pre-edit")
+/** The events of Codex's hook command: its hooks cannot ask the user, so it has no `pre-edit`, nor `subagent-start`. */
+export const CODEX_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter(
+  (event) => event !== "pre-edit" && event !== "subagent-start",
+)
 
-/** The events of Copilot's hook command, the only one with `subagent-start`. */
+/** The events of Copilot's hook command. */
 export const COPILOT_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS
 
 /** The events as words, such as `session-start, post-edit, stop and subagent-stop`. */

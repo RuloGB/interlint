@@ -967,6 +967,6 @@ describe("interlint check for a subagent's shell changes, as the OpenCode plugin
   it("does not show the internal options in the usage", async () => {
     const usage = (await run("--help")).stdout
     expect(usage).not.toContain("since-start")
-    expect(usage).not.toContain("subagent-start")
+    expect(usage).not.toContain("--when subagent-start")
   })
 })

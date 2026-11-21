@@ -441,6 +441,58 @@ describe("interlint hook claude-code subagent-stop", () => {
 
     expect((await hook("subagent-stop", subagentStopInput(false, "writer-2"))).stderr).toMatch(/\(attempt 1 of 3\)/)
   })
+
+  /** A `SubagentStart` input, as Claude Code gives it: the same session and agent_id as the subagent's stop. */
+  function subagentStartInput(agentId = "writer-1") {
+    return JSON.stringify({ session_id: "session-1", cwd: projectDir, hook_event_name: "SubagentStart", agent_id: agentId, agent_type: "general-purpose" })
+  }
+
+  it("blocks a subagent that changed a file with a shell command, with the failures of only the projects it changed", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    expect(await hook("subagent-start", subagentStartInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    // A shell command writes the file: no post-edit hook runs.
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    const { exitCode, stderr } = await hook("subagent-stop", subagentStopInput(false))
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toContain("orders/checkstyle")
+    expect(stderr).not.toContain("billing/checkstyle")
+  })
+
+  it("gives a subagent that wrote through a shell the same 3 attempts", async () => {
+    writeWorkspace({ orders: true, billing: false })
+    await hook("subagent-start", subagentStartInput())
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    const attempts = [await hook("subagent-stop", subagentStopInput(false))]
+    for (let index = 0; index < 3; index++) attempts.push(await hook("subagent-stop", subagentStopInput(true)))
+
+    expect(attempts.map(({ exitCode }) => exitCode)).toEqual([2, 2, 2, 0])
+  })
+
+  it("runs nothing when a subagent that changed no file, by any means, stops", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput())
+
+    expect(await hook("subagent-stop", subagentStopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("does not check another subagent's shell changes made before it started", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput("writer-1"))
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+    await hook("subagent-start", subagentStartInput("reviewer-1"))
+
+    expect(await hook("subagent-stop", subagentStopInput(false, "reviewer-1"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("checks only the files the edit tools changed for a subagent whose start it never saw, as with older settings", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    expect(await hook("subagent-stop", subagentStopInput(false))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
 })
 
 describe("interlint hook claude-code run by GitHub Copilot", () => {

@@ -23,8 +23,8 @@ const USAGE = `Usage:
       Run the edit checks for the changed files
   interlint doctor [--cwd <dir>]
       Tell whether Interlint works in this project and on this machine, and what to fix
-  interlint hook claude-code|copilot|codex session-start|user-prompt|pre-edit|post-edit|stop|subagent-stop
-      Agent hook: reads the hook's JSON on stdin (codex has no pre-edit)
+  interlint hook claude-code|copilot|codex session-start|user-prompt|pre-edit|post-edit|stop|subagent-start|subagent-stop
+      Agent hook: reads the hook's JSON on stdin (codex has no pre-edit nor subagent-start)
   interlint metrics [--all] [--since <YYYY-MM-DD>] [--agent claude-code|codex|copilot|opencode] [--cwd <dir>]
       Sum up the metrics of the checks
   interlint metrics report [--out <path>] [--force] [--format md|html|pdf] [same options as metrics]
