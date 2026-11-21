@@ -106,10 +106,7 @@ export async function subagentStop(
 ): Promise<StopOutcome> {
   if (isPaused(request.sessionId, deps)) return { decision: { action: "end" }, notice: "", passed: "" }
   const snapshot = deps.subagentSnapshots.read(request)
-  const changedProjects = snapshot === undefined ? [] : changedSince(projectDir, snapshot, deps)
-  // The checks run for the projects that hold one of these: the files the subagent edited, and a marker for each
-  // project it changed by other means.
-  const files = [...new Set([...deps.subagentFiles.list(request), ...changedProjects.map(projectMarker)])]
+  const files = filesToCheck(projectDir, snapshot, deps.subagentFiles.list(request), deps)
   if (files.length === 0) return { decision: { action: "end" }, notice: "", passed: "" }
   const { report, notice, passed, failed } = await checkProject(
     projectDir,
@@ -122,6 +119,29 @@ export async function subagentStop(
     if (snapshot !== undefined) deps.subagentSnapshots.save(request, projectFingerprints(projectDir, deps))
   }
   return { decision, notice, passed }
+}
+
+/**
+ * The files a subagent's task-end checks run for: `edited`, the files it changed with an edit tool, relative to the
+ * project, and a marker for each project whose files changed, by any means, since its start was seen. Empty when it
+ * changed nothing, so nothing runs.
+ */
+export function subagentCheckFiles(projectDir: string, agent: AgentRef, edited: readonly string[], deps: FeedbackDeps): string[] {
+  return filesToCheck(projectDir, deps.subagentSnapshots.read(agent), edited, deps)
+}
+
+/**
+ * The checks run for the projects that hold one of these: the files the subagent edited, and a marker for each project
+ * it changed by other means since `snapshot`. None without a snapshot.
+ */
+function filesToCheck(
+  projectDir: string,
+  snapshot: Readonly<Record<string, string>> | undefined,
+  edited: readonly string[],
+  deps: FeedbackDeps,
+): string[] {
+  const changedProjects = snapshot === undefined ? [] : changedSince(projectDir, snapshot, deps)
+  return [...new Set([...edited, ...changedProjects.map(projectMarker)])]
 }
 
 /** The root project, among the keys of a snapshot: the directory of `interlint.yaml`. */

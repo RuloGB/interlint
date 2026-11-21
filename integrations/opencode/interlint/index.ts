@@ -13,8 +13,10 @@
  *   While one of its subagents has changes whose checks have not passed yet, it waits for that subagent first.
  *   OpenCode shows the turn as ended meanwhile, so checks that run longer than DEFAULT_RUNNING_NOTICE_MS tell the
  *   user in a message that they are running.
- * - Just before a subagent that changed files with an edit tool would go idle, the `experimental.idle` session hook
- *   (OpenCode 2.2.1 and later) runs the task-end checks of the projects holding those files. OpenCode waits for the
+ * - Just before a subagent that changed files would go idle, the `experimental.idle` session hook (OpenCode 2.2.1 and
+ *   later) runs the task-end checks of the projects it changed: those holding the files its edit tools changed, and
+ *   those whose files changed since its last prompt, such as through a shell command. Before each prompt of a
+ *   subagent, the `prompt` hook has the CLI keep each project's fingerprint for that. OpenCode waits for the
  *   hook, and input it admits runs in the same execution, so the subagent fixes the failures before it ends, up to
  *   MAX_CONSECUTIVE_BLOCKS times. Its answer, in the foreground or in the background, reaches the agent that
  *   delegated the work only then. Every message admitted to a session is input, even with `resume: false`, so what
@@ -113,6 +115,8 @@ const PAUSE_ADVICE = 'Write "interlint: pause" to pause Interlint in this sessio
 
 /** Keeps the protected files of the session in the agent's context as they are. */
 const SESSION_START_ARGS = ["check", "--when", "session-start"]
+/** Keeps each project's fingerprint before a subagent's prompt, so its checks also cover what it changes through a shell. */
+const SUBAGENT_START_ARGS = ["check", "--when", "subagent-start"]
 /** The permission OpenCode evaluates before the `edit`, `write` and `patch` tools change files. */
 const EDIT_PERMISSION = "edit"
 /** The built-in tools that change files. */
@@ -621,6 +625,12 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
       const started = new Map<string, Promise<void>>()
       /** The main sessions the user paused Interlint in (F26). */
       const paused = new Set<string>()
+      /**
+       * The subagents whose projects the CLI kept as they were before their last prompt: their checks also cover what
+       * they changed through a shell since then. A subagent missing here, such as with an older CLI, is checked only
+       * for the files its edit tools changed.
+       */
+      const snapshots = new Set<string>()
 
       const lookup = async (sessionID: string) => {
         const known = lookups.get(sessionID)
@@ -890,7 +900,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
         hold.checking = true
         try {
           const files = [...(written.get(sessionID) ?? [])]
-          const args = [...TASK_END_ARGS, ...files.flatMap((file) => ["--file", file])]
+          const since = snapshots.has(sessionID) ? ["--root-session", await rootOf(sessionID), "--since-start"] : []
+          const args = [...TASK_END_ARGS, ...since, ...files.flatMap((file) => ["--file", file])]
           return await runChecks(directory, command, timeoutMs, args, await contextOf(sessionID))
         } catch (error) {
           console.error("[interlint]", error)
@@ -939,7 +950,8 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
         try {
           if (settling.has(sessionID) || holds.get(sessionID)?.checking) return
           const { parent, ours } = await lookup(sessionID)
-          if (parent === undefined || !ours || !written.get(sessionID)?.size || (await isPaused(sessionID))) return
+          if (parent === undefined || !ours || (await isPaused(sessionID))) return
+          if (!written.get(sessionID)?.size && !snapshots.has(sessionID)) return
           const hold = holds.get(sessionID) ?? { attempts: 0, output: "", checking: false, stopped: false }
           holds.set(sessionID, hold)
           await holdUntilChecked(sessionID, hold)
@@ -1058,6 +1070,7 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
        */
       const onDeleted = async (sessionID: string) => {
         lines.delete(sessionID)
+        snapshots.delete(sessionID)
         outcomes.delete(sessionID)
         background.delete(sessionID)
         const hold = holds.get(sessionID)
@@ -1232,13 +1245,33 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
         return mark === "pause" ? PAUSED_MESSAGE : RESUMED_MESSAGE
       }
 
+      /**
+       * Before a subagent's prompt: the CLI keeps each project's fingerprint, so its checks before it goes idle also
+       * cover what it changes through a shell. Not for Interlint's own message to a subagent it holds or resumed: its
+       * checks still cover what it changed before. Awaited, so the subagent changes nothing before it.
+       */
+      const startSubagent = async (sessionID: string) => {
+        if (holds.has(sessionID) || settling.has(sessionID) || (await isPaused(sessionID))) return
+        // Without the fingerprints, the subagent's checks cover the files its edit tools change, as before.
+        snapshots.delete(sessionID)
+        try {
+          const args = [...SUBAGENT_START_ARGS, "--root-session", await rootOf(sessionID)]
+          const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(sessionID))
+          if (run.exitCode === 0) return void snapshots.add(sessionID)
+          console.error("[interlint] could not keep the projects before the subagent's prompt:", run.output)
+        } catch (error) {
+          console.error("[interlint] could not keep the projects before the subagent's prompt:", error)
+        }
+      }
+
       // Only a main session's prompt is the user's: a subagent's is written by the agent that started it.
       let promptHook: { dispose(): Promise<void> } | undefined
       try {
         promptHook = await ctx.session.hook?.("prompt", async (event) => {
-          const mark = pauseMark(event.prompt?.text)
           const { parent, ours } = await lookup(event.sessionID)
-          if (parent !== undefined || !ours) return
+          if (!ours) return
+          if (parent !== undefined) return await startSubagent(event.sessionID)
+          const mark = pauseMark(event.prompt?.text)
           if (mark === undefined) {
             if (paused.has(event.sessionID)) return
             // Awaited, so the CLI takes the user's changes before the agent's turn changes anything. It waits for any

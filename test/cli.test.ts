@@ -861,3 +861,112 @@ describe("interlint --version", () => {
     expect((await run("--help")).stdout).toContain("interlint --version")
   })
 })
+
+describe("interlint check for a subagent's shell changes, as the OpenCode plugin runs it", () => {
+  /** A project whose task-end check leaves `<name>.ran` behind and exits with `exitCode`. */
+  function writeProject(name: string, exitCode: number) {
+    mkdirSync(join(projectDir, name), { recursive: true })
+    writeFileSync(
+      join(projectDir, name, "check.mjs"),
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("../${name}.ran", "")\nconsole.log("[ERROR] ${name} broke a rule")\nprocess.exit(${exitCode})\n`,
+    )
+    return `  - name: ${name}/checkstyle\n    dir: ${name}\n    run: node check.mjs\n    report: maven\n    when: task-end\n`
+  }
+
+  const ran = (name: string) => existsSync(join(projectDir, `${name}.ran`))
+  const SUBAGENT = JSON.stringify({ agent: "opencode", session: "writer", subagent: true })
+  const START = ["check", "--when", "subagent-start", "--root-session", "main", "--agent-context"]
+  const STOP = ["check", "--when", "task-end", "--changed", "--root-session", "main", "--since-start", "--agent-context"]
+
+  async function runWithStdin(stdin: string, ...args: string[]) {
+    let stdout = ""
+    let stderr = ""
+    const exitCode = await main(args, {
+      cwd: projectDir,
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+      stdin: async () => stdin,
+    })
+    return { exitCode, stdout, stderr }
+  }
+
+  beforeEach(async () => {
+    writeFileSync(join(projectDir, "interlint.yaml"), `checks:\n${writeProject("orders", 1)}${writeProject("billing", 0)}`)
+    // The reference of every project, as a task end before the subagent sets it.
+    await run("check", "--when", "task-end", "--changed")
+  })
+
+  it("runs the checks of the project a subagent changed through a shell since it started, and fails with them", async () => {
+    expect(await runWithStdin(SUBAGENT, ...START)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}")
+
+    const stopped = await runWithStdin(SUBAGENT, ...STOP)
+
+    expect(stopped.exitCode).toBe(1)
+    expect(stopped.stdout).toContain("orders/checkstyle")
+    expect([ran("orders"), ran("billing")]).toEqual([true, false])
+  })
+
+  it("runs nothing for a subagent that changed nothing", async () => {
+    await runWithStdin(SUBAGENT, ...START)
+
+    expect(await runWithStdin(SUBAGENT, ...STOP)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect([ran("orders"), ran("billing")]).toEqual([false, false])
+  })
+
+  it("does not give a subagent the shell changes made before it started", async () => {
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}")
+    await runWithStdin(SUBAGENT, ...START)
+
+    expect(await runWithStdin(SUBAGENT, ...STOP)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect(ran("orders")).toBe(false)
+  })
+
+  /** What an edit tool does to billing: the plugin gives the file it wrote with `--file`. */
+  function editBilling() {
+    mkdirSync(join(projectDir, "billing", "src"), { recursive: true })
+    writeFileSync(join(projectDir, "billing", "src", "Invoice.java"), "class Invoice {}")
+  }
+
+  it("checks only the files given for a subagent whose start it never saw, as before", async () => {
+    editBilling()
+    expect((await runWithStdin(SUBAGENT, ...STOP, "--file", "billing/src/Invoice.java")).exitCode).toBe(0)
+    expect([ran("orders"), ran("billing")]).toEqual([false, true])
+
+    rmSync(join(projectDir, "billing.ran"))
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}")
+    expect(await runWithStdin(SUBAGENT, ...STOP)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    expect([ran("orders"), ran("billing")]).toEqual([false, false])
+  })
+
+  it("adds the projects changed through a shell to the files its edit tool changed", async () => {
+    await runWithStdin(SUBAGENT, ...START)
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}")
+    editBilling()
+
+    expect((await runWithStdin(SUBAGENT, ...STOP, "--file", "billing/src/Invoice.java")).exitCode).toBe(1)
+    expect([ran("orders"), ran("billing")]).toEqual([true, true])
+  })
+
+  it("rejects --since-start outside the task end, and a start without a session", async () => {
+    expect((await runWithStdin(SUBAGENT, "check", "--when", "edit", "--since-start", "--file", "a.java")).stderr).toContain(
+      "--since-start is only valid with --when task-end",
+    )
+    expect((await run("check", "--when", "subagent-start")).stderr).toContain("--when subagent-start needs the session in --agent-context")
+    expect((await run("check", "--when", "task-end", "--since-start")).stderr).toContain("--since-start needs the session in --agent-context")
+  })
+
+  it("rejects the options a subagent's start does not take", async () => {
+    for (const option of [["--file", "a.java"], ["--lines", "1"], ["--changed"], ["--since-start"], ["--asked"]]) {
+      const started = await runWithStdin(SUBAGENT, ...START, ...option)
+      expect(started.exitCode).toBe(2)
+      expect(started.stderr).toContain(`--when subagent-start does not take ${option[0]}`)
+    }
+  })
+
+  it("does not show the internal options in the usage", async () => {
+    const usage = (await run("--help")).stdout
+    expect(usage).not.toContain("since-start")
+    expect(usage).not.toContain("--when subagent-start")
+  })
+})

@@ -395,6 +395,7 @@ describe("interlint init --agent claude-code", () => {
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120, statusMessage: "Interlint: running checks" }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600, statusMessage: "Interlint: running checks" }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }
+  const SUBAGENT_START = { type: "command", command: "interlint hook claude-code subagent-start", timeout: 30 }
   const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
   const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const USER_PROMPT = { type: "command", command: "interlint hook claude-code user-prompt", timeout: 120 }
@@ -405,7 +406,7 @@ describe("interlint init --agent claude-code", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("adds the session-start, user-prompt, pre-edit, post-edit, stop and subagent-stop hooks to .claude/settings.json", async () => {
+  it("adds the session-start, user-prompt, pre-edit, post-edit, stop, subagent-start and subagent-stop hooks to .claude/settings.json", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "claude-code")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -416,6 +417,7 @@ describe("interlint init --agent claude-code", () => {
         PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
         PostToolUse: [{ matcher: "Edit|Write", hooks: [POST_EDIT] }],
         Stop: [{ hooks: [STOP] }],
+        SubagentStart: [{ hooks: [SUBAGENT_START] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       },
     })
@@ -445,6 +447,7 @@ describe("interlint init --agent claude-code", () => {
         SessionStart: [notify, { hooks: [SESSION_START] }],
         UserPromptSubmit: [{ hooks: [USER_PROMPT] }],
         PreToolUse: [{ matcher: "Edit|Write", hooks: [PRE_EDIT] }],
+        SubagentStart: [{ hooks: [SUBAGENT_START] }],
         SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       },
     })
@@ -463,7 +466,8 @@ describe("interlint init --agent claude-code", () => {
   })
 
   it("leaves a file that already has the hooks exactly as it is, formatting included", async () => {
-    const settings = `{\n    "hooks": {\n        "SessionStart": [{ "hooks": [${JSON.stringify(SESSION_START)}] }],\n        "PreToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(PRE_EDIT)}] }],\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }],\n        "UserPromptSubmit": [{ "hooks": [${JSON.stringify(USER_PROMPT)}] }]\n    }\n}\n`
+    const settings = `{\n    "hooks": {\n        "SessionStart": [{ "hooks": [${JSON.stringify(SESSION_START)}] }],\n        "PreToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(PRE_EDIT)}] }],\n        "Stop": [{ "hooks": [${JSON.stringify(STOP)}] }],\n        "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [${JSON.stringify(POST_EDIT)}] }],\n        "SubagentStart": [{ "hooks": [${JSON.stringify(SUBAGENT_START)}] }],
+        "SubagentStop": [{ "hooks": [${JSON.stringify(SUBAGENT_STOP)}] }],\n        "UserPromptSubmit": [{ "hooks": [${JSON.stringify(USER_PROMPT)}] }]\n    }\n}\n`
     writeFile(SETTINGS, settings)
 
     expect((await run("init", "--agent", "claude-code")).stdout).toContain("Unchanged:\n  .claude/settings.json\n")
@@ -493,6 +497,7 @@ describe("interlint init --agent claude-code", () => {
         { matcher: "Edit|Write", hooks: [POST_EDIT] },
       ],
       Stop: [{ hooks: [STOP] }],
+      SubagentStart: [{ hooks: [SUBAGENT_START] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       SessionStart: [{ hooks: [SESSION_START] }],
       UserPromptSubmit: [{ hooks: [USER_PROMPT] }],
@@ -726,6 +731,7 @@ describe("interlint init --agent claude-code with an older hook next to the curr
   const POST_EDIT = { type: "command", command: "interlint hook claude-code post-edit", timeout: 120, statusMessage: "Interlint: running checks" }
   const STOP = { type: "command", command: "interlint hook claude-code stop", timeout: 600, statusMessage: "Interlint: running checks" }
   const SUBAGENT_STOP = { type: "command", command: "interlint hook claude-code subagent-stop", timeout: 600, statusMessage: "Interlint: running checks" }
+  const SUBAGENT_START = { type: "command", command: "interlint hook claude-code subagent-start", timeout: 30 }
   const SESSION_START = { type: "command", command: "interlint hook claude-code session-start", timeout: 30 }
   const PRE_EDIT = { type: "command", command: "interlint hook claude-code pre-edit", timeout: 30 }
   const USER_PROMPT = { type: "command", command: "interlint hook claude-code user-prompt", timeout: 120 }
@@ -775,6 +781,7 @@ describe("interlint init --agent claude-code with an older hook next to the curr
         { matcher: "Edit|Write", hooks: [POST_EDIT] },
       ],
       Stop: [{ hooks: [STOP] }],
+      SubagentStart: [{ hooks: [SUBAGENT_START] }],
       SubagentStop: [{ hooks: [SUBAGENT_STOP] }],
       SessionStart: [{ hooks: [SESSION_START] }],
       UserPromptSubmit: [{ hooks: [USER_PROMPT] }],

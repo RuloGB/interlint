@@ -2,7 +2,15 @@ import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { type CheckProjectDeps, checkProject, startSession } from "../../../application/checking/check-project.js"
 import { protectedAmong } from "../../../application/checking/protected-files.js"
-import { type FeedbackDeps, pauseSession, resumeSession, userTurn } from "../../../application/feedback/agent-events.js"
+import {
+  type FeedbackDeps,
+  pauseSession,
+  resumeSession,
+  subagentCheckFiles,
+  subagentStart,
+  userTurn,
+} from "../../../application/feedback/agent-events.js"
+import type { AgentRef } from "../../../application/feedback/ports.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { EXIT, type Io, UsageError } from "./cli-io.js"
@@ -15,14 +23,24 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps, feed
   const projectDir = resolve(io.cwd, values.cwd ?? ".")
   if (when === "session-start" || when === "pre-edit") return await forPlugin(when, values, io, projectDir, deps)
   if (when === "pause" || when === "resume" || when === "turn-start") return await pauseForPlugin(when, values, io, projectDir, feedback)
+  if (when === "subagent-start") return await subagentForPlugin(values, io, projectDir, feedback)
   if (when !== "edit" && when !== "task-end") throw new UsageError(`--when must be edit or task-end (got "${when}")`)
   if (when === "edit" && files.length === 0) throw new UsageError("--when edit needs at least one --file <path>")
   if (when === "edit" && values.changed === true) throw new UsageError("--changed is only valid with --when task-end")
+  const sinceStart = values["since-start"] === true
+  if (when === "edit" && sinceStart) throw new UsageError("--since-start is only valid with --when task-end")
   const lines = parseLines(values.lines, files.length, when)
   const asked = values.asked === true
   const rootSession = values["root-session"]
 
   const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
+  // Files given but all outside the project hold no project, so nothing runs for them.
+  let taskEndFiles = files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined
+  if (sinceStart) {
+    taskEndFiles = subagentCheckFiles(projectDir, subagentOf(agent, rootSession, "--since-start"), taskEndFiles ?? [], feedback)
+    // A subagent that changed nothing, by any means, has nothing to check.
+    if (taskEndFiles.length === 0) return EXIT.passed
+  }
   const { report, notice, passed } =
     when === "edit"
       ? await checkProject(
@@ -41,8 +59,7 @@ export async function check(args: string[], io: Io, deps: CheckProjectDeps, feed
           projectDir,
           {
             when: "task-end",
-            // Files given but all outside the project hold no project, so nothing runs for them.
-            files: files.length > 0 ? projectFiles(io.cwd, projectDir, files) : undefined,
+            files: taskEndFiles,
             changedOnly: values.changed === true,
             agent,
             asked,
@@ -102,6 +119,33 @@ async function pauseForPlugin(
   else if (when === "resume") await resumeSession(projectDir, session, deps, agent)
   else await userTurn(projectDir, session, deps)
   return EXIT.passed
+}
+
+/**
+ * The start of a subagent that the OpenCode plugin runs before each prompt the subagent gets, internal and left out of
+ * the usage like `--agent-context`, which gives the subagent's session; `--root-session` gives its main session. The
+ * CLI keeps each project's fingerprint, so `--when task-end --since-start` also checks the projects the subagent
+ * changed through a shell. Writes nothing and exits 0.
+ */
+async function subagentForPlugin(
+  values: ReturnType<typeof parseCheckArgs>["values"],
+  io: Io,
+  projectDir: string,
+  deps: FeedbackDeps,
+): Promise<number> {
+  for (const option of ["file", "lines", "changed", "since-start", "asked"] as const) {
+    if (values[option] !== undefined) throw new UsageError(`--when subagent-start does not take --${option}`)
+  }
+  const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
+  subagentStart(projectDir, subagentOf(agent, values["root-session"], "--when subagent-start"), deps)
+  return EXIT.passed
+}
+
+/** The subagent of the agent's context: its own session, under its main session `rootSession` when given. */
+function subagentOf(agent: AgentContext | undefined, rootSession: string | undefined, option: string): AgentRef {
+  const session = agent?.session
+  if (session === undefined) throw new UsageError(`${option} needs the session in --agent-context`)
+  return { sessionId: rootSession ?? session, agentId: session }
 }
 
 /**
@@ -168,6 +212,7 @@ function parseCheckArgs(args: string[]) {
         "agent-context": { type: "boolean" },
         asked: { type: "boolean" },
         "root-session": { type: "string" },
+        "since-start": { type: "boolean" },
       },
       strict: true,
       allowPositionals: false,

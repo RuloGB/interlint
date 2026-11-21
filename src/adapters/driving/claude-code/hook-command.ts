@@ -5,6 +5,7 @@ import {
   type FeedbackDeps,
   mainStop,
   sessionStart,
+  subagentStart,
   subagentStop,
   userPrompt,
 } from "../../../application/feedback/agent-events.js"
@@ -76,6 +77,12 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
 
     if (event === "session-start") {
       sessionStart(projectDir, context(), deps)
+      return HOOK_EXIT.pass
+    }
+
+    // The subagent's stop then also checks what it changes without an edit tool, such as through a shell command.
+    if (event === "subagent-start") {
+      subagentStart(projectDir, input, deps)
       return HOOK_EXIT.pass
     }
 
