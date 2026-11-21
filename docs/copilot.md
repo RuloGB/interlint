@@ -1,6 +1,6 @@
 # GitHub Copilot
 
-Interlint works with GitHub Copilot through six hooks in the repository. Copilot CLI, the GitHub Copilot app and the Copilot agent in VS Code share one hook system, so one setup covers them.
+Interlint works with GitHub Copilot through seven hooks in the repository. Copilot CLI, the GitHub Copilot app and the Copilot agent in VS Code share one hook system, so one setup covers them.
 
 Copilot's hooks are in preview and may change. This page was tested on Windows, on a Copilot Free plan, with edits by the main agent and by a subagent, through `edit`, `create` and `apply_patch`:
 
@@ -38,6 +38,7 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this writes `.github
       }
     ],
     "agentStop": [{ "type": "command", "command": "interlint hook copilot stop", "timeoutSec": 600 }],
+    "subagentStart": [{ "type": "command", "command": "interlint hook copilot subagent-start", "timeoutSec": 30 }],
     "subagentStop": [{ "type": "command", "command": "interlint hook copilot subagent-stop", "timeoutSec": 600 }]
   }
 }
@@ -63,7 +64,8 @@ Copilot Business and Enterprise can turn hooks off for an organization. Then Int
 - **Before a tool changes a protected file,** `pre-edit` makes Copilot ask you whether to allow it, with a message that names the file. In autopilot and in the Copilot cloud agent nobody can answer, so Copilot denies the edit. An edit you allow becomes the new reference for that file.
 - **After a tool changes a file** (`edit`, `create`, `str_replace_editor` or `apply_patch`; a `str_replace_editor` that only views a file runs nothing), `post-edit` runs the `edit` checks for that file. Copilot adds the failures to the tool's result, so the agent reads them right after the edit. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines. The hook counts the lines each `edit` adds or changes, every line of a `create`, and the added lines of a patch.
 - **When the agent finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, the agent cannot stop: Copilot gives it the failures as its next prompt. The message tells it to fix them even if you asked it to change nothing else: asking you whether to fix them does not end the task. A protected file changed without your approval, by any means, blocks it too. After 3 blocks in a row it lets the task end; it does not block again until the next turn. Copilot itself stops after 8 blocks in a row.
-- **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed. A subagent that changed no file runs nothing. If a check fails, the subagent cannot stop and gets the failures. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
+- **When a subagent starts,** `subagent-start` keeps a fingerprint of each project's files, so its stop can tell what it changed by any means, such as a shell command.
+- **When a subagent finishes,** `subagent-stop` runs the checks of the projects holding the files that subagent changed with an edit tool, and of the projects whose files changed since it started, such as through a shell command. A subagent that changed no file runs nothing. The subagent waits until the checks end, whether they pass or fail, and only then does the main agent get its answer. If a check fails, the subagent cannot stop and gets the failures. After 3 blocks in a row it lets the subagent stop, and the main agent's `stop` gets the failures it could not fix.
 
 Copilot has no way for a hook to show you a message. When the checks pass, the hooks answer nothing. When the task ends after 3 blocks, the failures, the checks that passed and any notice go to stderr, which Copilot keeps in its log. A notice for the agent, such as a [FreezingArchRule store frozen from broken classes](usage.md#freezingarchrule-store-frozen-from-broken-classes), comes after the failures when a stop blocks.
 
@@ -82,7 +84,7 @@ Copilot also runs the hooks in `.claude/settings.json`. There they could not blo
 
 ## `interlint hook copilot`
 
-`interlint hook copilot session-start|user-prompt|pre-edit|post-edit|stop|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`COPILOT_PROJECT_DIR`, or the input's `cwd`). It always exits 0 when it ran, as Copilot reads a hook's answer only then:
+`interlint hook copilot session-start|user-prompt|pre-edit|post-edit|stop|subagent-start|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`COPILOT_PROJECT_DIR`, or the input's `cwd`). It always exits 0 when it ran, as Copilot reads a hook's answer only then:
 
 | Exit code | Meaning |
 |---|---|

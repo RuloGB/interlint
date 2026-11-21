@@ -12,7 +12,15 @@ import type { AgentContext } from "../../../domain/metric.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, failedLine, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import {
+  CLAUDE_CODE_HOOK_EVENTS,
+  editNote,
+  failedLine,
+  hookEventNames,
+  isHookEvent,
+  withNotice,
+  withPassed,
+} from "../hooks/hook-text.js"
 import { type HookInput, parseHookInput } from "./hook-input.js"
 
 /** Exit codes as Claude Code reads them: 2 blocks and sends stderr to Claude, any other non-zero code is only shown to the user. */
@@ -51,8 +59,8 @@ export async function hook(args: string[], io: Io, deps: FeedbackDeps): Promise<
   try {
     const [agent, event, ...extra] = args
     if (agent !== "claude-code") throw new UsageError(`hook needs the agent claude-code, copilot or codex (got "${agent ?? ""}")`)
-    if (!isHookEvent(event) || extra.length > 0) {
-      throw new UsageError(`claude-code hooks are ${hookEventNames()} (got "${args.slice(1).join(" ")}")`)
+    if (!isHookEvent(event, CLAUDE_CODE_HOOK_EVENTS) || extra.length > 0) {
+      throw new UsageError(`claude-code hooks are ${hookEventNames(CLAUDE_CODE_HOOK_EVENTS)} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseHookInput(io.stdin ? await io.stdin() : "")
     // Copilot also runs the hooks in .claude/settings.json, where it can neither block nor give the edited file: its

@@ -25,7 +25,7 @@ import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { findsCommand, runCommand } from "./adapters/driven/process/command-runner.js"
 import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
-import { fileSessionPauses, fileStopCounter, fileSubagentFiles } from "./adapters/driven/state/agent-state.js"
+import { fileSessionPauses, fileStopCounter, fileSubagentFiles, fileSubagentSnapshots } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
 import { headlessPdf } from "./adapters/driven/browser/headless-pdf.js"
 import { fileMetrics, fileMetricsSource, fileSessionMetrics } from "./adapters/driven/state/file-metrics.js"
@@ -77,6 +77,7 @@ const DEPS: CliDeps = {
   feedback: {
     checking,
     subagentFiles: fileSubagentFiles,
+    subagentSnapshots: fileSubagentSnapshots,
     stops: fileStopCounter,
     transcriptModel,
     pauses: fileSessionPauses,

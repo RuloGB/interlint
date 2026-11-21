@@ -5,6 +5,7 @@ import {
   type FeedbackDeps,
   mainStop,
   sessionStart,
+  subagentStart,
   subagentStop,
   userPrompt,
 } from "../../../application/feedback/agent-events.js"
@@ -12,7 +13,7 @@ import type { AgentContext } from "../../../domain/metric.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
-import { editNote, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
+import { COPILOT_HOOK_EVENTS, editNote, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type CopilotHookInput, parseCopilotHookInput } from "./hook-input.js"
 
 /**
@@ -46,8 +47,8 @@ function answer(io: Io, output: Record<string, string>): void {
 export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): Promise<number> {
   try {
     const [, event, ...extra] = args
-    if (!isHookEvent(event) || extra.length > 0) {
-      throw new UsageError(`copilot hooks are ${hookEventNames()} (got "${args.slice(1).join(" ")}")`)
+    if (!isHookEvent(event, COPILOT_HOOK_EVENTS) || extra.length > 0) {
+      throw new UsageError(`copilot hooks are ${hookEventNames(COPILOT_HOOK_EVENTS)} (got "${args.slice(1).join(" ")}")`)
     }
     const input = parseCopilotHookInput(io.stdin ? await io.stdin() : "")
     const projectDir = resolve(io.cwd, process.env.COPILOT_PROJECT_DIR || input.cwd || ".")
@@ -55,6 +56,12 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
 
     if (event === "session-start") {
       sessionStart(projectDir, context(), deps)
+      return COPILOT_HOOK_EXIT.pass
+    }
+
+    // The subagent's stop then also checks what it changes without an edit tool, such as through a shell command.
+    if (event === "subagent-start") {
+      subagentStart(projectDir, input, deps)
       return COPILOT_HOOK_EXIT.pass
     }
 

@@ -20,6 +20,17 @@ export interface SubagentFiles {
 }
 
 /**
+ * Remembers the fingerprint of each project's files when a subagent started, by the project's `dir` or `.` for the
+ * root, so its stop can tell the projects it changed by any means, such as a shell command. Each hook run is its own
+ * process, so the store outlives it.
+ */
+export interface SubagentSnapshots {
+  save(agent: AgentRef, fingerprints: Readonly<Record<string, string>>): void
+  /** None for a subagent whose start was not seen, such as with hooks written by an older Interlint. */
+  read(agent: AgentRef): Readonly<Record<string, string>> | undefined
+}
+
+/**
  * The model of the last answer in a Claude Code session's transcript, or in the transcript of its subagent `agentId`.
  * None when it cannot be read.
  */

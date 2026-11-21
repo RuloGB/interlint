@@ -567,6 +567,7 @@ describe("interlint init --agent copilot", () => {
         },
       ],
       agentStop: [{ type: "command", command: "interlint hook copilot stop", timeoutSec: 600 }],
+      subagentStart: [{ type: "command", command: "interlint hook copilot subagent-start", timeoutSec: 30 }],
       subagentStop: [{ type: "command", command: "interlint hook copilot subagent-stop", timeoutSec: 600 }],
     },
   }
@@ -576,7 +577,7 @@ describe("interlint init --agent copilot", () => {
     archTest("src/test/java/com/acme/ArchitectureRulesTest.java")
   })
 
-  it("writes the session-start, user-prompt, pre-edit, post-edit, stop and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
+  it("writes the session-start, user-prompt, pre-edit, post-edit, stop, subagent-start and subagent-stop hooks to .github/hooks/interlint.json, with time for Maven", async () => {
     const { exitCode, stdout, stderr } = await run("init", "--agent", "copilot")
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
