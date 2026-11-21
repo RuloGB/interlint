@@ -18,12 +18,21 @@ import {
 } from "../checking/check-project.js"
 import { ConfigError } from "../checking/ports.js"
 import { protectedAmong } from "../checking/protected-files.js"
-import type { AgentRef, SessionMetrics, SessionPauses, StopCounter, SubagentFiles, TranscriptModel } from "./ports.js"
+import type {
+  AgentRef,
+  SessionMetrics,
+  SessionPauses,
+  StopCounter,
+  SubagentFiles,
+  SubagentSnapshots,
+  TranscriptModel,
+} from "./ports.js"
 import { decideStop, type StopDecision, type StopRequest } from "./stop-policy.js"
 
 export interface FeedbackDeps {
   checking: CheckProjectDeps
   subagentFiles: SubagentFiles
+  subagentSnapshots: SubagentSnapshots
   stops: StopCounter
   transcriptModel: TranscriptModel
   pauses: SessionPauses
@@ -74,10 +83,20 @@ export async function afterEdit(
 }
 
 /**
- * When a subagent stops: the task-end checks of the projects holding the files it changed. One that changed no file,
- * such as a read-only reviewer, has nothing of its own to fix. Unless the stop is blocked, its files are forgotten:
- * they passed, or after the last attempt the main agent's stop, which checks every changed project, gets them.
- * In a session the user paused Interlint in, it ends without a check.
+ * When a subagent starts: keeps the fingerprint of each project's files, so its stop also checks the projects it
+ * changed without an edit tool, such as through a shell command. Nothing for the main agent, or in a paused session.
+ */
+export function subagentStart(projectDir: string, agent: AgentRef, deps: FeedbackDeps): void {
+  if (agent.agentId === undefined || isPaused(agent.sessionId, deps)) return
+  deps.subagentSnapshots.save(agent, projectFingerprints(projectDir, deps))
+}
+
+/**
+ * When a subagent stops: the task-end checks of the projects holding the files it changed with an edit tool, and of
+ * the projects whose files changed, by any means, since it started. One that changed no file, such as a read-only
+ * reviewer, has nothing of its own to fix. Unless the stop is blocked, its files are forgotten and the fingerprints
+ * taken again for its next turn: they passed, or after the last attempt the main agent's stop, which checks every
+ * changed project, gets them. In a session the user paused Interlint in, it ends without a check.
  */
 export async function subagentStop(
   projectDir: string,
@@ -86,7 +105,11 @@ export async function subagentStop(
   context?: AgentContext,
 ): Promise<StopOutcome> {
   if (isPaused(request.sessionId, deps)) return { decision: { action: "end" }, notice: "", passed: "" }
-  const files = deps.subagentFiles.list(request)
+  const snapshot = deps.subagentSnapshots.read(request)
+  const changedProjects = snapshot === undefined ? [] : changedSince(projectDir, snapshot, deps)
+  // The checks run for the projects that hold one of these: the files the subagent edited, and a marker for each
+  // project it changed by other means.
+  const files = [...new Set([...deps.subagentFiles.list(request), ...changedProjects.map(projectMarker)])]
   if (files.length === 0) return { decision: { action: "end" }, notice: "", passed: "" }
   const { report, notice, passed, failed } = await checkProject(
     projectDir,
@@ -94,8 +117,44 @@ export async function subagentStop(
     deps.checking,
   )
   const decision = decideStop(request, report, failed, deps.stops)
-  if (decision.action !== "block") deps.subagentFiles.forget(request)
+  if (decision.action !== "block") {
+    deps.subagentFiles.forget(request)
+    if (snapshot !== undefined) deps.subagentSnapshots.save(request, projectFingerprints(projectDir, deps))
+  }
   return { decision, notice, passed }
+}
+
+/** The root project, among the keys of a snapshot: the directory of `interlint.yaml`. */
+const ROOT_PROJECT = "."
+
+/**
+ * The fingerprint of each project that has checks, by its `dir` or `.` for the root. A project seen for the first
+ * time gets its files as they are as its reference, so a change made after this counts as one.
+ */
+function projectFingerprints(projectDir: string, deps: FeedbackDeps): Record<string, string> {
+  const dirs = new Set(deps.checking.loadConfig(projectDir).checks.map((check) => check.dir ?? ROOT_PROJECT))
+  const fingerprints: Record<string, string> = {}
+  for (const dir of dirs) {
+    const path = dir === ROOT_PROJECT ? projectDir : `${projectDir}/${dir}`
+    if (deps.checking.hasDirectory(path)) fingerprints[dir] = deps.checking.changes.lookup(path).fingerprint
+  }
+  return fingerprints
+}
+
+/** The projects of the snapshot whose files changed since it was taken, by their `dir` or `.` for the root. */
+function changedSince(projectDir: string, snapshot: Readonly<Record<string, string>>, deps: FeedbackDeps): string[] {
+  const now = projectFingerprints(projectDir, deps)
+  return Object.entries(snapshot)
+    .filter(([dir, fingerprint]) => now[dir] !== undefined && now[dir] !== fingerprint)
+    .map(([dir]) => dir)
+}
+
+/**
+ * A path that the task-end checks place in the project of `dir`, `.` for the root, and in no other: they run for the
+ * projects that hold one of their files. It names no real file, since the checks only read which project it is in.
+ */
+function projectMarker(dir: string): string {
+  return dir === ROOT_PROJECT ? "." : `${dir}/.`
 }
 
 /**

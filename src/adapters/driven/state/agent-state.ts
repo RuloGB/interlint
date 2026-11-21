@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto"
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import type { AgentRef, SessionPauses, StopCounter, SubagentFiles } from "../../../application/feedback/ports.js"
+import type {
+  AgentRef,
+  SessionPauses,
+  StopCounter,
+  SubagentFiles,
+  SubagentSnapshots,
+} from "../../../application/feedback/ports.js"
 import { userStateDir, writeWhole } from "./user-state.js"
 
 /** A session paused this long ago, never resumed, leaves its record behind no more: it most likely ended long ago. */
@@ -37,6 +43,34 @@ export const fileSubagentFiles: SubagentFiles = {
   },
   forget(agent) {
     if (agent.agentId !== undefined) rmSync(stateFile("claude-code-subagents", agent), { force: true })
+  },
+}
+
+/**
+ * The fingerprints of the projects when each subagent started, as JSON in a file per session and subagent. A file it
+ * cannot read counts as no start seen: the subagent's stop then checks only what its edit tools changed.
+ */
+export const fileSubagentSnapshots: SubagentSnapshots = {
+  save(agent, fingerprints) {
+    if (agent.agentId === undefined) return
+    const file = stateFile("subagent-snapshots", agent)
+    if (writeWhole(file, JSON.stringify(fingerprints))) {
+      try {
+        forgetStaleRecords(dirname(file))
+      } catch {
+        // The fingerprints are kept; only the cleanup is lost.
+      }
+    }
+  },
+  read(agent) {
+    if (agent.agentId === undefined) return undefined
+    try {
+      const fingerprints: unknown = JSON.parse(readFileSync(stateFile("subagent-snapshots", agent), "utf8"))
+      if (typeof fingerprints !== "object" || fingerprints === null || Array.isArray(fingerprints)) return undefined
+      return Object.fromEntries(Object.entries(fingerprints).filter(([, value]) => typeof value === "string"))
+    } catch {
+      return undefined
+    }
   },
 }
 
@@ -105,7 +139,10 @@ export const fileStopCounter: StopCounter = {
 }
 
 /** A state file of the session, or of one of its subagents. */
-function stateFile(kind: "claude-code-stop" | "claude-code-subagents" | "paused-sessions", { sessionId, agentId }: AgentRef): string {
+function stateFile(
+  kind: "claude-code-stop" | "claude-code-subagents" | "subagent-snapshots" | "paused-sessions",
+  { sessionId, agentId }: AgentRef,
+): string {
   // Hashed, because the IDs come from the hook input and go into a path. The main agent keeps its old name.
   const key = agentId === undefined ? sessionId : `${sessionId}\0${agentId}`
   const name = createHash("sha256").update(key).digest("hex").slice(0, 32)

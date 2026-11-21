@@ -357,6 +357,70 @@ describe("interlint hook copilot subagent-stop", () => {
 
     expect(JSON.parse((await hook("subagent-stop", subagentStopInput("writer-2"))).stdout).reason).toContain("(attempt 1 of 3)")
   })
+
+  /** A `subagentStart` input, as Copilot gives it: the session in `sessionId` and `parentAgentId`. */
+  function subagentStartInput(agentId = "writer-1") {
+    return JSON.stringify({
+      sessionId: "session-1",
+      timestamp: 1794468825000,
+      cwd: projectDir,
+      transcriptPath: join(tempDir, "events.jsonl"),
+      agentName: "general-purpose",
+      agentId,
+      agentType: "general-purpose",
+      parentAgentId: "session-1",
+    })
+  }
+
+  it("blocks a subagent that changed a file with a shell command, with the failures of only the projects it changed", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    expect(await hook("subagent-start", subagentStartInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    // A shell command writes the file: no post-edit hook runs.
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+
+    const { exitCode, stdout } = await hook("subagent-stop", subagentStopInput())
+
+    expect(exitCode).toBe(0)
+    const { decision, reason } = JSON.parse(stdout)
+    expect(decision).toBe("block")
+    expect(reason).toContain("orders/checkstyle")
+    expect(reason).not.toContain("billing/checkstyle")
+  })
+
+  it("runs nothing when a subagent that changed no file, by any means, stops", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput())
+
+    expect(await hook("subagent-stop", subagentStopInput())).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
+
+  it("checks the shell changes of a subagent's next turn, after its checks passed", async () => {
+    writeWorkspace({ orders: false, billing: false })
+    // Both checks fail once `failing` exists, a file outside both projects, so creating it changes neither.
+    for (const name of ["orders", "billing"]) {
+      writeFileSync(join(projectDir, name, "check.mjs"), `import { existsSync } from "node:fs"\nprocess.exit(existsSync("../failing") ? 1 : 0)\n`)
+    }
+    await hook("subagent-start", subagentStartInput())
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+    expect((await hook("subagent-stop", subagentStopInput())).stdout).toBe("")
+
+    // Copilot sends the subagent another message, with no subagentStart, and its shell command changes orders only.
+    writeFileSync(join(projectDir, "failing"), "")
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order { int id; }\n")
+    const { stdout } = await hook("subagent-stop", subagentStopInput())
+
+    expect(JSON.parse(stdout).reason).toContain("orders/checkstyle")
+    expect(JSON.parse(stdout).reason).not.toContain("billing/checkstyle")
+  })
+
+  it("does not check another subagent's shell changes made before it started", async () => {
+    writeWorkspace({ orders: true, billing: true })
+    await hook("subagent-start", subagentStartInput("writer-1"))
+    writeFileSync(join(projectDir, "orders", "Order.java"), "class Order {}\n")
+    await hook("subagent-start", subagentStartInput("reviewer-1"))
+
+    expect(await hook("subagent-stop", subagentStopInput("reviewer-1"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  })
 })
 
 describe("the metrics of the Copilot hooks", () => {
@@ -447,6 +511,6 @@ describe("interlint hook copilot", () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("copilot hooks are session-start, user-prompt, pre-edit, post-edit, stop and subagent-stop")
+    expect(stderr).toContain("copilot hooks are session-start, user-prompt, pre-edit, post-edit, stop, subagent-start and subagent-stop")
   })
 })

@@ -1,18 +1,25 @@
 /** The texts the agent hooks give, the same for every agent that runs them. */
 
-/** The events the agent hook commands take. Codex takes all but `pre-edit`: its hooks cannot ask the user. */
-export const HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "post-edit", "stop", "subagent-stop"] as const
-export type HookEvent = (typeof HOOK_EVENTS)[number]
+/** Every event an agent hook command can take. */
+const ALL_HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "post-edit", "stop", "subagent-start", "subagent-stop"] as const
+export type HookEvent = (typeof ALL_HOOK_EVENTS)[number]
 
-/** The events of Codex's hook command. */
-export const CODEX_HOOK_EVENTS: readonly HookEvent[] = HOOK_EVENTS.filter((event) => event !== "pre-edit")
+/** The events of Claude Code's hook command. */
+export const CLAUDE_CODE_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter((event) => event !== "subagent-start")
+
+/** The events of Codex's hook command: its hooks cannot ask the user, so it has no `pre-edit`. */
+export const CODEX_HOOK_EVENTS: readonly HookEvent[] = CLAUDE_CODE_HOOK_EVENTS.filter((event) => event !== "pre-edit")
+
+/** The events of Copilot's hook command, the only one with `subagent-start`. */
+export const COPILOT_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS
 
 /** The events as words, such as `session-start, post-edit, stop and subagent-stop`. */
-export function hookEventNames(events: readonly HookEvent[] = HOOK_EVENTS): string {
+export function hookEventNames(events: readonly HookEvent[]): string {
   return `${events.slice(0, -1).join(", ")} and ${events.at(-1)}`
 }
 
-export function isHookEvent(event: string | undefined, events: readonly HookEvent[] = HOOK_EVENTS): event is HookEvent {
+/** Whether `event` is one of `events`, the events of one agent's hook command. */
+export function isHookEvent(event: string | undefined, events: readonly HookEvent[]): event is HookEvent {
   return (events as readonly (string | undefined)[]).includes(event)
 }
 
