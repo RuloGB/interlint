@@ -1156,6 +1156,117 @@ describe("OpenCode plugin holding a subagent until its checks pass", () => {
   })
 })
 
+/**
+ * The fake context with the `prompt` and `experimental.idle` session hooks, and fake checks that record every run
+ * of the CLI. The subagent's start gives `start`; its task-end checks give `taskEnd` in turn, then pass.
+ */
+function withSubagentHooks(start: CheckRun, ...taskEnd: CheckRun[]) {
+  const fake = fakeContext([], SESSIONS)
+  const runs: { args: string[]; session: string | undefined }[] = []
+  let onIdle: ((event: { sessionID: string; background: unknown[] }) => Promise<void> | void) | undefined
+  let onPrompt: ((event: { sessionID: string; prompt?: { text?: unknown } }) => Promise<void> | void) | undefined
+  Object.assign(fake.ctx.session, {
+    hook: async (name: string, callback: unknown) => {
+      if (name === "experimental.idle") onIdle = callback as typeof onIdle
+      if (name === "prompt") onPrompt = callback as typeof onPrompt
+      return { dispose: async () => {} }
+    },
+  })
+  const run: RunChecks = async (_directory, _command, _timeoutMs, args = [], context) => {
+    if (args[2] === "edit" || args[2] === "turn-start") return PASSED
+    runs.push({ args, session: context?.session })
+    if (args[2] === "subagent-start") return start
+    return taskEnd.shift() ?? PASSED
+  }
+  const prompt = async (sessionID: string) => {
+    await onPrompt?.({ sessionID, prompt: { text: "Add a line to Order.java" } })
+  }
+  const idle = async (sessionID: string) => {
+    await onIdle?.({ sessionID, background: [] })
+  }
+  return { ...fake, runs, run, prompt, idle }
+}
+
+const SUBAGENT_START = ["check", "--when", "subagent-start", "--root-session", "main"]
+const SINCE_START = [...TASK_END, "--root-session", "main", "--since-start"]
+
+describe("OpenCode plugin holding a subagent that writes through a shell", () => {
+  it("keeps the projects as they are before each prompt of a subagent, and none for the main agent", async () => {
+    const { ctx, runs, run, prompt } = withSubagentHooks(PASSED)
+    await createInterlintPlugin(run).setup(ctx)
+
+    await prompt("main")
+    await prompt("writer")
+
+    expect(runs).toEqual([{ args: SUBAGENT_START, session: "writer" }])
+  })
+
+  it("checks what a subagent changed since its prompt before it goes idle, and gives it the failures to fix", async () => {
+    const { ctx, sent, runs, run, prompt, idle } = withSubagentHooks(PASSED, VIOLATIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("writer")
+
+    await idle("writer")
+
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START, SINCE_START])
+    expect(sent).toEqual([{ sessionID: "writer", text: WRITER_BLOCK, resume: true }])
+
+    // Interlint's own message keeps the projects as they were, so the check still covers the change it made before.
+    await prompt("writer")
+    await idle("writer")
+
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START, SINCE_START, SINCE_START])
+    expect(sent).toHaveLength(1)
+  })
+
+  it("gives a subagent that wrote through a shell the same number of attempts as one that used an edit tool", async () => {
+    const { ctx, sent, run, prompt, idle } = withSubagentHooks(PASSED, VIOLATIONS, VIOLATIONS, VIOLATIONS, VIOLATIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("writer")
+
+    for (let attempt = 0; attempt <= MAX_CONSECUTIVE_BLOCKS; attempt++) await idle("writer")
+
+    expect(sent.filter(({ resume }) => resume)).toHaveLength(MAX_CONSECUTIVE_BLOCKS)
+  })
+
+  it("adds the files the subagent's edit tool changed", async () => {
+    const { ctx, runs, run, prompt, idle, afterTool } = withSubagentHooks(PASSED)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("writer")
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+
+    await idle("writer")
+
+    expect(runs.at(-1)?.args).toEqual([...SINCE_START, "--file", WRITER_FILE])
+  })
+
+  it("tells nobody anything when the CLI finds nothing the subagent changed", async () => {
+    const { ctx, sent, run, prompt, idle, emit } = withSubagentHooks(PASSED)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("writer")
+
+    await idle("writer")
+    emit(SUCCEEDED, "writer")
+    await settled()
+
+    expect(sent).toEqual([])
+  })
+
+  it("checks only what the edit tool changed when the CLI cannot keep the projects, as an older one", async () => {
+    const usage: CheckRun = { exitCode: 2, output: "interlint: --when must be edit or task-end\n" }
+    const { ctx, runs, run, prompt, idle, afterTool } = withSubagentHooks(usage)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("writer")
+
+    await idle("writer")
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START])
+
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    await idle("writer")
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START, WRITER_RUN])
+  })
+})
+
 describe("changedFiles", () => {
   it("reads the path of edit and write", () => {
     expect(changedFiles("edit", { path: "src/main/java/shop/Order.java", oldString: "a", newString: "b" })).toEqual([
@@ -1732,8 +1843,20 @@ describe("pausing Interlint in an OpenCode session", () => {
     await settled()
     await settled()
 
-    expect(runs.map(({ args }) => args)).toEqual([TASK_END])
+    // The subagent's prompt only keeps the projects as they are, for its own checks.
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START, TASK_END])
     expect(sent).toEqual([expect.objectContaining({ sessionID: "main", resume: true })])
+  })
+
+  it("does not keep the projects before a subagent's prompt while paused", async () => {
+    const { ctx, run, runs, prompt } = pausable([], SESSIONS)
+    await createInterlintPlugin(run).setup(ctx)
+    await prompt("interlint: pause")
+    runs.length = 0
+
+    await prompt("Add a line to Order.java", "writer")
+
+    expect(runs).toEqual([])
   })
 
   it("pauses only its own session", async () => {
