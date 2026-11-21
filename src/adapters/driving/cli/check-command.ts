@@ -133,6 +133,9 @@ async function subagentForPlugin(
   projectDir: string,
   deps: FeedbackDeps,
 ): Promise<number> {
+  for (const option of ["file", "lines", "changed", "since-start", "asked"] as const) {
+    if (values[option] !== undefined) throw new UsageError(`--when subagent-start does not take --${option}`)
+  }
   const agent = values["agent-context"] === true && io.stdin ? agentContextOf(await io.stdin()) : undefined
   subagentStart(projectDir, subagentOf(agent, values["root-session"], "--when subagent-start"), deps)
   return EXIT.passed

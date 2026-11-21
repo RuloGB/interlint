@@ -1252,11 +1252,16 @@ export function createInterlintPlugin(runChecks: RunChecks = runInterlint, holdL
        */
       const startSubagent = async (sessionID: string) => {
         if (holds.has(sessionID) || settling.has(sessionID) || (await isPaused(sessionID))) return
-        const args = [...SUBAGENT_START_ARGS, "--root-session", await rootOf(sessionID)]
-        const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(sessionID))
-        if (run.exitCode === 0) return void snapshots.add(sessionID)
+        // Without the fingerprints, the subagent's checks cover the files its edit tools change, as before.
         snapshots.delete(sessionID)
-        console.error("[interlint] could not keep the projects before the subagent's prompt:", run.output)
+        try {
+          const args = [...SUBAGENT_START_ARGS, "--root-session", await rootOf(sessionID)]
+          const run = await runChecks(directory, command, editTimeoutMs, args, await contextOf(sessionID))
+          if (run.exitCode === 0) return void snapshots.add(sessionID)
+          console.error("[interlint] could not keep the projects before the subagent's prompt:", run.output)
+        } catch (error) {
+          console.error("[interlint] could not keep the projects before the subagent's prompt:", error)
+        }
       }
 
       // Only a main session's prompt is the user's: a subagent's is written by the agent that started it.

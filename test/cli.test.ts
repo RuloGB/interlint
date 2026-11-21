@@ -956,6 +956,14 @@ describe("interlint check for a subagent's shell changes, as the OpenCode plugin
     expect((await run("check", "--when", "task-end", "--since-start")).stderr).toContain("--since-start needs the session in --agent-context")
   })
 
+  it("rejects the options a subagent's start does not take", async () => {
+    for (const option of [["--file", "a.java"], ["--lines", "1"], ["--changed"], ["--since-start"], ["--asked"]]) {
+      const started = await runWithStdin(SUBAGENT, ...START, ...option)
+      expect(started.exitCode).toBe(2)
+      expect(started.stderr).toContain(`--when subagent-start does not take ${option[0]}`)
+    }
+  })
+
   it("does not show the internal options in the usage", async () => {
     const usage = (await run("--help")).stdout
     expect(usage).not.toContain("since-start")

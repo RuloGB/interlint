@@ -1158,9 +1158,9 @@ describe("OpenCode plugin holding a subagent until its checks pass", () => {
 
 /**
  * The fake context with the `prompt` and `experimental.idle` session hooks, and fake checks that record every run
- * of the CLI. The subagent's start gives `start`; its task-end checks give `taskEnd` in turn, then pass.
+ * of the CLI. The subagent's start gives `start`, or throws it; its task-end checks give `taskEnd` in turn, then pass.
  */
-function withSubagentHooks(start: CheckRun, ...taskEnd: CheckRun[]) {
+function withSubagentHooks(start: CheckRun | Error, ...taskEnd: CheckRun[]) {
   const fake = fakeContext([], SESSIONS)
   const runs: { args: string[]; session: string | undefined }[] = []
   let onIdle: ((event: { sessionID: string; background: unknown[] }) => Promise<void> | void) | undefined
@@ -1175,7 +1175,10 @@ function withSubagentHooks(start: CheckRun, ...taskEnd: CheckRun[]) {
   const run: RunChecks = async (_directory, _command, _timeoutMs, args = [], context) => {
     if (args[2] === "edit" || args[2] === "turn-start") return PASSED
     runs.push({ args, session: context?.session })
-    if (args[2] === "subagent-start") return start
+    if (args[2] === "subagent-start") {
+      if (start instanceof Error) throw start
+      return start
+    }
     return taskEnd.shift() ?? PASSED
   }
   const prompt = async (sessionID: string) => {
@@ -1241,15 +1244,29 @@ describe("OpenCode plugin holding a subagent that writes through a shell", () =>
   })
 
   it("tells nobody anything when the CLI finds nothing the subagent changed", async () => {
-    const { ctx, sent, run, prompt, idle, emit } = withSubagentHooks(PASSED)
+    const { ctx, sent, run, prompt, idle, emit, afterTool } = withSubagentHooks(PASSED)
     await createInterlintPlugin(run).setup(ctx)
     await prompt("writer")
 
     await idle("writer")
     emit(SUCCEEDED, "writer")
     await settled()
+    const answer = await afterTool("subagent", {}, "completed", { sessionID: "main", result: subagentAnswer })
 
+    // No line in the subagent's session, and its answer reaches the main agent as it is.
     expect(sent).toEqual([])
+    expect(answer.result).toEqual(subagentAnswer)
+  })
+
+  it("lets the subagent's prompt through, checking only what the edit tool changed, when keeping the projects throws", async () => {
+    const { ctx, runs, run, prompt, idle, afterTool } = withSubagentHooks(new Error("spawn failed"))
+    await createInterlintPlugin(run).setup(ctx)
+
+    await expect(prompt("writer")).resolves.toBeUndefined()
+
+    await afterTool("edit", { path: WRITER_FILE }, "completed", { sessionID: "writer" })
+    await idle("writer")
+    expect(runs.map(({ args }) => args)).toEqual([SUBAGENT_START, WRITER_RUN])
   })
 
   it("checks only what the edit tool changed when the CLI cannot keep the projects, as an older one", async () => {
