@@ -1,14 +1,14 @@
 /** The texts the agent hooks give, the same for every agent that runs them. */
 
 /** Every event an agent hook command can take. */
-const ALL_HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "post-edit", "stop", "subagent-start", "subagent-stop"] as const
+const ALL_HOOK_EVENTS = ["session-start", "user-prompt", "pre-edit", "pre-shell", "post-edit", "stop", "subagent-start", "subagent-stop"] as const
 export type HookEvent = (typeof ALL_HOOK_EVENTS)[number]
 
 /** The events of Claude Code's hook command. */
-export const CLAUDE_CODE_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS
+export const CLAUDE_CODE_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter((event) => event !== "pre-shell")
 
 /** The events of Codex's hook command: its hooks cannot ask the user, so it has no `pre-edit`. */
-export const CODEX_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter((event) => event !== "pre-edit")
+export const CODEX_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS.filter((event) => event !== "pre-edit" && event !== "pre-shell")
 
 /** The events of Copilot's hook command. */
 export const COPILOT_HOOK_EVENTS: readonly HookEvent[] = ALL_HOOK_EVENTS

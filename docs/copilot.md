@@ -1,6 +1,6 @@
 # GitHub Copilot
 
-Interlint works with GitHub Copilot through seven hooks in the repository. Copilot CLI, the GitHub Copilot app and the Copilot agent in VS Code share one hook system, so one setup covers them.
+Interlint works with GitHub Copilot through eight hooks in the repository. Copilot CLI, the GitHub Copilot app and the Copilot agent in VS Code share one hook system, so one setup covers them.
 
 Copilot's hooks are in preview and may change. This page was tested on Windows, on a Copilot Free plan, with edits by the main agent and by a subagent, through `edit`, `create` and `apply_patch`:
 
@@ -20,14 +20,15 @@ Besides `interlint.yaml` (see [Using Interlint](usage.md)), this writes `.github
   "version": 1,
   "hooks": {
     "sessionStart": [{ "type": "command", "command": "interlint hook copilot session-start", "timeoutSec": 30 }],
-    "userPromptSubmitted": [{ "type": "command", "command": "interlint hook copilot user-prompt", "timeoutSec": 120 }],
+    "userPromptSubmitted": [{ "type": "command", "command": "interlint hook copilot user-prompt", "timeoutSec": 600 }],
     "preToolUse": [
       {
         "type": "command",
         "matcher": "edit|create|str_replace_editor|apply_patch",
         "command": "interlint hook copilot pre-edit",
         "timeoutSec": 30
-      }
+      },
+      { "type": "command", "matcher": "powershell|bash", "command": "interlint hook copilot pre-shell", "timeoutSec": 30 }
     ],
     "postToolUse": [
       {
@@ -60,7 +61,8 @@ Copilot Business and Enterprise can turn hooks off for an organization. Then Int
 ## What the hooks do
 
 - **When the session starts,** `session-start` keeps a hash of each [protected file](usage.md#protected-files), so the task end can tell which ones changed.
-- **When you send a message,** `user-prompt` reads `interlint: pause` and `interlint: resume` in it (see [Pausing Interlint](usage.md#pausing-interlint)). Without them, it takes what changed since the agent's last turn ended, such as a `git pull`, as yours (see [Changes made between two turns](usage.md#changes-made-between-two-turns)).
+- **When you send a message,** `user-prompt` reads `interlint: pause` and `interlint: resume` in it (see [Pausing Interlint](usage.md#pausing-interlint)). Without them, it takes what changed since the agent's last turn ended, such as a `git pull`, as yours (see [Changes made between two turns](usage.md#changes-made-between-two-turns)). If the task-end checks of the agent's last turn, or other checks on the project, are still running, your message waits for them, up to 10 minutes, so the agent does not start while they run.
+- **Before the agent runs Maven in a shell,** `pre-shell` makes the build wait for Interlint's checks (see [The agent's own Maven builds](#the-agents-own-maven-builds)).
 - **Before a tool changes a protected file,** `pre-edit` makes Copilot ask you whether to allow it, with a message that names the file. In autopilot and in the Copilot cloud agent nobody can answer, so Copilot denies the edit. An edit you allow becomes the new reference for that file.
 - **After a tool changes a file** (`edit`, `create`, `str_replace_editor` or `apply_patch`; a `str_replace_editor` that only views a file runs nothing), `post-edit` runs the `edit` checks for that file. Copilot adds the failures to the tool's result, so the agent reads them right after the edit. A check with [`every` or `lines`](usage.md#every-n-files-or-lines) runs only on the edit that brings it to that many edited files or written lines. The hook counts the lines each `edit` adds or changes, every line of a `create`, and the added lines of a patch.
 - **When the agent finishes,** `stop` runs the checks of the projects that changed since their checks last passed (see [At task end](usage.md#at-task-end)). If one fails, the agent cannot stop: Copilot gives it the failures as its next prompt. The message tells it to fix them even if you asked it to change nothing else: asking you whether to fix them does not end the task. A protected file changed without your approval, by any means, blocks it too. After 3 blocks in a row it lets the task end; it does not block again until the next turn. Copilot itself stops after 8 blocks in a row.
@@ -73,6 +75,18 @@ The count of blocks and the files each subagent changed are kept in your user's 
 
 Each check the hooks run is kept in your [metrics](usage.md#metrics) with `agent: "copilot"`, the session, and the model of the agent's last answer, read from the end of the session's `events.jsonl`. A subagent's checks have `subagent: true` and its type, but no model: the file does not say which answers are the subagent's. When the file cannot be read, the model is left out and the checks run the same.
 
+## The agent's own Maven builds
+
+Interlint's checks and a Maven build the agent runs itself must not share `target/` at the same time: the two builds would mix their classes and both could fail. So when the agent's shell tool (`powershell` on Windows, `bash` elsewhere) is about to run a command with `mvn`, `mvnw` or `mvnd`, such as `./mvnw test` or `cd orders; mvn verify`, `pre-shell` wraps it in `interlint lock --command`, an internal command that takes the same lock as the checks and runs the agent's command in the same shell while it holds it.
+
+- If checks are running, the command waits for them to end. Its output then starts with a line that says so, such as `Interlint: this command waited 12 s for Interlint's checks on this project to finish, so the two builds did not share target/.`
+- While the command runs, Interlint's checks wait for it. When it ends, also when it fails or is stopped, the lock is released.
+- A command the agent leaves in the background holds the lock until it ends. A goal that starts a server and runs until it is stopped, such as `spring-boot:run`, `quarkus:dev` or `jetty:run`, only waits for the checks before it starts: it would otherwise hold the lock for good.
+- A command without Maven runs as it is. Copilot shows you the command the agent wrote, not the wrapped one.
+- Only a line that runs Maven alone, with at most a `cd` before it, is wrapped, such as `mvn test`, `./mvnw -q verify -pl api` or `cd orders && ./mvnw test`. A line with anything else, such as `mvn test && git push`, `mvn test | tail` or `mvn test > build.log`, runs as it is, without waiting, and Copilot's log says why. Wrapped, that other command would be inside the base64 `--command`, where Copilot's shell permission rules could not read it.
+- The wrapped command runs `interlint` from the shell's `PATH`, by name: a path outside the project in a command makes Copilot ask you to approve it. In PowerShell it runs the first program named `interlint`, such as npm's `interlint.cmd`, never npm's `interlint.ps1`, which an execution policy may block. When `interlint` is not on the `PATH`, the command runs as it is, without waiting, and Copilot's log says why.
+- If `interlint lock` is killed while the command runs, the lock is released, as when a check is killed.
+
 ## With Claude Code in the same project
 
 Copilot also runs the hooks in `.claude/settings.json`. There they could not block, and `post-edit` could not see the edited file. So when Copilot runs `interlint hook claude-code`, it runs no check and leaves a line in Copilot's log that says why. The checks run once, through `.github/hooks/interlint.json`. A project can keep both setups: Claude Code runs its own hooks, and Copilot runs its own.
@@ -84,9 +98,9 @@ Copilot also runs the hooks in `.claude/settings.json`. There they could not blo
 
 ## `interlint hook copilot`
 
-`interlint hook copilot session-start|user-prompt|pre-edit|post-edit|stop|subagent-start|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`COPILOT_PROJECT_DIR`, or the input's `cwd`). It always exits 0 when it ran, as Copilot reads a hook's answer only then:
+`interlint hook copilot session-start|user-prompt|pre-edit|pre-shell|post-edit|stop|subagent-start|subagent-stop` reads the hook's JSON on stdin and runs the checks in the project (`COPILOT_PROJECT_DIR`, or the input's `cwd`). It always exits 0 when it ran, as Copilot reads a hook's answer only then:
 
 | Exit code | Meaning |
 |---|---|
-| 0 | The hook ran. For `pre-edit`, stdout holds `"permissionDecision": "ask"` with the question for you when the edit changes a protected file. When a check failed, stdout holds the answer: `additionalContext` with the failures for `post-edit`, or `"decision": "block"` with the failures as `reason` for `stop` and `subagent-stop`. Otherwise stdout is empty |
+| 0 | The hook ran. For `pre-edit`, stdout holds `"permissionDecision": "ask"` with the question for you when the edit changes a protected file. For `pre-shell`, stdout holds `modifiedArgs` with the wrapped command when the command runs Maven. When a check failed, stdout holds the answer: `additionalContext` with the failures for `post-edit`, or `"decision": "block"` with the failures as `reason` for `stop` and `subagent-stop`. Otherwise stdout is empty |
 | 1 | Interlint could not run, for example without `interlint.yaml`. Copilot logs it and the agent goes on |

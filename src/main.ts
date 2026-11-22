@@ -25,6 +25,7 @@ import { scanNpmProjects } from "./adapters/driven/npm/project-scan.js"
 import { findsCommand, runCommand } from "./adapters/driven/process/command-runner.js"
 import { exitCodeReader } from "./adapters/driven/process/exit-code-reader.js"
 import { lookupExecutable } from "./adapters/driven/process/executable-lookup.js"
+import { runShell } from "./adapters/driven/process/shell-runner.js"
 import { fileSessionPauses, fileStopCounter, fileSubagentFiles, fileSubagentSnapshots } from "./adapters/driven/state/agent-state.js"
 import { fileChangeTracker } from "./adapters/driven/state/change-tracker.js"
 import { headlessPdf } from "./adapters/driven/browser/headless-pdf.js"
@@ -108,7 +109,7 @@ const DEPS: CliDeps = {
     protectedFiles: diskProtectedFiles,
   },
   metrics: { source: fileMetricsSource(), reportFile: diskReportFile, pdf: headlessPdf(), now: () => new Date() },
-  version: interlintVersion,
+  runShell,  version: interlintVersion,
 }
 
 export { EXIT, type Io } from "./adapters/driving/cli/cli-io.js"

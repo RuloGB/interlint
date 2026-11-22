@@ -23,6 +23,15 @@ export interface CopilotHookInput {
   transcriptPath?: string
   /** The user's prompt, in a `userPromptSubmitted` hook. */
   prompt?: string
+  /** The command a shell tool is about to run, with the tool's arguments as Copilot gave them. */
+  shell?: CopilotShellCall
+}
+
+/** A call of Copilot's shell tool: `powershell` on Windows, `bash` elsewhere. */
+export interface CopilotShellCall {
+  tool: (typeof SHELL_TOOLS)[number]
+  command: string
+  args: Record<string, unknown>
 }
 
 export class CopilotHookInputError extends UserFacingError {}
@@ -32,6 +41,9 @@ export class CopilotHookInputError extends UserFacingError {}
  * post-edit matcher that `init --agent copilot` writes lists the same tools.
  */
 export const EDIT_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"] as const
+
+/** Copilot's tools that run a shell command. The pre-shell matcher that `init --agent copilot` writes lists the same tools. */
+export const SHELL_TOOLS = ["powershell", "bash"] as const
 
 /** The one `str_replace_editor` command that changes no file. `undo_edit` puts back an earlier version, so it counts. */
 const EDITOR_VIEW = "view"
@@ -56,7 +68,15 @@ export function parseCopilotHookInput(text: string): CopilotHookInput {
     agentType: nonEmpty(agentType) ?? nonEmpty(agentName),
     transcriptPath: nonEmpty(transcriptPath),
     ...(typeof prompt === "string" ? { prompt } : {}),
+    ...shellOf(toolName, toolArgs),
   }
+}
+
+function shellOf(toolName: unknown, toolArgs: unknown): { shell?: CopilotShellCall } {
+  const tool = SHELL_TOOLS.find((name) => name === toolName)
+  const args = typeof toolArgs === "string" ? parsedOr(toolArgs) : toolArgs
+  if (tool === undefined || !isObject(args) || typeof args.command !== "string" || args.command.trim() === "") return {}
+  return { shell: { tool, command: args.command, args } }
 }
 
 /**
