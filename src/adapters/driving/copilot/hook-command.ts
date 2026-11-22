@@ -9,12 +9,14 @@ import {
   subagentStop,
   userPrompt,
 } from "../../../application/feedback/agent-events.js"
+import { onlyMaven, runsMaven } from "../../../domain/agent-build.js"
 import type { AgentContext } from "../../../domain/metric.js"
 import { protectedEditQuestion } from "../../../domain/protected-files.js"
 import { type Io, reportError, UsageError } from "../cli/cli-io.js"
 import { projectFiles } from "../cli/project-paths.js"
 import { COPILOT_HOOK_EVENTS, editNote, hookEventNames, isHookEvent, withNotice, withPassed } from "../hooks/hook-text.js"
 import { type CopilotHookInput, parseCopilotHookInput } from "./hook-input.js"
+import { INTERLINT_PROGRAM, lockedShellCommand } from "./shell-wrap.js"
 
 /**
  * Exit codes as GitHub Copilot reads them: 0 reads the JSON on stdout, 2 is only a warning, and any other code is
@@ -36,7 +38,7 @@ function contextOf(input: CopilotHookInput, deps: FeedbackDeps): AgentContext {
 }
 
 /** Writes a Copilot hook's JSON output. */
-function answer(io: Io, output: Record<string, string>): void {
+function answer(io: Io, output: Record<string, unknown>): void {
   io.stdout(`${JSON.stringify(output)}\n`)
 }
 
@@ -78,6 +80,24 @@ export async function copilotHook(args: string[], io: Io, deps: FeedbackDeps): P
       const guarded = beforeEdit(projectDir, [...new Set(files)], deps, input.sessionId)
       // Copilot asks the user before the tool runs. In autopilot and in the cloud agent nobody can answer: it denies.
       if (guarded.length > 0) answer(io, { permissionDecision: "ask", permissionDecisionReason: protectedEditQuestion(guarded) })
+      return COPILOT_HOOK_EXIT.pass
+    }
+
+    // A Maven build the agent starts runs under the project lock, so it never shares `target/` with the checks. No hook
+    // sees such a command end, and none can keep a process alive past its own end, so the command holds the lock.
+    // A line that runs more than Maven, or a PATH without `interlint`, runs as it is, and Copilot's log says why.
+    if (event === "pre-shell") {
+      const { shell } = input
+      if (shell === undefined || !runsMaven(shell.command)) return COPILOT_HOOK_EXIT.pass
+      if (!onlyMaven(shell.command)) {
+        io.stderr("interlint: this command runs more than Maven, so it runs without waiting for Interlint's checks\n")
+        return COPILOT_HOOK_EXIT.pass
+      }
+      if (!deps.checking.hasExecutable(INTERLINT_PROGRAM)) {
+        io.stderr(`interlint: ${INTERLINT_PROGRAM} is not on the PATH, so this Maven command runs without waiting for Interlint's checks\n`)
+        return COPILOT_HOOK_EXIT.pass
+      }
+      answer(io, { modifiedArgs: { ...shell.args, command: lockedShellCommand(shell, projectDir) } })
       return COPILOT_HOOK_EXIT.pass
     }
 

@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { copilotHookFiles } from "../src/adapters/driven/agents/copilot-hooks.js"
-import { EDIT_TOOLS, parseCopilotHookInput } from "../src/adapters/driving/copilot/hook-input.js"
+import { EDIT_TOOLS, parseCopilotHookInput, SHELL_TOOLS } from "../src/adapters/driving/copilot/hook-input.js"
+import { lockedShellCommand } from "../src/adapters/driving/copilot/shell-wrap.js"
 import { main } from "../src/main.js"
 
 const VIOLATIONS_XML = readFileSync(
@@ -504,6 +505,121 @@ describe("parseCopilotHookInput", () => {
 
     expect(hooks.postToolUse[0].matcher.split("|")).toEqual([...EDIT_TOOLS])
   })
+
+  it("reads the same shell tools that the pre-shell matcher of init --agent copilot lets through", () => {
+    const [file] = copilotHookFiles(".")
+    const { hooks } = JSON.parse(file?.content ?? "{}")
+
+    expect(hooks.preToolUse[1].matcher.split("|")).toEqual([...SHELL_TOOLS])
+  })
+
+  it("reads a shell tool's command and keeps its other arguments", () => {
+    const input = JSON.stringify({ sessionId: "s", toolName: "powershell", toolArgs: { command: "mvn test", mode: "async", detach: true } })
+
+    expect(parseCopilotHookInput(input).shell).toEqual({
+      tool: "powershell",
+      command: "mvn test",
+      args: { command: "mvn test", mode: "async", detach: true },
+    })
+  })
+
+  it("reads no shell call from an edit tool or an empty command", () => {
+    expect(parseCopilotHookInput(postToolUse("Order.java")).shell).toBeUndefined()
+    expect(parseCopilotHookInput(JSON.stringify({ sessionId: "s", toolName: "bash", toolArgs: { command: " " } })).shell).toBeUndefined()
+  })
+})
+
+describe("interlint hook copilot pre-shell", () => {
+  const POWERSHELL_INTERLINT =
+    "$ProgressPreference = 'SilentlyContinue'; & (Get-Command interlint -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source"
+  const POWERSHELL_EXE = "([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)"
+  const base64 = (text: string) => Buffer.from(text).toString("base64")
+
+  /** `interlint` on the PATH, as npm installs it: a `.cmd` shim on Windows, an executable script elsewhere. */
+  function interlintOnPath() {
+    const binDir = join(tempDir, "bin")
+    mkdirSync(binDir, { recursive: true })
+    const name = process.platform === "win32" ? "interlint.cmd" : "interlint"
+    writeFileSync(join(binDir, name), "")
+    chmodSync(join(binDir, name), 0o755)
+    vi.stubEnv("PATH", `${binDir}${delimiter}${process.env.PATH ?? ""}`)
+  }
+
+  /** A `preToolUse` input of Copilot's shell tool, as the spike of 22/11/2026 saw it. */
+  function preShell(command: string, extra: Record<string, unknown> = {}, tool = "powershell") {
+    return JSON.stringify({
+      sessionId: "session-1",
+      timestamp: 1795302320578,
+      cwd: projectDir,
+      toolCallId: "call_1",
+      toolName: tool,
+      toolArgs: { command, description: "Run the tests", ...extra },
+    })
+  }
+
+  describe("with interlint on the PATH", () => {
+    beforeEach(interlintOnPath)
+
+    it("wraps a Maven command in interlint lock, keeping the tool's other arguments", async () => {
+      const { exitCode, stdout } = await hook("pre-shell", preShell("cd orders; ./mvnw -q test", { mode: "async", detach: true }))
+
+      expect(exitCode).toBe(0)
+      const { modifiedArgs } = JSON.parse(stdout)
+      expect(modifiedArgs).toMatchObject({ description: "Run the tests", mode: "async", detach: true })
+      expect(modifiedArgs.command).toBe(
+        `${POWERSHELL_INTERLINT} lock --cwd '${projectDir}' --shell powershell --shell-path ${POWERSHELL_EXE} --command ${base64("cd orders; ./mvnw -q test")}`,
+      )
+    })
+
+    it("wraps a Maven command for bash in the same shell", async () => {
+      const { stdout } = await hook("pre-shell", preShell("mvnd verify", {}, "bash"))
+
+      expect(JSON.parse(stdout).modifiedArgs.command).toBe(
+        `interlint lock --cwd '${projectDir}' --shell bash --shell-path "$BASH" --command ${base64("mvnd verify")}`,
+      )
+    })
+
+    it("leaves a command without Maven as it is", async () => {
+      expect(await hook("pre-shell", preShell("git status"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+      expect(await hook("pre-shell", preShell("cat mvnw.properties"))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    })
+
+    it("leaves a line that runs more than Maven as it is, so permission rules still see it, and says why in Copilot's log", async () => {
+      expect(await hook("pre-shell", preShell("mvn test && git push"))).toEqual({
+        exitCode: 0,
+        stdout: "",
+        stderr: "interlint: this command runs more than Maven, so it runs without waiting for Interlint's checks\n",
+      })
+    })
+
+    it("leaves a tool that is no shell as it is", async () => {
+      expect(await hook("pre-shell", postToolUse(JAVA_FILE()))).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+    })
+  })
+
+  it("leaves a Maven command as it is when interlint is not on the PATH, and says why in Copilot's log", async () => {
+    vi.stubEnv("PATH", tempDir)
+
+    expect(await hook("pre-shell", preShell("mvn test"))).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr: "interlint: interlint is not on the PATH, so this Maven command runs without waiting for Interlint's checks\n",
+    })
+  })
+})
+
+describe("lockedShellCommand", () => {
+  const call = (command: string, tool: "powershell" | "bash") => ({ tool, command, args: { command } })
+
+  it("doubles every quote that ends a PowerShell string in the project path, the typographic ones too", () => {
+    expect(lockedShellCommand(call("mvn test", "powershell"), "C:\\work\\it's \u2018a\u2019 \u201Ab\u201B")).toContain(
+      "--cwd 'C:\\work\\it''s \u2018\u2018a\u2019\u2019 \u201A\u201Ab\u201B\u201B' ",
+    )
+  })
+
+  it("closes and reopens the bash string around a quote in the project path", () => {
+    expect(lockedShellCommand(call("mvn test", "bash"), "/work/it's")).toContain("--cwd '/work/it'\\''s' ")
+  })
 })
 
 describe("interlint hook copilot", () => {
@@ -511,6 +627,6 @@ describe("interlint hook copilot", () => {
     const { exitCode, stderr } = await hook("post-commit", "{}")
 
     expect(exitCode).toBe(1)
-    expect(stderr).toContain("copilot hooks are session-start, user-prompt, pre-edit, post-edit, stop, subagent-start and subagent-stop")
+    expect(stderr).toContain("copilot hooks are session-start, user-prompt, pre-edit, pre-shell, post-edit, stop, subagent-start and subagent-stop")
   })
 })

@@ -8,14 +8,15 @@ export const COPILOT_HOOKS_FILE = ".github/hooks/interlint.json"
  * `subagentStop`, so it gets the failures of its own changes, including those made through a shell command, which
  * `subagentStart` lets it tell apart. `timeoutSec` is in seconds: the edit one matches the
  * OpenCode plugin's edit timeout, the stop ones give Maven time; past it, Copilot does not block. `sessionStart` keeps
- * the protected files as they are, and `preToolUse` asks the user before an edit changes one. `userPromptSubmitted`
- * reads `interlint: pause` and `interlint: resume` in the user's prompt.
+ * the protected files as they are, and `preToolUse` asks the user before an edit changes one, and makes a Maven
+ * command the agent runs in a shell hold the project lock. `userPromptSubmitted` reads `interlint: pause` and
+ * `interlint: resume` in the user's prompt, and waits for running task-end checks as long as the stop hook may run.
  */
 const HOOKS = {
   version: 1,
   hooks: {
     sessionStart: [{ type: "command", command: "interlint hook copilot session-start", timeoutSec: 30 }],
-    userPromptSubmitted: [{ type: "command", command: "interlint hook copilot user-prompt", timeoutSec: 120 }],
+    userPromptSubmitted: [{ type: "command", command: "interlint hook copilot user-prompt", timeoutSec: 600 }],
     preToolUse: [
       {
         type: "command",
@@ -23,6 +24,7 @@ const HOOKS = {
         command: "interlint hook copilot pre-edit",
         timeoutSec: 30,
       },
+      { type: "command", matcher: "powershell|bash", command: "interlint hook copilot pre-shell", timeoutSec: 30 },
     ],
     postToolUse: [
       {

@@ -680,6 +680,94 @@ describe("interlint lock", () => {
     lock.close()
     expect(await lock.exited).toBe(0)
   })
+
+  describe("with --command", () => {
+    const SHELL = process.platform === "win32" ? "powershell" : "bash"
+
+    /**
+     * A build that writes to `build.log` whether the project lock was held while it ran, and exits with `exitCode`.
+     * `extra` lands in the command line, where a goal such as `spring-boot:run` tells a server.
+     */
+    function buildCommand(exitCode: number, extra = "") {
+      const script = join(projectDir, "build.mjs").replace(/\\/g, "/")
+      writeFileSync(
+        script,
+        `import { appendFileSync, existsSync } from "node:fs"
+appendFileSync(${JSON.stringify(join(projectDir, "build.log"))}, existsSync(${JSON.stringify(lockFileFor(projectDir))}) ? "locked\\n" : "free\\n")
+process.exit(${exitCode})
+`,
+      )
+      return Buffer.from(`node "${script}" ${extra}`.trimEnd(), "utf8").toString("base64")
+    }
+    const buildLog = () => readFileSync(join(projectDir, "build.log"), "utf8")
+
+    async function lockCommand(...args: string[]) {
+      let stdout = ""
+      let stderr = ""
+      const exitCode = await main(["lock", "--cwd", projectDir, ...args], {
+        cwd: projectDir,
+        stdout: (text) => (stdout += text),
+        stderr: (text) => (stderr += text),
+      })
+      return { exitCode, stdout, stderr }
+    }
+
+    it("runs the agent's command while it holds the project lock, and exits with its exit code", async () => {
+      const { exitCode, stdout } = await lockCommand("--shell", SHELL, "--command", buildCommand(3))
+
+      expect(exitCode).toBe(3)
+      expect(stdout).toBe("")
+      expect(buildLog()).toBe("locked\n")
+      expect(existsSync(lockFileFor(projectDir))).toBe(false)
+    })
+
+    it("waits for the checks that hold the lock, and tells the command it waited", async () => {
+      const lock = startLock()
+      await lock.held
+
+      const command = lockCommand("--shell", SHELL, "--command", buildCommand(0))
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      expect(existsSync(join(projectDir, "build.log"))).toBe(false)
+      lock.close()
+      await lock.exited
+
+      const { exitCode, stdout } = await command
+      expect(exitCode).toBe(0)
+      expect(stdout).toMatch(/^Interlint: this command waited \d+ s for Interlint's checks on this project to finish, so the two builds did not share target\/\.\n$/)
+      expect(buildLog()).toBe("locked\n")
+    })
+
+    it("makes a check wait until the agent's command ends", async () => {
+      const log = join(projectDir, "build.log")
+      writeFileSync(join(projectDir, "check.mjs"), `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, "check\\n")\n`)
+      writeConfig({ name: "check", run: "node check.mjs", report: "exit-code", when: "edit" })
+      const script = join(projectDir, "slow-build.mjs").replace(/\\/g, "/")
+      writeFileSync(script, `import { appendFileSync } from "node:fs"\nsetTimeout(() => appendFileSync(${JSON.stringify(log)}, "build\\n"), 600)\n`)
+
+      const command = lockCommand("--shell", SHELL, "--command", Buffer.from(`node "${script}"`).toString("base64"))
+      await vi.waitFor(() => expect(existsSync(lockFileFor(projectDir))).toBe(true))
+      const checked = run("check", "--when", "edit", "--file", ORDER)
+
+      expect((await command).exitCode).toBe(0)
+      expect((await checked).exitCode).toBe(0)
+      expect(readFileSync(log, "utf8")).toBe("build\ncheck\n")
+    })
+
+    it("lets a server start without the lock once the checks are done", async () => {
+      const { exitCode } = await lockCommand("--shell", SHELL, "--command", buildCommand(0, "spring-boot:run"))
+
+      expect(exitCode).toBe(0)
+      expect(buildLog()).toBe("free\n")
+    })
+
+    it("exits 2 without a known --shell", async () => {
+      const { exitCode, stderr } = await lockCommand("--shell", "cmd", "--command", buildCommand(0))
+
+      expect(exitCode).toBe(2)
+      expect(stderr).toContain("--command needs --shell powershell or bash")
+      expect(existsSync(join(projectDir, "build.log"))).toBe(false)
+    })
+  })
 })
 
 describe("interlint usage", () => {

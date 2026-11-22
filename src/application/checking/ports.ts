@@ -43,6 +43,17 @@ export type BrokenClassRemover = (projectDir: string) => string[]
 /** Runs `work` while no other Interlint process runs checks on the same project. */
 export type ProjectLock = <T>(projectDir: string, work: () => Promise<T>) => Promise<T>
 
+/** A command line the agent gave its shell tool, and the kind of shell that runs it. */
+export interface ShellCommand {
+  shell: "powershell" | "bash"
+  /** The shell's executable, when the agent's shell gave it. Without it, `pwsh` or `powershell`, or `bash`. */
+  executable?: string
+  text: string
+}
+
+/** Runs an agent's shell command in the current directory, with its output going to Interlint's, and gives its exit code. */
+export type ShellRunner = (command: ShellCommand) => Promise<number>
+
 /**
  * Remembers which projects changed since their checks last passed, so the agent's task end runs only those.
  * A project is the directory a check runs in.
